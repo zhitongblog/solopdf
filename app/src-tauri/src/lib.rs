@@ -213,6 +213,80 @@ fn startup_files(state: tauri::State<StartupArgs>) -> Vec<String> {
 
 struct StartupArgs(Vec<String>);
 
+// ── debug bridge (SOLOPDF_DEBUG=1 only) ────────────────────────────────────
+// curl -X POST 127.0.0.1:14310/eval --data 'return 1+1'  → JS eval in webview.
+// Flow: HTTP thread enqueues (id, js); the frontend polls debug_poll every
+// 200ms, evals, calls debug_report; HTTP thread blocks on the result channel.
+struct DebugBridge {
+    cmds: std::sync::Mutex<Vec<(u64, String)>>,
+    waiters: std::sync::Mutex<std::collections::HashMap<u64, std::sync::mpsc::Sender<String>>>,
+    next_id: std::sync::atomic::AtomicU64,
+}
+
+impl DebugBridge {
+    fn new() -> Self {
+        Self {
+            cmds: Default::default(),
+            waiters: Default::default(),
+            next_id: std::sync::atomic::AtomicU64::new(1),
+        }
+    }
+}
+
+fn debug_enabled_env() -> bool {
+    std::env::var("SOLOPDF_DEBUG").map(|v| v == "1").unwrap_or(false)
+}
+
+#[tauri::command]
+fn debug_enabled() -> bool {
+    debug_enabled_env()
+}
+
+#[tauri::command]
+fn debug_poll(bridge: tauri::State<std::sync::Arc<DebugBridge>>) -> Vec<(u64, String)> {
+    std::mem::take(&mut *bridge.cmds.lock().unwrap())
+}
+
+#[tauri::command]
+fn debug_report(bridge: tauri::State<std::sync::Arc<DebugBridge>>, id: u64, result: String) {
+    if let Some(tx) = bridge.waiters.lock().unwrap().remove(&id) {
+        let _ = tx.send(result);
+    }
+}
+
+fn start_debug_server(bridge: std::sync::Arc<DebugBridge>) {
+    std::thread::spawn(move || {
+        let server = match tiny_http::Server::http("127.0.0.1:14310") {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("debug bridge: bind failed: {e}");
+                return;
+            }
+        };
+        eprintln!("debug bridge listening on 127.0.0.1:14310");
+        for mut req in server.incoming_requests() {
+            let mut body = String::new();
+            use std::io::Read as _;
+            let _ = req.as_reader().read_to_string(&mut body);
+            let id = bridge.next_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let (tx, rx) = std::sync::mpsc::channel();
+            bridge.waiters.lock().unwrap().insert(id, tx);
+            bridge.cmds.lock().unwrap().push((id, body));
+            let resp = rx
+                .recv_timeout(std::time::Duration::from_secs(20))
+                .unwrap_or_else(|_| "ERR: eval timeout (is the app frontend running?)".into());
+            let _ = req.respond(tiny_http::Response::from_string(resp));
+        }
+    });
+}
+
+/// Native print of the current webview (macOS WKWebView: JS window.print()
+/// is a NO-OP — this is why打印 needed a Rust round-trip).
+#[tauri::command]
+fn print_webview(webview_window: tauri::WebviewWindow) -> Result<(), String> {
+    webview_window.print().map_err(|e| e.to_string())
+}
+
 fn collect_open_args(args: impl Iterator<Item = String>) -> Vec<String> {
     args.skip(1)
         .filter(|a| a.ends_with(".pdf") || a.starts_with("solopdf://"))
@@ -236,6 +310,7 @@ pub fn run() {
             }
         }))
         .manage(StartupArgs(collect_open_args(std::env::args())))
+        .manage(std::sync::Arc::new(DebugBridge::new()))
         .invoke_handler(tauri::generate_handler![
             file_meta,
             read_chunk,
@@ -247,8 +322,16 @@ pub fn run() {
             reveal_file,
             save_pdf_bytes,
             startup_files,
+            debug_enabled,
+            debug_poll,
+            debug_report,
+            print_webview,
         ])
         .setup(|app| {
+            if debug_enabled_env() {
+                let bridge = app.state::<std::sync::Arc<DebugBridge>>();
+                start_debug_server(bridge.inner().clone());
+            }
             #[cfg(any(target_os = "linux", target_os = "windows"))]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;

@@ -28,6 +28,9 @@ tauri-plugin-deep-link = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 twox-hash = "2"
+# debug bridge (dormant unless SOLOPDF_DEBUG=1): lets E2E drive the real
+# WKWebView app — same pattern as SoloMD's dev bridge
+tiny_http = "0.12"
 
 [profile.release]
 opt-level = "s"

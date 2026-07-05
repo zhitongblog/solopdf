@@ -254,7 +254,20 @@ onMounted(async () => {
   window.addEventListener('focus', onFocus)
   posTimer = window.setInterval(() => { const t = store.activeTab; if (t) savePosition(t) }, 5000)
 
+  // E2E harness — used by browser tests and by the native debug bridge
+  ;(window as any).__solopdf = {
+    open: (name: string) =>
+      openPath(name.startsWith('/') ? name : `/Volumes/Dev/code/pdf/test-fixtures/${name}`),
+    openLink: (url: string) => handleDeepLink(url),
+    store,
+    controllers,
+    annotManagers,
+    documents,
+    printDocument,
+  }
+
   if (isTauri()) {
+    const { invoke } = await import('@tauri-apps/api/core')
     // deep links + files passed by OS (file association / second instance)
     const { listen } = await import('@tauri-apps/api/event')
     await listen<string[]>('solopdf://open-files', (e) => {
@@ -263,21 +276,26 @@ onMounted(async () => {
         else void openPath(f)
       }
     })
-    const args = await (await import('@tauri-apps/api/core')).invoke<string[]>('startup_files')
+    const args = await invoke<string[]>('startup_files')
     for (const f of args) {
       if (f.startsWith('solopdf://')) handleDeepLink(f)
       else void openPath(f)
     }
-  } else {
-    // web E2E harness: window.__solopdf.open('<fixture>.pdf')
-    ;(window as any).__solopdf = {
-      open: (name: string) => openPath(`/Volumes/Dev/code/pdf/test-fixtures/${name}`),
-      openLink: (url: string) => handleDeepLink(url),
-      store,
-      controllers,
-      annotManagers,
-      documents,
-      printDocument,
+    // debug bridge polling (only when app launched with SOLOPDF_DEBUG=1)
+    if (await invoke<boolean>('debug_enabled')) {
+      setInterval(async () => {
+        const cmds = await invoke<[number, string][]>('debug_poll')
+        for (const [id, js] of cmds) {
+          let out: string
+          try {
+            const val = await new Function(`return (async () => { ${js} })()`)()
+            out = typeof val === 'string' ? val : JSON.stringify(val) ?? 'undefined'
+          } catch (e) {
+            out = 'ERR: ' + String(e)
+          }
+          await invoke('debug_report', { id, result: out })
+        }
+      }, 200)
     }
   }
 })

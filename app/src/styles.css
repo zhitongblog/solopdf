@@ -262,6 +262,16 @@ html.dark .pv-page .annotationLayer :is(input, textarea, select) {
   font-size: 12.5px; z-index: 200; box-shadow: var(--shadow); max-width: 70vw;
 }
 
+/* Tauri print overlay: on screen it's invisible; when printing, it is the
+   only visible content (WKWebView native printOperation prints the page) */
+.print-overlay { display: none; }
+@media print {
+  .print-mode .app { display: none !important; }
+  .print-mode .print-overlay { display: block; }
+  .print-overlay img { display: block; width: 100%; page-break-after: always; }
+  @page { margin: 0; }
+}
+
 /* no-text-layer banner */
 .notext-banner {
   position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
