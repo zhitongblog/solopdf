@@ -103,6 +103,21 @@ async function cmdExportAnnotations(file) {
   console.log(JSON.stringify(sc, null, 2))
 }
 
+async function cmdFormFields(file) {
+  const doc = await open(file)
+  const fields = await doc.getFieldObjects()
+  if (!fields) {
+    console.log(JSON.stringify({ file, fields: null, note: '无 AcroForm 表单域' }))
+    return
+  }
+  const out = {}
+  for (const [name, objs] of Object.entries(fields)) {
+    const f = objs[0]
+    out[name] = { type: f.type, value: f.value ?? '', page: (f.page ?? -1) + 1 }
+  }
+  console.log(JSON.stringify({ file, count: Object.keys(out).length, fields: out }, null, 2))
+}
+
 async function cmdSelftest(dir) {
   // acceptance sweep over the standard fixture set (design doc test plan)
   const cases = [
@@ -157,6 +172,7 @@ switch (cmd) {
   case 'info': await cmdInfo(file ?? die('用法: solopdf info <file.pdf>')); break
   case 'extract-text': await cmdExtract(file ?? die('用法: solopdf extract-text <file.pdf>')); break
   case 'export-annotations': await cmdExportAnnotations(file ?? die('用法: solopdf export-annotations <file.pdf>')); break
+  case 'form-fields': await cmdFormFields(file ?? die('用法: solopdf form-fields <file.pdf>')); break
   case 'selftest': await cmdSelftest(file ?? die('用法: solopdf selftest <fixtures-dir>')); break
   default:
     console.log(`solopdf — SoloPDF 命令行工具（与应用同一渲染引擎）
@@ -165,6 +181,7 @@ switch (cmd) {
   solopdf info <file.pdf> [--password pw]          文档信息（页数/书签/元数据）
   solopdf extract-text <file.pdf> [--pages A-B]    提取文字
   solopdf export-annotations <file.pdf>            批注伴生文件 → JSON
+  solopdf form-fields <file.pdf>                   AcroForm 表单域与当前值 → JSON
   solopdf selftest <fixtures-dir>                  标准测试集验收`)
     process.exit(cmd ? 1 : 0)
 }

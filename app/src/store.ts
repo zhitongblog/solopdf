@@ -20,6 +20,8 @@ export interface TabState {
   stripExcerpts: boolean
   sidecarLocation: string
   loadError: string | null
+  /** user has edited AcroForm fields — "保存已填表单" appears */
+  formsDirty: boolean
 }
 
 export interface Settings {
@@ -114,6 +116,7 @@ export function newTab(path: string): TabState {
     stripExcerpts: false,
     sidecarLocation: '',
     loadError: null,
+    formsDirty: false,
   }
   store.tabs.push(t)
   store.activeTabId = t.id

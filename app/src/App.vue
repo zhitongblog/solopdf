@@ -83,6 +83,7 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
     controllers.set(tab.id, ctrl)
     ctrl.onVisiblePage = (p) => { tab.currentPage = p }
     ctrl.onSelection = (sel) => { selection.value = sel && store.activeTabId === tab.id ? sel : null }
+    ctrl.onFormsDirty = () => { tab.formsDirty = true }
     await ctrl.init()
 
     const mgr = new AnnotationManager(path, tab.name, tab.stripExcerpts)
@@ -191,6 +192,20 @@ function isTyping(e: KeyboardEvent): boolean {
   return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable
 }
 
+async function saveFilledForm(): Promise<void> {
+  const tab = store.activeTab
+  const ctrl = tab && controllers.get(tab.id)
+  if (!tab || !ctrl) return
+  try {
+    const bytes = await ctrl.saveFilled()
+    const suggested = tab.name.replace(/\.pdf$/i, '') + '-filled.pdf'
+    const dest = await platform().savePdf(suggested, bytes)
+    if (dest) showToast(`已保存：${dest.split('/').pop()}`)
+  } catch (err) {
+    showToast(`保存失败：${(err as Error).message}`)
+  }
+}
+
 async function doPrint(): Promise<void> {
   const tab = store.activeTab
   const doc = tab && documents.get(tab.id)
@@ -292,6 +307,7 @@ watch(() => store.settings.theme, () => {
           @search="searchOpen = !searchOpen"
           @settings="settingsOpen = true"
           @print="doPrint"
+          @save-filled="saveFilledForm"
         />
         <WelcomeScreen v-if="!store.tabs.length" @open="pickAndOpen" @open-path="openPath" />
         <template v-for="tab in store.tabs" :key="tab.id">

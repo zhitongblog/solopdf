@@ -3,7 +3,7 @@
  * Binary chunks travel via tauri::ipc::Response (ArrayBuffer, no base64).
  */
 import { invoke } from '@tauri-apps/api/core'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import type { FileMeta, PlatformBackend } from './types'
 
 export class TauriBackend implements PlatformBackend {
@@ -49,5 +49,16 @@ export class TauriBackend implements PlatformBackend {
 
   async revealFile(path: string): Promise<void> {
     await invoke('reveal_file', { path })
+  }
+
+  async savePdf(suggestedName: string, bytes: Uint8Array): Promise<string | null> {
+    const dest = await save({
+      defaultPath: suggestedName,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    })
+    if (!dest) return null
+    // raw body upload — no base64/JSON copy for multi-MB PDFs
+    await invoke('save_pdf_bytes', bytes, { headers: { 'x-dest': encodeURIComponent(dest) } })
+    return dest
   }
 }

@@ -10,3 +10,9 @@ declare module 'pdfjs-dist/build/pdf.worker.mjs?worker' {
   const WorkerFactory: new () => Worker
   export default WorkerFactory
 }
+
+declare module 'pdfjs-dist/web/pdf_viewer.mjs' {
+  export class SimpleLinkService {
+    constructor()
+  }
+}

@@ -77,4 +77,14 @@ export class WebBackend implements PlatformBackend {
   async revealFile(): Promise<void> {
     /* no-op on web */
   }
+
+  async savePdf(suggestedName: string, bytes: Uint8Array): Promise<string | null> {
+    // E2E mode: write into test-fixtures via the dev API
+    const res = await fetch(`/__fixtures/${encodeURIComponent(suggestedName)}`, {
+      method: 'PUT',
+      body: bytes as BodyInit,
+    })
+    if (!res.ok) throw new Error(`保存失败: ${res.status}`)
+    return `/Volumes/Dev/code/pdf/test-fixtures/${suggestedName}`
+  }
 }

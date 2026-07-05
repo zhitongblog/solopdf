@@ -96,6 +96,10 @@ input:focus { border-color: var(--accent); }
 .toolbar .page-nav { display: flex; align-items: center; gap: 4px; }
 .toolbar .page-nav input { width: 52px; text-align: center; padding: 2px 4px; }
 .toolbar .grow { flex: 1; }
+.toolbar .save-filled {
+  background: var(--accent); color: #fff; font-size: 12px; padding: 3px 10px;
+}
+.toolbar .save-filled:hover { opacity: 0.9; background: var(--accent); }
 .toolbar .hint {
   color: var(--fg-dim); font-size: 12px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
@@ -165,6 +169,12 @@ html.dark .pv-page { background: #2f2f31; }
   cursor: text; transform-origin: 0 0;
 }
 .pv-textlayer ::selection { background: rgba(58, 109, 240, 0.35); }
+
+/* pdf.js annotationLayer (form widgets) sits between canvas and text layer */
+.pv-page .annotationLayer { position: absolute; inset: 0; z-index: 3; }
+html.dark .pv-page .annotationLayer :is(input, textarea, select) {
+  color-scheme: light; /* form values must stay legible on the white page */
+}
 
 .pv-hl-layer { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 .pv-hl { position: absolute; border-radius: 2px; }

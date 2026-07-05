@@ -18,7 +18,8 @@
  * 60fps and must not churn proxies.
  */
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
-import { TextLayer, OPS } from 'pdfjs-dist'
+import { TextLayer, OPS, AnnotationLayer, AnnotationMode } from 'pdfjs-dist'
+import { SimpleLinkService } from 'pdfjs-dist/web/pdf_viewer.mjs'
 import { buildPageIndex, matchOnPage, type PageTextIndex } from '@solopdf/core'
 import type { Annotation, Quad } from '@solopdf/core'
 
@@ -76,8 +77,12 @@ export class PdfViewerController {
   private zoomDebounce = 0
   private annotations: Annotation[] = []
   private resolvedQuads = new Map<string, { page: number; quads: Quad[]; orphan: boolean }>()
+  private linkService = new SimpleLinkService()
+  /** true once the user edits any form field (annotationStorage non-empty) */
+  formsDirty = false
   onVisiblePage: (page: number) => void = () => {}
   onSelection: (sel: SelectionInfo | null) => void = () => {}
+  onFormsDirty: () => void = () => {}
 
   constructor(
     public doc: PDFDocumentProxy,
@@ -283,6 +288,9 @@ export class PdfViewerController {
         canvasContext: ctx,
         viewport: vp,
         transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
+        // forms render as live DOM widgets (AnnotationLayer below), not
+        // baked pixels — this is what makes填写/打勾 interactive
+        annotationMode: AnnotationMode.ENABLE_FORMS,
       } as Parameters<PDFPageProxy['render']>[0])
       s.renderTask = task
       await task.promise
@@ -335,6 +343,9 @@ export class PdfViewerController {
         s.textLayerDiv = tl
       }
 
+      // interactive form widgets (text inputs / checkboxes / dropdowns)
+      await this.renderFormLayer(s, vp)
+
       // highlight layer
       const hl = document.createElement('div')
       hl.className = 'pv-hl-layer'
@@ -350,6 +361,58 @@ export class PdfViewerController {
     } finally {
       s.rendering = false
     }
+  }
+
+  /** pdf.js AnnotationLayer with renderForms — fillable AcroForm widgets.
+   *  Values live in doc.annotationStorage; saveDocument() bakes them out. */
+  private async renderFormLayer(s: PageSlot, vp: ReturnType<PDFPageProxy['getViewport']>): Promise<void> {
+    try {
+      const annots = await s.page!.getAnnotations({ intent: 'display' })
+      if (!annots.some((a: { subtype?: string }) => a.subtype === 'Widget')) return
+      const div = document.createElement('div')
+      div.className = 'annotationLayer'
+      div.style.setProperty('--scale-factor', String(this.scale))
+      s.el.appendChild(div)
+      const layer = new AnnotationLayer({
+        div,
+        page: s.page!,
+        viewport: vp.clone({ dontFlip: true }),
+        // pdf.js 5.x reads annotationStorage from the CONSTRUCTOR, not from
+        // render() — passing it only to render() silently writes all form
+        // values into an orphan storage and saveDocument() exports nothing
+        annotationStorage: this.doc.annotationStorage,
+        accessibilityManager: null,
+        annotationCanvasMap: null,
+        annotationEditorUIManager: null,
+        structTreeLayer: null,
+      } as unknown as ConstructorParameters<typeof AnnotationLayer>[0])
+      await layer.render({
+        annotations: annots,
+        imageResourcesPath: '',
+        renderForms: true,
+        linkService: this.linkService,
+        annotationStorage: this.doc.annotationStorage,
+        enableScripting: false,
+        hasJSActions: false,
+      } as unknown as Parameters<AnnotationLayer['render']>[0])
+      // any input inside the layer marks the doc dirty (save button appears)
+      div.addEventListener('input', this.markFormsDirty)
+      div.addEventListener('change', this.markFormsDirty)
+    } catch (err) {
+      console.warn('form layer failed (page still readable)', err)
+    }
+  }
+
+  private markFormsDirty = (): void => {
+    if (!this.formsDirty) {
+      this.formsDirty = true
+      this.onFormsDirty()
+    }
+  }
+
+  /** serialize the document WITH filled form values */
+  async saveFilled(): Promise<Uint8Array> {
+    return await this.doc.saveDocument()
   }
 
   private releasePage(s: PageSlot): void {

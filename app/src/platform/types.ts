@@ -37,4 +37,7 @@ export interface PlatformBackend {
   fileHash(path: string): Promise<string>
   /** reveal file in OS file manager (no-op on web) */
   revealFile(path: string): Promise<void>
+  /** save filled-form PDF bytes; user picks destination (Tauri save dialog).
+   *  Returns saved path, or null if the user cancelled. */
+  savePdf(suggestedName: string, bytes: Uint8Array): Promise<string | null>
 }

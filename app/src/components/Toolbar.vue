@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { store, controllers } from '../store'
 
-defineEmits<{ search: []; settings: []; print: [] }>()
+defineEmits<{ search: []; settings: []; print: []; saveFilled: [] }>()
 
 const tab = computed(() => store.activeTab)
 const ctrl = computed(() => { void store.docTick; return tab.value ? controllers.get(tab.value.id) : undefined })
@@ -34,6 +34,12 @@ function zoom(dir: 1 | -1): void {
     <button title="适应宽度 (⌘0)" @click="ctrl?.setZoom('width')">适宽</button>
     <button title="适应页面" @click="ctrl?.setZoom('page')">适页</button>
     <div class="grow" />
+    <button
+      v-if="tab.formsDirty"
+      class="save-filled"
+      title="保存已填写的表单为 PDF 副本"
+      @click="$emit('saveFilled')"
+    >保存已填表单</button>
     <span class="hint" :title="tab.sidecarLocation">{{ tab.encrypted ? '🔒 ' : '' }}{{ tab.sidecarLocation ? '批注 → ' + tab.sidecarLocation.split('/').pop() : '' }}</span>
     <div class="sep" />
     <button title="搜索 (⌘F)" @click="$emit('search')">🔍</button>

@@ -27,7 +27,17 @@ function fixturesApi(): Plugin {
           return
         }
         const file = path.join(FIXTURES, rel)
-        if (!file.startsWith(FIXTURES) || !fs.existsSync(file)) return next()
+        if (!file.startsWith(FIXTURES)) return next()
+        if (req.method === 'PUT') {
+          const chunks: Buffer[] = []
+          req.on('data', (c) => chunks.push(c))
+          req.on('end', () => {
+            fs.writeFileSync(file, Buffer.concat(chunks))
+            res.end('ok')
+          })
+          return
+        }
+        if (!fs.existsSync(file)) return next()
         const stat = fs.statSync(file)
         const range = req.headers.range
         if (range) {

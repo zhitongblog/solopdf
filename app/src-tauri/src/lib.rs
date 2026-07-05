@@ -163,6 +163,48 @@ fn reveal_file(_app: tauri::AppHandle, path: String) -> Result<(), String> {
     tauri_plugin_opener::reveal_item_in_dir(path).map_err(|e| e.to_string())
 }
 
+/// Filled-form PDF save: raw binary body (no JSON copy), dest in header.
+#[tauri::command]
+fn save_pdf_bytes(request: tauri::ipc::Request) -> Result<(), String> {
+    let dest = request
+        .headers()
+        .get("x-dest")
+        .and_then(|v| v.to_str().ok())
+        .ok_or("缺少目标路径")?;
+    let dest = urlencoding_decode(dest)?;
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => {
+            fs::write(&dest, bytes).map_err(|e| format!("保存失败: {e}"))
+        }
+        _ => Err("expected raw body".into()),
+    }
+}
+
+/// minimal percent-decoding (avoid a full urlencoding crate for one call)
+fn urlencoding_decode(s: &str) -> Result<String, String> {
+    let mut out = Vec::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => {
+                let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).map_err(|e| e.to_string())?;
+                out.push(u8::from_str_radix(hex, 16).map_err(|e| e.to_string())?);
+                i += 3;
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).map_err(|e| e.to_string())
+}
+
 /// Files/deep-links this process was launched with (file association).
 #[tauri::command]
 fn startup_files(state: tauri::State<StartupArgs>) -> Vec<String> {
@@ -203,6 +245,7 @@ pub fn run() {
             save_state,
             file_hash,
             reveal_file,
+            save_pdf_bytes,
             startup_files,
         ])
         .setup(|app| {
