@@ -8,6 +8,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { platform } from './platform'
 import type { PdfViewerController } from './viewer/controller'
 import type { AnnotationManager } from './annotations/manager'
+import { detectSystemLocale, setLocale, type Locale } from './i18n'
 
 export interface TabState {
   id: number
@@ -30,6 +31,7 @@ export interface Settings {
   updateCheck: boolean
   sidebarTab: 'outline' | 'thumbs' | 'annots'
   sidebarOpen: boolean
+  language: 'system' | Locale
 }
 
 interface PersistedState {
@@ -46,6 +48,12 @@ export const DEFAULT_SETTINGS: Settings = {
   updateCheck: false,
   sidebarTab: 'outline',
   sidebarOpen: true,
+  language: 'system',
+}
+
+export function applyLanguage(): void {
+  const l = store.settings.language
+  setLocale(l === 'system' ? detectSystemLocale() : l)
 }
 
 let nextTabId = 1
@@ -83,6 +91,8 @@ export async function initStore(): Promise<void> {
   if (s.recents) store.recents = s.recents
   if (s.positions) store.positions = s.positions
   if (s.hashes) store.hashes = s.hashes
+  applyLanguage()
+  watch(() => store.settings.language, applyLanguage)
   store.loaded = true
   // persist on change, debounced
   let t = 0
