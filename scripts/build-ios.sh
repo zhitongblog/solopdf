@@ -24,19 +24,23 @@ mkdir -p ~/Library/MobileDevice/"Provisioning Profiles"
 cp "$PROFILE_SRC" ~/Library/MobileDevice/"Provisioning Profiles/$UUID.mobileprovision"
 echo "    UUID: $UUID"
 
-echo "==> Patching project.yml (manual signing, xcodegen settings.base)"
+echo "==> Patching project.yml (merge signing into existing settings.base)"
 python3 - "$PROJECT_YML" "$IOS_SIGNING_PROFILE_NAME" << 'PY'
 import sys
 p, profile = sys.argv[1], sys.argv[2]
 s = open(p).read()
 if 'PROVISIONING_PROFILE_SPECIFIER' not in s:
-    marker = "  solopdf_iOS:\n    type: application\n    platform: iOS"
-    inject = marker + f"""\n    settings:\n      base:\n        DEVELOPMENT_TEAM: 6NQM3XP5RF\n        CODE_SIGN_STYLE: Manual\n        CODE_SIGN_IDENTITY: \"Apple Distribution\"\n        PROVISIONING_PROFILE_SPECIFIER: \"{profile}\""""
-    assert marker in s, 'target marker not found'
-    s = s.replace(marker, inject, 1)
+    anchor = "    settings:\n      base:\n        ENABLE_BITCODE: false"
+    assert anchor in s, 'settings anchor not found'
+    inject = f'    settings:\n      base:\n        DEVELOPMENT_TEAM: 6NQM3XP5RF\n        CODE_SIGN_STYLE: Manual\n        CODE_SIGN_IDENTITY: "Apple Distribution"\n        PROVISIONING_PROFILE_SPECIFIER: "{profile}"\n        ENABLE_BITCODE: false'
+    s = s.replace(anchor, inject, 1)
     open(p, 'w').write(s)
 print('signing config ok')
 PY
+echo "==> Regenerating xcodeproj (tauri ios build does NOT re-run xcodegen)"
+(cd app/src-tauri/gen/apple && xcodegen generate >/dev/null)
+grep -q PROVISIONING_PROFILE_SPECIFIER app/src-tauri/gen/apple/solopdf.xcodeproj/project.pbxproj || { echo "ERROR: signing not in pbxproj" >&2; exit 1; }
+
 for key in LSSupportsOpeningDocumentsInPlace UISupportsDocumentBrowser; do
   if grep -q "$key:" "$PROJECT_YML"; then
     /usr/bin/sed -i.bak "s|^\\( *\\)$key: .*\$|\\1$key: false|" "$PROJECT_YML" && rm -f "$PROJECT_YML.bak"
@@ -67,6 +71,14 @@ cat > "$EXPORT_PLIST" <<EOF
 </dict>
 </plist>
 EOF
+
+echo "==> Clearing stale Externals debug variants (SoloMD pitfall #3)"
+rm -rf app/src-tauri/gen/apple/Externals/*/debug
+# Externals must NOT be a source folder — the linker finds libapp.a via
+# LIBRARY_SEARCH_PATHS; as a source it copies debug+release variants and
+# xcodebuild fails with "Multiple commands produce libapp.a" (SoloMD fix)
+/usr/bin/sed -i.bak '/^      - path: Externals$/d' "$PROJECT_YML" && rm -f "$PROJECT_YML.bak"
+(cd app/src-tauri/gen/apple && xcodegen generate >/dev/null)
 
 echo "==> Building signed .ipa (this takes a while)"
 cd app
