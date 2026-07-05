@@ -127,7 +127,10 @@ fn load_state(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
         return Ok(serde_json::json!({}));
     }
     let text = fs::read_to_string(&f).map_err(|e| e.to_string())?;
-    Ok(serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({})))
+    // strip UTF-8 BOM: an external editor (or PowerShell) saving state.json
+    // with a BOM would otherwise silently reset ALL settings to defaults
+    let text = text.trim_start_matches('\u{feff}');
+    Ok(serde_json::from_str(text).unwrap_or_else(|_| serde_json::json!({})))
 }
 
 #[tauri::command]
