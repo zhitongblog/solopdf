@@ -172,6 +172,18 @@ html.dark .pv-page { background: #2f2f31; }
 
 /* pdf.js annotationLayer (form widgets) sits between canvas and text layer */
 .pv-page .annotationLayer { position: absolute; inset: 0; z-index: 3; }
+/* Fix pdf.js's checkbox X mark: upstream rules set left:45% and NO top, so
+   the two rotated strokes render off-center in WebKit (top:auto differs from
+   Firefox). Center both strokes exactly on the widget midpoint and inset the
+   X slightly so it stays inside the printed box even when the AcroForm
+   widget rect is a bit larger than the artwork square. */
+.pv-page .annotationLayer .buttonWidgetAnnotation.checkBox input:checked::before,
+.pv-page .annotationLayer .buttonWidgetAnnotation.checkBox input:checked::after {
+  top: 16%;
+  height: 68%;
+  left: calc(50% - 0.75px);
+  width: 1.5px;
+}
 html.dark .pv-page .annotationLayer :is(input, textarea, select) {
   color-scheme: light; /* form values must stay legible on the white page */
 }
