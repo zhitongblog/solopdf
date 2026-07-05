@@ -23,13 +23,14 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
-tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-deep-link = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 twox-hash = "2"
-# debug bridge (dormant unless SOLOPDF_DEBUG=1): lets E2E drive the real
-# WKWebView app — same pattern as SoloMD's dev bridge
+
+# desktop-only: single-instance forwarding + the SOLOPDF_DEBUG bridge
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tiny_http = "0.12"
 
 [profile.release]

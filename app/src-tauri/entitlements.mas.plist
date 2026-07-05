@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Mac App Store sandbox is mandatory. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+
+	<!-- Must match the provisioning profile (TeamID 6NQM3XP5RF, app.solopdf)
+	     or TestFlight distribution breaks with warning 90886. -->
+	<key>com.apple.application-identifier</key>
+	<string>6NQM3XP5RF.app.solopdf</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>6NQM3XP5RF</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>6NQM3XP5RF.*</string>
+	</array>
+
+	<!-- WKWebView JIT — without BOTH of these the Vue app never mounts and
+	     the window is blank (SoloMD's MAS 1.0.0 rejection root cause). -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+
+	<!-- User opens PDFs via the open dialog / drag-drop, and saves exported
+	     Markdown / filled-form copies via the save dialog. Sidecar writes to
+	     unauthorized folders fall back to the app container (built-in). -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+</dict>
+</plist>

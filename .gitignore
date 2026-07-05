@@ -9,3 +9,5 @@ app/public/pdfjs/
 core/dist/
 app/src-tauri/gen/
 app/src-tauri/icons/icon.iconset/
+app/src-tauri/gen/apple/build/
+dist-mas/

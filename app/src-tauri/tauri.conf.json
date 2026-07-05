@@ -45,18 +45,26 @@
     ],
     "fileAssociations": [
       {
-        "ext": ["pdf"],
+        "ext": [
+          "pdf"
+        ],
         "name": "PDF Document",
         "description": "PDF document",
         "role": "Viewer",
         "mimeType": "application/pdf"
       }
-    ]
+    ],
+    "iOS": {
+      "developmentTeam": "6NQM3XP5RF",
+      "minimumSystemVersion": "14.0"
+    }
   },
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["solopdf"]
+        "schemes": [
+          "solopdf"
+        ]
       }
     }
   }

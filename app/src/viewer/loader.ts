@@ -7,8 +7,15 @@ import PdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?worker'
 import { platform } from '../platform'
 import { PlatformRangeTransport, INITIAL_READ } from './transport'
 
-// bundle the worker with vite instead of fetching from CDN (offline-first)
-pdfjs.GlobalWorkerOptions.workerPort = new PdfWorker()
+// bundle the worker with vite instead of fetching from CDN (offline-first).
+// Constructed LAZILY: eager module-scope `new Worker()` crashes the whole
+// import chain on iOS WKWebView (custom-protocol module workers) → blank app.
+let workerStarted = false
+function ensureWorker(): void {
+  if (workerStarted) return
+  pdfjs.GlobalWorkerOptions.workerPort = new PdfWorker()
+  workerStarted = true
+}
 
 export interface OpenResult {
   doc: PDFDocumentProxy
@@ -30,6 +37,7 @@ export async function openDocument(
   path: string,
   askPassword: (retry: boolean) => Promise<string | null>,
 ): Promise<OpenResult> {
+  ensureWorker()
   const meta = await platform().fileMeta(path)
   const head = await platform().readChunk(path, 0, Math.min(INITIAL_READ, meta.size))
   const transport = new PlatformRangeTransport(path, meta.size, head)

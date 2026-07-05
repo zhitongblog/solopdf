@@ -161,9 +161,16 @@ async fn file_hash(path: String) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 fn reveal_file(_app: tauri::AppHandle, path: String) -> Result<(), String> {
     tauri_plugin_opener::reveal_item_in_dir(path).map_err(|e| e.to_string())
+}
+
+#[cfg(mobile)]
+#[tauri::command]
+fn reveal_file(_app: tauri::AppHandle, _path: String) -> Result<(), String> {
+    Ok(())
 }
 
 /// Filled-form PDF save: raw binary body (no JSON copy), dest in header.
@@ -257,6 +264,7 @@ fn debug_report(bridge: tauri::State<std::sync::Arc<DebugBridge>>, id: u64, resu
     }
 }
 
+#[cfg(desktop)]
 fn start_debug_server(bridge: std::sync::Arc<DebugBridge>) {
     std::thread::spawn(move || {
         let server = match tiny_http::Server::http("127.0.0.1:14310") {
@@ -284,10 +292,17 @@ fn start_debug_server(bridge: std::sync::Arc<DebugBridge>) {
 }
 
 /// Native print of the current webview (macOS WKWebView: JS window.print()
-/// is a NO-OP — this is why打印 needed a Rust round-trip).
+/// is a NO-OP — this is why打印 needed a Rust round-trip). Desktop only.
+#[cfg(desktop)]
 #[tauri::command]
 fn print_webview(webview_window: tauri::WebviewWindow) -> Result<(), String> {
     webview_window.print().map_err(|e| e.to_string())
+}
+
+#[cfg(mobile)]
+#[tauri::command]
+fn print_webview() -> Result<(), String> {
+    Err("printing is not supported on mobile yet".into())
 }
 
 fn collect_open_args(args: impl Iterator<Item = String>) -> Vec<String> {
@@ -298,20 +313,22 @@ fn collect_open_args(args: impl Iterator<Item = String>) -> Vec<String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_deep_link::init())
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            // second launch: forward its files/links to the running window
-            let files = collect_open_args(argv.into_iter());
-            if !files.is_empty() {
-                let _ = app.emit("solopdf://open-files", files);
-            }
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.set_focus();
-            }
-        }))
+        .plugin(tauri_plugin_deep_link::init());
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        // second launch: forward its files/links to the running window
+        let files = collect_open_args(argv.into_iter());
+        if !files.is_empty() {
+            let _ = app.emit("solopdf://open-files", files);
+        }
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.set_focus();
+        }
+    }));
+    builder
         .manage(StartupArgs(collect_open_args(std::env::args())))
         .manage(std::sync::Arc::new(DebugBridge::new()))
         .invoke_handler(tauri::generate_handler![
@@ -331,6 +348,7 @@ pub fn run() {
             print_webview,
         ])
         .setup(|app| {
+            #[cfg(desktop)]
             if debug_enabled_env() {
                 let bridge = app.state::<std::sync::Arc<DebugBridge>>();
                 start_debug_server(bridge.inner().clone());
