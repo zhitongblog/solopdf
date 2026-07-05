@@ -1,0 +1,11 @@
+node_modules/
+dist/
+target/
+*.log
+.DS_Store
+test-fixtures/large-britannica-v1.pdf
+test-fixtures/*.annotations.md
+app/public/pdfjs/
+core/dist/
+app/src-tauri/gen/
+app/src-tauri/icons/icon.iconset/

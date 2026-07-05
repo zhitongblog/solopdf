@@ -1,0 +1,14 @@
+{
+  "name": "solopdf-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
+  "scripts": {
+    "dev": "pnpm --filter solopdf-app dev",
+    "tauri": "pnpm --filter solopdf-app tauri",
+    "test": "pnpm --filter @solopdf/core test",
+    "cli": "node cli/src/index.mjs"
+  }
+}

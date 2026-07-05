@@ -1,0 +1,12 @@
+{
+  "name": "@solopdf/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "solopdf": "src/index.mjs"
+  },
+  "dependencies": {
+    "@solopdf/core": "workspace:*",
+    "pdfjs-dist": "^5.4.0"
+  }
+}

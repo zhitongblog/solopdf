@@ -1,0 +1,14 @@
+{
+  "name": "@solopdf/dev-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "solopdf-mcp": "src/index.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.24.0",
+    "@solopdf/core": "workspace:*",
+    "pdfjs-dist": "^5.4.0"
+  }
+}

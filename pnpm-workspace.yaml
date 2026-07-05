@@ -1,0 +1,5 @@
+packages:
+  - app
+  - core
+  - cli
+  - dev-mcp
