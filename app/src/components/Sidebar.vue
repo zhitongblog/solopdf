@@ -7,6 +7,7 @@
 import { computed, ref, watch, onBeforeUnmount, nextTick } from 'vue'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { store, controllers, documents, annotManagers } from '../store'
+import { t } from '../i18n'
 import type { Annotation } from '@solopdf/core'
 
 const tab = computed(() => store.activeTab)
@@ -151,13 +152,13 @@ onBeforeUnmount(() => observer?.disconnect())
 <template>
   <div class="sidebar" v-if="tab">
     <div class="sidebar-tabs">
-      <button :class="{ active: store.settings.sidebarTab === 'outline' }" @click="store.settings.sidebarTab = 'outline'">目录</button>
-      <button :class="{ active: store.settings.sidebarTab === 'thumbs' }" @click="store.settings.sidebarTab = 'thumbs'">缩略图</button>
-      <button :class="{ active: store.settings.sidebarTab === 'annots' }" @click="store.settings.sidebarTab = 'annots'">批注</button>
+      <button :class="{ active: store.settings.sidebarTab === 'outline' }" @click="store.settings.sidebarTab = 'outline'">{{ t('sb.outline') }}</button>
+      <button :class="{ active: store.settings.sidebarTab === 'thumbs' }" @click="store.settings.sidebarTab = 'thumbs'">{{ t('sb.thumbs') }}</button>
+      <button :class="{ active: store.settings.sidebarTab === 'annots' }" @click="store.settings.sidebarTab = 'annots'">{{ t('sb.annots') }}</button>
     </div>
 
     <div class="sidebar-body" v-if="store.settings.sidebarTab === 'outline'">
-      <div v-if="!flatOutline.length" class="annot-empty">该文档没有目录</div>
+      <div v-if="!flatOutline.length" class="annot-empty">{{ t('sb.noOutline') }}</div>
       <div
         v-for="(n, i) in flatOutline"
         :key="i"
@@ -189,7 +190,7 @@ onBeforeUnmount(() => observer?.disconnect())
 
     <div class="sidebar-body" v-else>
       <div v-if="!annots.length" class="annot-empty">
-        划选正文文字即可高亮<br />批注保存为 Markdown 伴生文件
+        <span v-html="t('sb.annotEmpty')"></span>
       </div>
       <div
         v-for="a in annots"
@@ -202,18 +203,18 @@ onBeforeUnmount(() => observer?.disconnect())
         <template v-if="editingId === a.id">
           <textarea v-model="editText" @click.stop @keydown.enter.meta="saveEdit(a)" />
           <div class="ai-meta">
-            <button @click.stop="saveEdit(a)">保存</button>
-            <button @click.stop="editingId = null">取消</button>
+            <button @click.stop="saveEdit(a)">{{ t('sb.save') }}</button>
+            <button @click.stop="editingId = null">{{ t('sb.cancel') }}</button>
           </div>
         </template>
         <template v-else>
           <div class="ai-note" v-if="a.note">{{ a.note }}</div>
           <div class="ai-meta">
             <span>p.{{ a.anchor.page }}</span>
-            <span v-if="a.orphan" title="原文位置已失效，仅保留文字">⚠ 位置失效</span>
+            <span v-if="a.orphan" :title="t('sb.orphanTip')">{{ t('sb.orphan') }}</span>
             <span style="flex: 1"></span>
-            <button @click.stop="startEdit(a)">编辑</button>
-            <button @click.stop="removeAnnot(a)">删除</button>
+            <button @click.stop="startEdit(a)">{{ t('sb.edit') }}</button>
+            <button @click.stop="removeAnnot(a)">{{ t('sb.delete') }}</button>
           </div>
         </template>
       </div>

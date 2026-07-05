@@ -87,4 +87,13 @@ export class WebBackend implements PlatformBackend {
     if (!res.ok) throw new Error(`保存失败: ${res.status}`)
     return `/Volumes/Dev/code/pdf/test-fixtures/${suggestedName}`
   }
+
+  async saveText(suggestedName: string, text: string): Promise<string | null> {
+    const res = await fetch(`/__fixtures/${encodeURIComponent(suggestedName)}`, {
+      method: 'PUT',
+      body: text,
+    })
+    if (!res.ok) throw new Error(`保存失败: ${res.status}`)
+    return `/Volumes/Dev/code/pdf/test-fixtures/${suggestedName}`
+  }
 }

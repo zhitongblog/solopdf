@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { SelectionInfo } from '../viewer/controller'
+import { t } from '../i18n'
 
 const props = defineProps<{ selection: SelectionInfo }>()
 defineEmits<{ pick: [color: string] }>()
@@ -15,9 +16,9 @@ const style = computed(() => {
 
 <template>
   <div class="hl-pop" :style="style" @mousedown.prevent>
-    <button class="swatch sw-yellow" title="黄色高亮" @click="$emit('pick', 'yellow')" />
-    <button class="swatch sw-green" title="绿色高亮" @click="$emit('pick', 'green')" />
-    <button class="swatch sw-blue" title="蓝色高亮" @click="$emit('pick', 'blue')" />
-    <button class="swatch sw-pink" title="粉色高亮" @click="$emit('pick', 'pink')" />
+    <button class="swatch sw-yellow" :title="t('hl.yellow')" @click="$emit('pick', 'yellow')" />
+    <button class="swatch sw-green" :title="t('hl.green')" @click="$emit('pick', 'green')" />
+    <button class="swatch sw-blue" :title="t('hl.blue')" @click="$emit('pick', 'blue')" />
+    <button class="swatch sw-pink" :title="t('hl.pink')" @click="$emit('pick', 'pink')" />
   </div>
 </template>

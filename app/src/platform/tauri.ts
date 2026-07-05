@@ -61,4 +61,17 @@ export class TauriBackend implements PlatformBackend {
     await invoke('save_pdf_bytes', bytes, { headers: { 'x-dest': encodeURIComponent(dest) } })
     return dest
   }
+
+  async saveText(suggestedName: string, text: string): Promise<string | null> {
+    const dest = await save({
+      defaultPath: suggestedName,
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+    })
+    if (!dest) return null
+    // save_pdf_bytes is a generic raw-body file writer despite the name
+    await invoke('save_pdf_bytes', new TextEncoder().encode(text), {
+      headers: { 'x-dest': encodeURIComponent(dest) },
+    })
+    return dest
+  }
 }

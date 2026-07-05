@@ -40,4 +40,6 @@ export interface PlatformBackend {
   /** save filled-form PDF bytes; user picks destination (Tauri save dialog).
    *  Returns saved path, or null if the user cancelled. */
   savePdf(suggestedName: string, bytes: Uint8Array): Promise<string | null>
+  /** save a text file (Markdown export); returns path or null if cancelled */
+  saveText(suggestedName: string, text: string): Promise<string | null>
 }

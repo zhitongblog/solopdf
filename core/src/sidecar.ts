@@ -20,6 +20,20 @@
  */
 import type { Annotation, AnchorData, Sidecar, SidecarMeta } from './types.js'
 
+export interface SidecarLabels {
+  /** H1 suffix + section word, e.g. 批注 / Annotations */
+  annotations: string
+  /** section title word, e.g. 高亮 / Highlight */
+  highlight: string
+  /** jump-back link text, e.g. 跳回原文 / Jump to source */
+  jumpBack: string
+}
+export const DEFAULT_LABELS: SidecarLabels = {
+  annotations: '批注',
+  highlight: '高亮',
+  jumpBack: '跳回原文',
+}
+
 const META_RE = /<!--\s*solopdf:meta\s+v1([^>]*?)-->/
 const ANCHOR_RE = /<!--\s*solopdf:anchor\s+([A-Za-z0-9_-]+)\s+({.*?})\s*-->/g
 const ID_RE = /<!--\s*solopdf:id\s+([A-Za-z0-9_-]+)\s*-->/
@@ -45,25 +59,25 @@ function anchorLine(a: Annotation): string {
 }
 
 /** Render one annotation section (## block). */
-export function renderAnnotation(a: Annotation, pdfPath: string): string {
+export function renderAnnotation(a: Annotation, pdfPath: string, labels: SidecarLabels = DEFAULT_LABELS): string {
   const lines: string[] = []
-  lines.push(`## p.${a.anchor.page} — 高亮 <!-- solopdf:id ${a.id} -->`)
+  lines.push(`## p.${a.anchor.page} — ${labels.highlight} <!-- solopdf:id ${a.id} -->`)
   if (a.excerpt) {
     for (const l of a.excerpt.split('\n')) lines.push(`> ${l}`)
   }
   lines.push(a.note || '')
-  lines.push(`[跳回原文](${deepLink(pdfPath, a.anchor.page, a.id)})`)
+  lines.push(`[${labels.jumpBack}](${deepLink(pdfPath, a.anchor.page, a.id)})`)
   lines.push(anchorLine(a))
   return lines.join('\n') + '\n'
 }
 
 /** Serialize a complete sidecar — ONLY for creating a brand-new file. */
-export function serialize(sc: Sidecar, pdfPath: string): string {
+export function serialize(sc: Sidecar, pdfPath: string, labels: SidecarLabels = DEFAULT_LABELS): string {
   const parts: string[] = []
-  parts.push(`# 《${sc.meta.pdfName}》批注`)
+  parts.push(`# 《${sc.meta.pdfName}》${labels.annotations}`)
   parts.push(metaLine(sc.meta))
   parts.push('')
-  for (const a of sc.annotations) parts.push(renderAnnotation(a, pdfPath))
+  for (const a of sc.annotations) parts.push(renderAnnotation(a, pdfPath, labels))
   return parts.join('\n')
 }
 
@@ -158,7 +172,7 @@ function parseBody(body: string): { excerpt: string; note: string } {
   for (const l of lines) {
     if (l.startsWith('> ')) excerptLines.push(l.slice(2))
     else if (l.startsWith('>')) excerptLines.push(l.slice(1))
-    else if (l.match(/^\[跳回原文\]/)) continue
+    else if (l.match(/^\[[^\]]*\]\(solopdf:\/\//)) continue
     else if (l.match(/<!--\s*solopdf:anchor/)) continue
     else noteLines.push(l)
   }
@@ -178,16 +192,17 @@ export function upsertAnnotation(
   a: Annotation,
   pdfPath: string,
   meta: SidecarMeta,
+  labels: SidecarLabels = DEFAULT_LABELS,
 ): string {
   if (!text.trim()) {
-    return serialize({ meta, annotations: [a] }, pdfPath)
+    return serialize({ meta, annotations: [a] }, pdfPath, labels)
   }
   const sections = splitSections(text)
   const target = sections.find((s) => {
     const idm = s.header.match(ID_RE)
     return idm && idm[1] === a.id
   })
-  const rendered = renderAnnotation(a, pdfPath)
+  const rendered = renderAnnotation(a, pdfPath, labels)
   if (target) {
     return text.slice(0, target.start) + rendered + text.slice(target.end)
   }

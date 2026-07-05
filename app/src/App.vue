@@ -15,6 +15,8 @@ import {
   addRecent, savePosition, restorePosition, effectiveTheme,
 } from './store'
 import { platform, isTauri } from './platform'
+import { t } from './i18n'
+import { exportMarkdown } from './export'
 import { openDocument } from './viewer/loader'
 import { PdfViewerController, type SelectionInfo } from './viewer/controller'
 import { AnnotationManager } from './annotations/manager'
@@ -77,7 +79,7 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
     tab.numPages = doc.numPages
 
     const host = hostFor(tab.id)
-    if (!host) throw new Error('内部错误：找不到渲染容器')
+    if (!host) throw new Error('internal: render host missing')
     const ctrl = new PdfViewerController(doc, host, effectiveTheme)
     ctrl.darkPdf = store.settings.darkPdf
     controllers.set(tab.id, ctrl)
@@ -98,7 +100,7 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
     if (jumpTo) jumpAfterLoad(tab.id, jumpTo)
   } catch (err) {
     tab.loadError = String((err as Error)?.message ?? err)
-    showToast(`打开失败：${tab.loadError}`)
+    showToast(t('app.openFail', { msg: tab.loadError }))
   }
 }
 
@@ -152,9 +154,9 @@ async function highlightSelection(color: string): Promise<void> {
   try {
     await mgr.addFromSelection(sel, color)
     ctrl.clearSelection()
-    showToast(`已高亮 → ${mgr.sidecarLocation.split('/').pop()}`)
+    showToast(t('app.highlighted', { file: mgr.sidecarLocation.split('/').pop()! }))
   } catch (err) {
-    showToast(`批注保存失败：${(err as Error).message}`)
+    showToast(t('app.annotSaveFail', { msg: (err as Error).message }))
   }
 }
 
@@ -200,9 +202,24 @@ async function saveFilledForm(): Promise<void> {
     const bytes = await ctrl.saveFilled()
     const suggested = tab.name.replace(/\.pdf$/i, '') + '-filled.pdf'
     const dest = await platform().savePdf(suggested, bytes)
-    if (dest) showToast(`已保存：${dest.split('/').pop()}`)
+    if (dest) showToast(t('app.saved', { file: dest.split('/').pop()! }))
   } catch (err) {
-    showToast(`保存失败：${(err as Error).message}`)
+    showToast(t('app.saveFail', { msg: (err as Error).message }))
+  }
+}
+
+async function exportMd(): Promise<void> {
+  const tab = store.activeTab
+  const doc = tab && documents.get(tab.id)
+  if (!tab || !doc) return
+  try {
+    const mgr = annotManagers.get(tab.id)
+    const md = await exportMarkdown(doc, tab.name, mgr?.annotations ?? [])
+    const suggested = tab.name.replace(/\.pdf$/i, '') + '.md'
+    const dest = await platform().saveText(suggested, md)
+    if (dest) showToast(t('app.exported', { file: dest.split('/').pop()! }))
+  } catch (err) {
+    showToast(t('app.exportFail', { msg: (err as Error).message }))
   }
 }
 
@@ -210,11 +227,11 @@ async function doPrint(): Promise<void> {
   const tab = store.activeTab
   const doc = tab && documents.get(tab.id)
   if (!tab || !doc) return
-  showToast('正在准备打印…')
+  showToast(t('app.printPrep'))
   try {
     await printDocument(doc)
   } catch (err) {
-    showToast(`打印失败：${(err as Error).message}`)
+    showToast(t('app.printFail', { msg: (err as Error).message }))
   }
 }
 
@@ -264,6 +281,7 @@ onMounted(async () => {
     annotManagers,
     documents,
     printDocument,
+    exportMd,
   }
 
   if (isTauri()) {
@@ -326,6 +344,7 @@ watch(() => store.settings.theme, () => {
           @settings="settingsOpen = true"
           @print="doPrint"
           @save-filled="saveFilledForm"
+          @export-md="exportMd"
         />
         <WelcomeScreen v-if="!store.tabs.length" @open="pickAndOpen" @open-path="openPath" />
         <template v-for="tab in store.tabs" :key="tab.id">
@@ -335,13 +354,13 @@ watch(() => store.settings.theme, () => {
             :data-tab="tab.id"
           >
             <div v-if="tab.loadError" class="welcome">
-              <h1>无法打开</h1>
+              <h1>{{ t('app.cantOpen') }}</h1>
               <p>{{ tab.loadError }}</p>
-              <button class="open-btn" @click="onCloseTab(tab.id)">关闭标签</button>
+              <button class="open-btn" @click="onCloseTab(tab.id)">{{ t('app.closeTab') }}</button>
             </div>
           </div>
         </template>
-        <div v-if="noTextBanner" class="notext-banner">该页无文字层 — 文字选择与高亮不可用</div>
+        <div v-if="noTextBanner" class="notext-banner">{{ t('app.noTextLayer') }}</div>
         <SearchBar v-if="searchOpen && store.activeTab" @close="searchOpen = false" />
       </div>
     </div>
@@ -357,14 +376,11 @@ watch(() => store.settings.theme, () => {
 
     <div v-if="privacyAsk" class="modal-mask">
       <div class="modal">
-        <h3>加密 PDF 的批注隐私</h3>
-        <p class="modal-note">
-          高亮摘录和定位指纹会以<b>明文</b>写入批注文件。这个 PDF 有密码，
-          你可以选择仅保存批注内容、不保存原文摘录（定位精度会降低）。
-        </p>
+        <h3>{{ t('pv.title') }}</h3>
+        <p class="modal-note">{{ t('pv.body') }}</p>
         <div class="modal-actions">
-          <button @click="privacyAsk!.resolve(true)">仅存批注（更隐私）</button>
-          <button class="primary" @click="privacyAsk!.resolve(false)">正常保存</button>
+          <button @click="privacyAsk!.resolve(true)">{{ t('pv.strip') }}</button>
+          <button class="primary" @click="privacyAsk!.resolve(false)">{{ t('pv.normal') }}</button>
         </div>
       </div>
     </div>

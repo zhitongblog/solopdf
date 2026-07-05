@@ -1,42 +1,52 @@
 <script setup lang="ts">
 import { store } from '../store'
+import { t, LOCALES } from '../i18n'
 const emit = defineEmits<{ close: [] }>()
 </script>
 
 <template>
   <div class="modal-mask" @click.self="emit('close')">
     <div class="modal">
-      <h3>设置</h3>
+      <h3>{{ t('st.title') }}</h3>
       <div class="settings-row">
         <div>
-          <div class="sr-label">主题</div>
-          <div class="sr-sub">跟随系统 / 浅色 / 深色</div>
+          <div class="sr-label">{{ t('st.language') }}</div>
+        </div>
+        <select v-model="store.settings.language">
+          <option value="system">{{ t('st.langSystem') }}</option>
+          <option v-for="l in LOCALES" :key="l.value" :value="l.value">{{ l.label }}</option>
+        </select>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="sr-label">{{ t('st.theme') }}</div>
+          <div class="sr-sub">{{ t('st.themeSub') }}</div>
         </div>
         <select v-model="store.settings.theme">
-          <option value="system">系统</option>
-          <option value="light">浅色</option>
-          <option value="dark">深色</option>
+          <option value="system">{{ t('st.system') }}</option>
+          <option value="light">{{ t('st.light') }}</option>
+          <option value="dark">{{ t('st.dark') }}</option>
         </select>
       </div>
       <div class="settings-row">
         <div>
-          <div class="sr-label">深色模式下 PDF 页面</div>
-          <div class="sr-sub">智能反色：纯文字页反色，含图片页保持原样</div>
+          <div class="sr-label">{{ t('st.darkPdf') }}</div>
+          <div class="sr-sub">{{ t('st.darkPdfSub') }}</div>
         </div>
         <select v-model="store.settings.darkPdf">
-          <option value="smart">智能反色</option>
-          <option value="off">保持原样</option>
+          <option value="smart">{{ t('st.smart') }}</option>
+          <option value="off">{{ t('st.keep') }}</option>
         </select>
       </div>
       <div class="settings-row">
         <div>
-          <div class="sr-label">检查更新</div>
-          <div class="sr-sub">关闭后应用零网络请求（当前版本未配置更新源）</div>
+          <div class="sr-label">{{ t('st.update') }}</div>
+          <div class="sr-sub">{{ t('st.updateSub') }}</div>
         </div>
         <input type="checkbox" v-model="store.settings.updateCheck" />
       </div>
       <div class="modal-actions">
-        <button class="primary" @click="emit('close')">完成</button>
+        <button class="primary" @click="emit('close')">{{ t('st.done') }}</button>
       </div>
     </div>
   </div>

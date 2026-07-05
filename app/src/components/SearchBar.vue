@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { store, controllers } from '../store'
 import { SearchSession, type SearchHit } from '../viewer/search'
+import { t } from '../i18n'
 
 const emit = defineEmits<{ close: [] }>()
 const input = ref<HTMLInputElement>()
@@ -21,12 +22,12 @@ function run(): void {
   const c = ctrl.value
   if (!c || !query.value.trim()) return
   session = new SearchSession(c, query.value)
-  status.value = '搜索中…'
+  status.value = t('se.searching')
   void session.run((h, done, total) => {
     hits.value = [...h]
     status.value = done < total
-      ? `搜索中… ${done}/${total} 页，${h.length} 个结果`
-      : `${h.length} 个结果${h.length >= 500 ? '（已达上限）' : ''}`
+      ? t('se.progress', { done, total, n: h.length })
+      : t('se.results', { n: h.length }) + (h.length >= 500 ? t('se.capped') : '')
   })
 }
 
@@ -50,14 +51,14 @@ onMounted(() => input.value?.focus())
       <input
         ref="input"
         v-model="query"
-        placeholder="搜索文档…（回车）"
+        :placeholder="t('se.placeholder')"
         @keydown.enter.exact="hits.length ? next(1) : run()"
         @keydown.enter.shift="next(-1)"
         @keydown.esc="emit('close')"
       />
-      <button title="上一个" @click="next(-1)">↑</button>
-      <button title="下一个" @click="next(1)">↓</button>
-      <button title="关闭 (Esc)" @click="emit('close')">×</button>
+      <button :title="t('se.prev')" @click="next(-1)">↑</button>
+      <button :title="t('se.next')" @click="next(1)">↓</button>
+      <button :title="t('se.close')" @click="emit('close')">×</button>
     </div>
     <div class="search-status" v-if="status">{{ status }}</div>
     <div class="results" v-if="hits.length">

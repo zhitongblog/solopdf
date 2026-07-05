@@ -118,6 +118,36 @@ async function cmdFormFields(file) {
   console.log(JSON.stringify({ file, count: Object.keys(out).length, fields: out }, null, 2))
 }
 
+async function cmdExportMd(file) {
+  const doc = await open(file)
+  // outline -> headings
+  const outline = []
+  const walk = async (items, depth) => {
+    for (const it of items ?? []) {
+      try {
+        let dest = it.dest
+        if (typeof dest === 'string') dest = await doc.getDestination(dest)
+        if (Array.isArray(dest) && dest[0]) outline.push({ title: it.title ?? '', page: (await doc.getPageIndex(dest[0])) + 1, depth })
+      } catch {}
+      if (it.items?.length) await walk(it.items, depth + 1)
+    }
+  }
+  await walk(await doc.getOutline().catch(() => null), 0)
+  const byPage = new Map()
+  for (const o of outline.sort((a,b) => a.page - b.page)) {
+    if (!byPage.has(o.page)) byPage.set(o.page, [])
+    byPage.get(o.page).push(o)
+  }
+  const name = path.basename(file)
+  process.stdout.write(`# ${name.replace(/\.pdf$/i, '')}\n\n> Source: ${name} · Pages: ${doc.numPages}\n\n`)
+  for (let p = 1; p <= doc.numPages; p++) {
+    for (const h of byPage.get(p) ?? []) process.stdout.write(`${'#'.repeat(Math.min(h.depth + 2, 6))} ${h.title}\n\n`)
+    process.stdout.write(`<!-- p.${p} -->\n`)
+    const t = await pageText(doc, p)
+    if (t.trim()) process.stdout.write(t.trim() + '\n\n')
+  }
+}
+
 async function cmdSelftest(dir) {
   // acceptance sweep over the standard fixture set (design doc test plan)
   const cases = [
@@ -173,6 +203,7 @@ switch (cmd) {
   case 'extract-text': await cmdExtract(file ?? die('用法: solopdf extract-text <file.pdf>')); break
   case 'export-annotations': await cmdExportAnnotations(file ?? die('用法: solopdf export-annotations <file.pdf>')); break
   case 'form-fields': await cmdFormFields(file ?? die('用法: solopdf form-fields <file.pdf>')); break
+  case 'export-md': await cmdExportMd(file ?? die('用法: solopdf export-md <file.pdf>')); break
   case 'selftest': await cmdSelftest(file ?? die('用法: solopdf selftest <fixtures-dir>')); break
   default:
     console.log(`solopdf — SoloPDF 命令行工具（与应用同一渲染引擎）
@@ -182,6 +213,7 @@ switch (cmd) {
   solopdf extract-text <file.pdf> [--pages A-B]    提取文字
   solopdf export-annotations <file.pdf>            批注伴生文件 → JSON
   solopdf form-fields <file.pdf>                   AcroForm 表单域与当前值 → JSON
+  solopdf export-md <file.pdf>                     全文导出为 Markdown（stdout）
   solopdf selftest <fixtures-dir>                  标准测试集验收`)
     process.exit(cmd ? 1 : 0)
 }

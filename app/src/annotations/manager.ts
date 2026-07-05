@@ -10,9 +10,19 @@
 import {
   parse, upsertAnnotation, removeAnnotation, stripPrivate, genId, makeFingerprint,
 } from '@solopdf/core'
-import type { Annotation, SidecarMeta } from '@solopdf/core'
+import type { Annotation, SidecarMeta, SidecarLabels } from '@solopdf/core'
 import { platform } from '../platform'
+import { t } from '../i18n'
 import type { SelectionInfo } from '../viewer/controller'
+
+/** sidecar display labels follow the app language (parser is label-agnostic) */
+function labels(): SidecarLabels {
+  return {
+    annotations: t('sc.annotations'),
+    highlight: t('sc.highlight'),
+    jumpBack: t('sc.jumpBack'),
+  }
+}
 
 export class AnnotationManager {
   annotations: Annotation[] = []
@@ -58,7 +68,7 @@ export class AnnotationManager {
       createdAt: new Date().toISOString(),
     }
     if (this.stripExcerpts) a = stripPrivate(a)
-    await this.write(upsertAnnotation(this.text, a, this.pdfPath, this.meta))
+    await this.write(upsertAnnotation(this.text, a, this.pdfPath, this.meta, labels()))
     this.annotations = parse(this.text).annotations
     this.onChange(this.annotations)
     return a
@@ -67,7 +77,7 @@ export class AnnotationManager {
   async updateNote(id: string, note: string): Promise<void> {
     const a = this.annotations.find((x) => x.id === id)
     if (!a) return
-    await this.write(upsertAnnotation(this.text, { ...a, note }, this.pdfPath, this.meta))
+    await this.write(upsertAnnotation(this.text, { ...a, note }, this.pdfPath, this.meta, labels()))
     this.annotations = parse(this.text).annotations
     this.onChange(this.annotations)
   }
