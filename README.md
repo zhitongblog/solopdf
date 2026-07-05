@@ -1,6 +1,6 @@
 # SoloPDF
 
-官网：https://doaipm.com/solopdf/ · GitHub：https://github.com/zhitongblog/solopdf
+官网：https://doaipm.com/zh/products/solopdf/ · GitHub：https://github.com/zhitongblog/solopdf
 
 免费 · 无广告 · 本地化的跨平台 PDF 阅读器。**高亮即笔记**：你在 PDF 里划的每一条高亮，
 自动保存为 Markdown 伴生文件——[SoloMD](https://solomd.app) 能打开、RAG 能搜索、git 能做版本管理。
