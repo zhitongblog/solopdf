@@ -361,8 +361,19 @@ pub fn run() {
             let _ = app;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running SoloPDF");
+        .build(tauri::generate_context!())
+        .expect("error while building SoloPDF")
+        .run(|app, event| {
+            // Finder double-click / iOS Files "open with" arrive as Opened
+            // events (NOT argv) — forward them to the frontend just like
+            // second-instance launches.
+            if let tauri::RunEvent::Opened { urls } = event {
+                let files: Vec<String> = urls.iter().map(|u| u.to_string()).collect();
+                if !files.is_empty() {
+                    let _ = app.emit("solopdf://open-files", files);
+                }
+            }
+        });
 }
 
 use std::hash::Hasher as _;

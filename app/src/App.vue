@@ -291,7 +291,11 @@ onMounted(async () => {
     await listen<string[]>('solopdf://open-files', (e) => {
       for (const f of e.payload) {
         if (f.startsWith('solopdf://')) handleDeepLink(f)
-        else void openPath(f)
+        else if (f.startsWith('file://')) {
+          // RunEvent::Opened delivers file URLs (Finder double-click, iOS
+          // Files "open with") — decode to a plain path
+          void openPath(decodeURIComponent(f.replace(/^file:\/\//, '')))
+        } else void openPath(f)
       }
     })
     const args = await invoke<string[]>('startup_files')
