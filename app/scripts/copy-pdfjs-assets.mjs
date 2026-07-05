@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url)
 const pdfjsRoot = path.dirname(require.resolve('pdfjs-dist/package.json'))
 const publicDir = path.resolve(import.meta.dirname, '../public/pdfjs')
 
-for (const dir of ['cmaps', 'standard_fonts']) {
+for (const dir of ['cmaps', 'standard_fonts', 'wasm']) {
   const src = path.join(pdfjsRoot, dir)
   const dst = path.join(publicDir, dir)
   fs.mkdirSync(dst, { recursive: true })

@@ -43,6 +43,9 @@ export async function openDocument(
     cMapUrl: cmapsUrl(),
     cMapPacked: true,
     standardFontDataUrl: fontsUrl(),
+    // JPEG2000 (JPX) images — archive.org scans use them — decode via
+    // OpenJPEG WASM; without wasmUrl those images silently fail to paint
+    wasmUrl: '/pdfjs/wasm/',
   })
 
   task.onPassword = (updatePassword: (pw: string) => void, reason: number) => {
