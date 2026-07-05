@@ -33,6 +33,7 @@
     "category": "Productivity",
     "license": "MIT",
     "publisher": "alexlee",
+    "homepage": "https://solopdf.doaipm.com",
     "shortDescription": "Free, ad-free, local-first PDF reader",
     "longDescription": "SoloPDF is a free, ad-free, local-first PDF reader. Highlights become Markdown notes that SoloMD can open, search, and version.",
     "icon": [
