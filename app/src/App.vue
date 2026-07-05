@@ -261,6 +261,8 @@ onMounted(async () => {
       store,
       controllers,
       annotManagers,
+      documents,
+      printDocument,
     }
   }
 })

@@ -10,7 +10,11 @@ import type { PDFDocumentProxy } from 'pdfjs-dist'
 const BATCH = 10
 const PRINT_DPI = 200 // ≈2.08x of 96dpi
 
-export async function printDocument(doc: PDFDocumentProxy): Promise<void> {
+export async function printDocument(
+  doc: PDFDocumentProxy,
+  /** test seam: E2E stubs the system dialog call */
+  trigger: (w: Window) => void = (w) => w.print(),
+): Promise<void> {
   const frame = document.createElement('iframe')
   frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden'
   document.body.appendChild(frame)
@@ -54,7 +58,7 @@ export async function printDocument(doc: PDFDocumentProxy): Promise<void> {
     })
 
     frame.contentWindow!.focus()
-    frame.contentWindow!.print()
+    trigger(frame.contentWindow!)
   } finally {
     // give the print dialog time to snapshot the frame before removal
     setTimeout(() => frame.remove(), 60_000)
