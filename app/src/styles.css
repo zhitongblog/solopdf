@@ -149,6 +149,22 @@ input:focus { border-color: var(--accent); }
 }
 .annot-empty { color: var(--fg-dim); font-size: 12px; text-align: center; padding: 24px 8px; }
 
+/* narrow screens (phones): sidebar becomes an overlay, not a squeeze */
+.sidebar-backdrop { display: none; }
+@media (max-width: 700px) {
+  .app-main { position: relative; }
+  .sidebar {
+    position: absolute; left: 0; top: 0; bottom: 0; z-index: 60;
+    width: min(300px, 82vw); min-width: 0;
+    box-shadow: 4px 0 24px rgba(0,0,0,.25);
+  }
+  .sidebar-backdrop {
+    display: block; position: absolute; inset: 0; z-index: 55;
+    background: rgba(0,0,0,.3);
+  }
+  .toolbar { overflow-x: auto; }
+}
+
 /* ── viewer ── */
 .pv-scroll { flex: 1; overflow: auto; position: relative; }
 .pv-canvas-area { position: relative; margin: 12px auto; }

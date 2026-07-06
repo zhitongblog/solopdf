@@ -173,6 +173,17 @@ fn reveal_file(_app: tauri::AppHandle, _path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Mobile export target: app Documents dir (visible in the iOS Files app
+/// thanks to UIFileSharingEnabled). Save dialogs don't exist on iOS.
+#[tauri::command]
+fn save_to_documents(app: tauri::AppHandle, name: String, text: String) -> Result<String, String> {
+    let dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let dest = dir.join(name);
+    fs::write(&dest, text).map_err(|e| e.to_string())?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
 /// Filled-form PDF save: raw binary body (no JSON copy), dest in header.
 #[tauri::command]
 fn save_pdf_bytes(request: tauri::ipc::Request) -> Result<(), String> {
@@ -341,6 +352,7 @@ pub fn run() {
             file_hash,
             reveal_file,
             save_pdf_bytes,
+            save_to_documents,
             startup_files,
             debug_enabled,
             debug_poll,

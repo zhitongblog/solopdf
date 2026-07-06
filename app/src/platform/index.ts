@@ -4,6 +4,10 @@ import { WebBackend } from './web'
 
 export * from './types'
 
+export function isMobile(): boolean {
+  return /iPhone|iPad|Android/i.test(navigator.userAgent)
+}
+
 export function isTauri(): boolean {
   return '__TAURI_INTERNALS__' in window
 }

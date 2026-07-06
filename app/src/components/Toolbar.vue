@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { store, controllers } from '../store'
+import { isMobile } from '../platform'
 import { t } from '../i18n'
 
 defineEmits<{ search: []; settings: []; print: []; saveFilled: []; exportMd: [] }>()
@@ -45,7 +46,7 @@ function zoom(dir: 1 | -1): void {
     <div class="sep" />
     <button :title="t('tb.exportMdTip')" @click="$emit('exportMd')">MD↓</button>
     <button :title="t('tb.search')" @click="$emit('search')">🔍</button>
-    <button :title="t('tb.print')" @click="$emit('print')">🖨</button>
+    <button v-if="!isMobile()" :title="t('tb.print')" @click="$emit('print')">🖨</button>
     <button :title="t('tb.settings')" @click="$emit('settings')">⚙︎</button>
   </div>
 </template>

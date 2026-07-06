@@ -63,6 +63,11 @@ export class TauriBackend implements PlatformBackend {
   }
 
   async saveText(suggestedName: string, text: string): Promise<string | null> {
+    if (/iPhone|iPad|Android/i.test(navigator.userAgent)) {
+      // no save dialogs on mobile — write to the app Documents folder,
+      // which UIFileSharingEnabled exposes in the iOS Files app
+      return await invoke<string>('save_to_documents', { name: suggestedName, text })
+    }
     const dest = await save({
       defaultPath: suggestedName,
       filters: [{ name: 'Markdown', extensions: ['md'] }],

@@ -14,7 +14,7 @@ import {
   store, controllers, documents, annotManagers, initStore, newTab, closeTab,
   addRecent, savePosition, restorePosition, effectiveTheme,
 } from './store'
-import { platform, isTauri } from './platform'
+import { platform, isTauri, isMobile } from './platform'
 import { t } from './i18n'
 import { exportMarkdown } from './export'
 import { openDocument } from './viewer/loader'
@@ -266,6 +266,8 @@ watch(
 let posTimer = 0
 onMounted(async () => {
   await initStore()
+  // phones: sidebar starts closed regardless of persisted desktop preference
+  if (window.innerWidth < 700) store.settings.sidebarOpen = false
   applyTheme()
   window.addEventListener('keydown', onKey)
   window.addEventListener('focus', onFocus)
@@ -340,6 +342,11 @@ watch(() => store.settings.theme, () => {
   <div class="app">
     <TabBar @new="pickAndOpen" @close="onCloseTab" />
     <div class="app-main">
+      <div
+        v-if="store.settings.sidebarOpen && store.activeTab"
+        class="sidebar-backdrop"
+        @click="store.settings.sidebarOpen = false"
+      ></div>
       <Sidebar v-if="store.settings.sidebarOpen && store.activeTab" />
       <div class="app-content">
         <Toolbar

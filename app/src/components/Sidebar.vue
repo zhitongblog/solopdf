@@ -123,9 +123,13 @@ watch(mgr, (m) => {
   }
 }, { immediate: true })
 
+function closeIfNarrow(): void {
+  if (window.innerWidth < 700) store.settings.sidebarOpen = false
+}
 function jumpTo(a: Annotation): void {
   if (a.orphan) return
   ctrl.value?.flashAnnotation(a.id)
+  closeIfNarrow()
 }
 function startEdit(a: Annotation): void {
   editingId.value = a.id
@@ -169,7 +173,7 @@ onBeforeUnmount(() => observer?.disconnect())
           class="outline-toggle"
           @click.stop="n.open = !n.open"
         >{{ n.children.length ? (n.open ? '▾' : '▸') : '' }}</span>
-        <span class="ol-title" :title="n.title" @click="n.page && ctrl?.scrollToPage(n.page)">{{ n.title }}</span>
+        <span class="ol-title" :title="n.title" @click="n.page && (ctrl?.scrollToPage(n.page), closeIfNarrow())">{{ n.title }}</span>
         <span class="ol-page" v-if="n.page">{{ n.page }}</span>
       </div>
     </div>
@@ -181,7 +185,7 @@ onBeforeUnmount(() => observer?.disconnect())
         class="thumb"
         :class="{ current: p === tab.currentPage }"
         :data-page="p"
-        @click="ctrl?.scrollToPage(p)"
+        @click="ctrl?.scrollToPage(p); closeIfNarrow()"
       >
         <div class="thumb-ph" style="width: 110px; height: 150px"></div>
         <div class="thumb-num">{{ p }}</div>
