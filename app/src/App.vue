@@ -29,11 +29,16 @@ import PasswordDialog from './components/PasswordDialog.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import HighlightPopover from './components/HighlightPopover.vue'
 import WelcomeScreen from './components/WelcomeScreen.vue'
+import OcrDialog from './components/OcrDialog.vue'
+import ImageOcrDialog from './components/ImageOcrDialog.vue'
 
 const scrollHost = ref<HTMLDivElement>()
 const selection = ref<SelectionInfo | null>(null)
 const searchOpen = ref(false)
 const settingsOpen = ref(false)
+const ocrOpen = ref(false)
+const imageOcrPath = ref('')
+const imageOcrBytes = ref<{ bytes: Uint8Array; name: string } | null>(null)
 const toast = ref('')
 const noTextBanner = ref(false)
 const pwRequest = ref<{ retry: boolean; resolve: (pw: string | null) => void } | null>(null)
@@ -223,6 +228,38 @@ async function exportMd(): Promise<void> {
   }
 }
 
+// ── OCR ──
+function onOcrDone(dest: string, kind: 'pdf' | 'md'): void {
+  ocrOpen.value = false
+  showToast(t('app.ocrDone', { file: dest.split('/').pop()! }))
+  // open the searchable copy right away so the user can verify search/copy
+  if (kind === 'pdf') void openPath(dest)
+}
+
+async function pickImageForOcr(): Promise<void> {
+  if (isMobile()) {
+    // iOS: a native file input surfaces the system sheet with 拍照 /
+    // 照片图库 / 浏览 — camera capture included, no extra plugin needed
+    // (requires NSCameraUsageDescription in Info.plist)
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.onchange = async () => {
+      const f = input.files?.[0]
+      if (!f) return
+      imageOcrBytes.value = { bytes: new Uint8Array(await f.arrayBuffer()), name: f.name || 'photo.jpg' }
+    }
+    input.click()
+    return
+  }
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const sel = await open({
+    multiple: false,
+    filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg'] }],
+  })
+  if (typeof sel === 'string') imageOcrPath.value = sel
+}
+
 async function doPrint(): Promise<void> {
   const tab = store.activeTab
   const doc = tab && documents.get(tab.id)
@@ -284,6 +321,8 @@ onMounted(async () => {
     documents,
     printDocument,
     exportMd,
+    ocr: await import('./ocr'),
+    openImageOcr: (p: string) => { imageOcrPath.value = p },
   }
 
   if (isTauri()) {
@@ -356,8 +395,14 @@ watch(() => store.settings.theme, () => {
           @print="doPrint"
           @save-filled="saveFilledForm"
           @export-md="exportMd"
+          @ocr="ocrOpen = true"
         />
-        <WelcomeScreen v-if="!store.tabs.length" @open="pickAndOpen" @open-path="openPath" />
+        <WelcomeScreen
+          v-if="!store.tabs.length"
+          @open="pickAndOpen"
+          @open-path="openPath"
+          @ocr-image="pickImageForOcr"
+        />
         <template v-for="tab in store.tabs" :key="tab.id">
           <div
             v-show="tab.id === store.activeTabId"
@@ -371,7 +416,10 @@ watch(() => store.settings.theme, () => {
             </div>
           </div>
         </template>
-        <div v-if="noTextBanner" class="notext-banner">{{ t('app.noTextLayer') }}</div>
+        <div v-if="noTextBanner" class="notext-banner">
+          {{ t('app.noTextLayer') }}
+          <button v-if="isTauri()" class="banner-ocr-btn" @click="ocrOpen = true">{{ t('app.ocrBanner') }}</button>
+        </div>
         <SearchBar v-if="searchOpen && store.activeTab" @close="searchOpen = false" />
       </div>
     </div>
@@ -397,6 +445,20 @@ watch(() => store.settings.theme, () => {
     </div>
 
     <SettingsPanel v-if="settingsOpen" @close="settingsOpen = false" />
+    <OcrDialog v-if="ocrOpen && store.activeTab" @close="ocrOpen = false" @done="onOcrDone" />
+    <ImageOcrDialog
+      v-if="imageOcrPath"
+      :path="imageOcrPath"
+      @close="imageOcrPath = ''"
+      @toast="showToast"
+    />
+    <ImageOcrDialog
+      v-if="imageOcrBytes"
+      :bytes="imageOcrBytes.bytes"
+      :name="imageOcrBytes.name"
+      @close="imageOcrBytes = null"
+      @toast="showToast"
+    />
     <div v-if="toast" class="toast">{{ toast }}</div>
   </div>
 </template>

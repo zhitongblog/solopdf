@@ -12,12 +12,23 @@ autobins = false
 name = "SoloPDF"
 path = "src/main.rs"
 
+# OCR CLI driver — shipped artifact (see README); desktop only
+[[bin]]
+name = "solopdf-ocr"
+path = "src/bin/ocr_cli.rs"
+
 [lib]
 name = "solopdf_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# enables the PP-OCR ONNX engine on macOS too, so the Windows/Linux OCR
+# pipeline can be developed and tested on this machine before UTM runs
+ppocr = ["dep:ort", "dep:image"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+cc = "1"
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -27,6 +38,14 @@ tauri-plugin-deep-link = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 twox-hash = "2"
+lopdf = "0.36"
+ort = { version = "2.0.0-rc.10", optional = true, features = ["download-binaries"] }
+image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
+
+# PP-OCR is the shipped engine on Windows/Linux
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+ort = { version = "2.0.0-rc.10", features = ["download-binaries"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 # desktop-only: single-instance forwarding + the SOLOPDF_DEBUG bridge
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]

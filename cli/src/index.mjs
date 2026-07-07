@@ -30,15 +30,26 @@ function die(msg, code = 1) {
   process.exit(code)
 }
 
+/** pdfjs-dist package root (for wasm/cmap/font assets — CCITT/JBIG2/JPX
+ *  scanned PDFs need the wasm decoders even for text extraction) */
+function pdfjsRoot() {
+  const pkg = new URL(import.meta.resolve('pdfjs-dist/package.json')).pathname
+  return path.dirname(pkg)
+}
+
 async function open(file) {
   if (!existsSync(file)) die(`文件不存在: ${file}`)
   const data = new Uint8Array(await readFile(file))
+  const root = pdfjsRoot()
   const task = getDocument({
     data,
     password: flag('password'),
     // node has no DOM canvas; disable font rendering paths we don't need
     disableFontFace: true,
     verbosity: 0,
+    wasmUrl: `file://${root}/wasm/`,
+    cMapUrl: `file://${root}/cmaps/`,
+    standardFontDataUrl: `file://${root}/standard_fonts/`,
   })
   try {
     return await task.promise
@@ -148,6 +159,95 @@ async function cmdExportMd(file) {
   }
 }
 
+/** locate the Rust OCR driver binary (SOLOPDF_OCR_BIN overrides) */
+function ocrBin() {
+  if (process.env.SOLOPDF_OCR_BIN) return process.env.SOLOPDF_OCR_BIN
+  const here = path.dirname(new URL(import.meta.url).pathname)
+  const exe = process.platform === 'win32' ? 'solopdf-ocr.exe' : 'solopdf-ocr'
+  for (const rel of [
+    `../../app/src-tauri/target/release/${exe}`,
+    `../../app/src-tauri/target/debug/${exe}`,
+    exe, // PATH
+  ]) {
+    const p = rel === exe ? exe : path.resolve(here, rel)
+    if (rel === exe || existsSync(p)) return p
+  }
+  return exe
+}
+
+/**
+ * OCR a scanned PDF (or an image) into a searchable PDF or Markdown.
+ * Pages render via the same pdf.js engine, OCR runs in the native
+ * solopdf-ocr binary (Vision on macOS, PP-OCR ONNX on Win/Linux).
+ */
+async function cmdOcr(file) {
+  const { execFileSync } = await import('node:child_process')
+  const { writeFile, mkdtemp, rm } = await import('node:fs/promises')
+  const os = await import('node:os')
+  const out = flag('out') ?? file.replace(/\.(pdf|png|jpe?g)$/i, '') + '-ocr.pdf'
+  const lang = flag('lang') ?? 'zh'
+  const bin = ocrBin()
+
+  if (/\.(png|jpe?g)$/i.test(file)) {
+    // image → plain text on stdout (pipe to a file for MD)
+    process.stdout.write(execFileSync(bin, ['image', file, '--lang', lang]).toString())
+    return
+  }
+
+  const { createCanvas } = await import('@napi-rs/canvas')
+  const doc = await open(file)
+  const tmp = await mkdtemp(path.join(os.tmpdir(), 'solopdf-ocr-'))
+  const pages = []
+  const wantMd = /\.md$/i.test(out)
+  const mdParts = [`# ${path.basename(file).replace(/\.pdf$/i, '')}`, '']
+  try {
+    for (let p = 1; p <= doc.numPages; p++) {
+      const page = await doc.getPage(p)
+      const vp1 = page.getViewport({ scale: 1 })
+      const scale = Math.min(2200 / Math.max(vp1.width, vp1.height), 4)
+      const vp = page.getViewport({ scale })
+      const canvas = createCanvas(Math.floor(vp.width), Math.floor(vp.height))
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      await page.render({ canvasContext: ctx, viewport: vp }).promise
+      const png = path.join(tmp, `p${p}.png`)
+      await writeFile(png, canvas.toBuffer('image/png'))
+      const lines = JSON.parse(execFileSync(bin, ['image', png, '--lang', lang, '--json']).toString())
+      console.error(`  p.${p}/${doc.numPages}: ${lines.length} 行`)
+      if (wantMd) {
+        mdParts.push(`<!-- p.${p} -->`)
+        for (const l of lines.sort((a, b) => a.y - b.y || a.x - b.x)) mdParts.push(l.t)
+        mdParts.push('')
+      } else {
+        // normalized image coords → PDF user space (same math as the app)
+        pages.push({
+          page: p - 1,
+          lines: lines.map((l) => {
+            const [ax, ay] = vp1.convertToPdfPoint(l.x * vp1.width, l.y * vp1.height)
+            const [bx, by] = vp1.convertToPdfPoint((l.x + l.w) * vp1.width, (l.y + l.h) * vp1.height)
+            return {
+              text: l.t,
+              x: Math.min(ax, bx), y: Math.min(ay, by),
+              w: Math.abs(bx - ax), h: Math.abs(by - ay),
+            }
+          }),
+        })
+      }
+    }
+    if (wantMd) {
+      await writeFile(out, mdParts.join('\n'))
+    } else {
+      const rj = path.join(tmp, 'results.json')
+      await writeFile(rj, JSON.stringify(pages))
+      execFileSync(bin, ['overlay', file, rj, out], { stdio: 'inherit' })
+    }
+    console.error(`✓ ${out}`)
+  } finally {
+    await rm(tmp, { recursive: true, force: true })
+  }
+}
+
 async function cmdSelftest(dir) {
   // acceptance sweep over the standard fixture set (design doc test plan)
   const cases = [
@@ -204,6 +304,7 @@ switch (cmd) {
   case 'export-annotations': await cmdExportAnnotations(file ?? die('用法: solopdf export-annotations <file.pdf>')); break
   case 'form-fields': await cmdFormFields(file ?? die('用法: solopdf form-fields <file.pdf>')); break
   case 'export-md': await cmdExportMd(file ?? die('用法: solopdf export-md <file.pdf>')); break
+  case 'ocr': await cmdOcr(file ?? die('用法: solopdf ocr <file.pdf|img> [--out x.pdf|x.md] [--lang zh|ja|en]')); break
   case 'selftest': await cmdSelftest(file ?? die('用法: solopdf selftest <fixtures-dir>')); break
   default:
     console.log(`solopdf — SoloPDF 命令行工具（与应用同一渲染引擎）
@@ -214,6 +315,7 @@ switch (cmd) {
   solopdf export-annotations <file.pdf>            批注伴生文件 → JSON
   solopdf form-fields <file.pdf>                   AcroForm 表单域与当前值 → JSON
   solopdf export-md <file.pdf>                     全文导出为 Markdown（stdout）
+  solopdf ocr <file.pdf|img> [--out x.pdf|x.md]    本地 OCR：扫描件 → 可搜索 PDF / Markdown
   solopdf selftest <fixtures-dir>                  标准测试集验收`)
     process.exit(cmd ? 1 : 0)
 }

@@ -306,3 +306,25 @@ html.dark .pv-page .annotationLayer :is(input, textarea, select) {
   background: var(--bg-panel); border: 1px solid var(--border); color: var(--fg-dim);
   border-radius: 16px; padding: 4px 14px; font-size: 12px; z-index: 30;
 }
+
+/* ── OCR ─────────────────────────────────────────────────────────────────── */
+.notext-banner .banner-ocr-btn {
+  margin-left: 10px; background: var(--accent); color: #fff;
+  border-radius: 10px; padding: 2px 10px; font-size: 12px;
+}
+.notext-banner .banner-ocr-btn:hover { opacity: 0.9; background: var(--accent); }
+.ocr-modal { min-width: 340px; }
+.ocr-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 13px; }
+.ocr-row label { width: 56px; color: var(--fg-dim); flex: none; }
+.ocr-row select { flex: 1; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; }
+.ocr-error { color: #d33; font-size: 12px; margin: 6px 0; }
+.ocr-progress-bar { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; margin: 14px 0 8px; }
+.ocr-progress-fill { height: 100%; background: var(--accent); transition: width 0.2s; }
+.ocr-image-modal { width: min(560px, 90vw); }
+.ocr-text {
+  width: 100%; height: min(320px, 50vh); resize: vertical;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px; font-size: 13px; line-height: 1.5;
+}
+.welcome .open-btn-secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); margin-top: 10px; }
+.welcome .open-btn-secondary:hover { background: var(--accent); color: #fff; opacity: 1; }

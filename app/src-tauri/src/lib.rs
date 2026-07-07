@@ -8,6 +8,8 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use tauri::{Emitter, Manager};
 
+pub mod ocr;
+
 #[derive(Serialize)]
 struct FileMeta {
     path: String,
@@ -226,6 +228,66 @@ fn urlencoding_decode(s: &str) -> Result<String, String> {
     String::from_utf8(out).map_err(|e| e.to_string())
 }
 
+/// OCR one image (PNG/JPEG raw body). Returns the recognized lines as a
+/// JSON string; language hints come via the x-langs header (CSV).
+#[tauri::command]
+async fn ocr_image(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let langs: Vec<String> = request
+        .headers()
+        .get("x-langs")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect())
+        .unwrap_or_default();
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(b) => b.clone(),
+        _ => return Err("expected raw image body".into()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let lines = ocr::recognize(&bytes, &langs)?;
+        serde_json::to_string(&lines).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Which OCR engine this build carries ("vision" / "ppocr").
+#[tauri::command]
+fn ocr_engine() -> &'static str {
+    ocr::engine_name()
+}
+
+/// Write a searchable copy of `src_path` with the given per-page OCR lines
+/// (already in PDF user-space points). `dest_path: None` → app Documents
+/// dir (iOS, where save dialogs don't exist). Returns the written path.
+#[tauri::command]
+async fn ocr_make_searchable(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    pages: Vec<ocr::textlayer::PageOcr>,
+) -> Result<String, String> {
+    let dest = match dest_path {
+        Some(d) => PathBuf::from(d),
+        None => {
+            let dir = app.path().document_dir().map_err(|e| e.to_string())?;
+            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let stem = Path::new(&src_path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "document".into());
+            dir.join(format!("{stem}-ocr.pdf"))
+        }
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取原 PDF 失败: {e}"))?;
+        let out = ocr::textlayer::add_text_layer(&pdf, &pages)?;
+        fs::write(&dest, out).map_err(|e| format!("写入失败: {e}"))?;
+        Ok(dest.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Files/deep-links this process was launched with (file association).
 #[tauri::command]
 fn startup_files(state: tauri::State<StartupArgs>) -> Vec<String> {
@@ -354,6 +416,9 @@ pub fn run() {
             save_pdf_bytes,
             save_to_documents,
             startup_files,
+            ocr_image,
+            ocr_engine,
+            ocr_make_searchable,
             debug_enabled,
             debug_poll,
             debug_report,
@@ -369,6 +434,10 @@ pub fn run() {
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 let _ = app.deep_link().register("solopdf");
+                // PP-OCR models ship as bundled resources on these platforms
+                if let Ok(dir) = app.path().resource_dir() {
+                    crate::ocr::ppocr::set_model_dir(dir.join("assets/ppocr"));
+                }
             }
             let _ = app;
             Ok(())

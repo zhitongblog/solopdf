@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { store, controllers } from '../store'
-import { isMobile } from '../platform'
+import { isMobile, isTauri } from '../platform'
 import { t } from '../i18n'
 
-defineEmits<{ search: []; settings: []; print: []; saveFilled: []; exportMd: [] }>()
+defineEmits<{ search: []; settings: []; print: []; saveFilled: []; exportMd: []; ocr: [] }>()
 
 const tab = computed(() => store.activeTab)
 const ctrl = computed(() => { void store.docTick; return tab.value ? controllers.get(tab.value.id) : undefined })
@@ -44,6 +44,7 @@ function zoom(dir: 1 | -1): void {
     >{{ t('tb.saveFilled') }}</button>
     <span class="hint" :title="tab.sidecarLocation">{{ tab.encrypted ? '🔒 ' : '' }}{{ tab.sidecarLocation ? t('tb.annotTo') + tab.sidecarLocation.split('/').pop() : '' }}</span>
     <div class="sep" />
+    <button v-if="isTauri()" :title="t('tb.ocrTip')" @click="$emit('ocr')">{{ t('tb.ocr') }}</button>
     <button :title="t('tb.exportMdTip')" @click="$emit('exportMd')">MD↓</button>
     <button :title="t('tb.search')" @click="$emit('search')">🔍</button>
     <button v-if="!isMobile()" :title="t('tb.print')" @click="$emit('print')">🖨</button>

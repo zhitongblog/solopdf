@@ -6,6 +6,7 @@
     "solopdf": "src/index.mjs"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.2",
     "@solopdf/core": "workspace:*",
     "pdfjs-dist": "^5.4.0"
   }
