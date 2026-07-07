@@ -5,6 +5,8 @@ description = "SoloPDF — free, ad-free, local-first PDF reader with highlights
 authors = ["alexlee"]
 edition = "2021"
 autobins = false
+# two [[bin]]s (app + solopdf-ocr): tauri needs to know which one is the app
+default-run = "SoloPDF"
 
 # Match tauri.conf.json mainBinaryName exactly — SoloMD shipped a Windows
 # NSIS shortcut pointing at the wrong casing once; not repeating that.
