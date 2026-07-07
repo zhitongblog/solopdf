@@ -37,8 +37,10 @@ char *solopdf_vision_ocr(const uint8_t *bytes, size_t len, const char *langs_csv
         VNRecognizeTextRequest *req = [[VNRecognizeTextRequest alloc] init];
         req.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
         req.usesLanguageCorrection = YES;
-        if (@available(macOS 13.0, iOS 16.0, *)) {
-            req.automaticallyDetectsLanguage = YES;
+        // runtime check instead of @available: cargo links with -nodefaultlibs,
+        // and @available needs compiler-rt's __isPlatformVersionAtLeast
+        if ([req respondsToSelector:@selector(setAutomaticallyDetectsLanguage:)]) {
+            req.automaticallyDetectsLanguage = YES; // macOS 13+ / iOS 16+
         }
         NSMutableArray<NSString *> *langs = [NSMutableArray array];
         if (langs_csv && *langs_csv) {
