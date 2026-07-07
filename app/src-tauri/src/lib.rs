@@ -337,7 +337,7 @@ fn debug_report(bridge: tauri::State<std::sync::Arc<DebugBridge>>, id: u64, resu
     }
 }
 
-#[cfg(desktop)]
+#[cfg(not(target_os = "android"))]
 fn start_debug_server(bridge: std::sync::Arc<DebugBridge>) {
     std::thread::spawn(move || {
         let server = match tiny_http::Server::http("127.0.0.1:14310") {
@@ -425,7 +425,7 @@ pub fn run() {
             print_webview,
         ])
         .setup(|app| {
-            #[cfg(desktop)]
+            #[cfg(not(target_os = "android"))]
             if debug_enabled_env() {
                 let bridge = app.state::<std::sync::Arc<DebugBridge>>();
                 start_debug_server(bridge.inner().clone());
