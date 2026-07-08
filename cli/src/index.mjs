@@ -17,6 +17,9 @@ import path from 'node:path'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { parse } from '@solopdf/core'
 
+// piping into `head` etc. closes stdout early — exit quietly instead of crashing
+process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0) })
+
 const args = process.argv.slice(2)
 const cmd = args[0]
 
