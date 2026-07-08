@@ -1,8 +1,9 @@
 // solopdf-ocr — CLI driver for the OCR core (shipped artifact, global rule #4).
 //
-//   solopdf-ocr image <img.png|jpg> [--lang ja|zh] [--json]
+//   solopdf-ocr image <img.png|jpg> [--lang ja|zh] [--json] [--photo]
 //       OCR one image. Text to stdout, or normalized-coordinate JSON lines
-//       with --json: [{"t","c","x","y","w","h"}]
+//       with --json. --photo enables camera-shot preprocessing (document
+//       detection + perspective correction on Apple platforms).
 //
 //   solopdf-ocr overlay <src.pdf> <results.json> <dest.pdf>
 //       Inject an invisible text layer. results.json:
@@ -36,7 +37,8 @@ fn main() {
                 "en" => vec!["en-US".into()],
                 _ => vec!["zh-Hans".into(), "zh-Hant".into(), "en-US".into()],
             };
-            let lines = ocr::recognize(&bytes, &langs).unwrap_or_else(|e| die(&e));
+            let photo = args.iter().any(|a| a == "--photo");
+            let lines = ocr::recognize(&bytes, &langs, photo).unwrap_or_else(|e| die(&e));
             if args.iter().any(|a| a == "--json") {
                 println!("{}", serde_json::to_string(&lines).unwrap());
             } else {
@@ -61,7 +63,7 @@ fn main() {
         Some("engine") => println!("{}", ocr::engine_name()),
         _ => die(
             "solopdf-ocr — 本地 OCR 命令行\n\n\
-             用法:\n  solopdf-ocr image <img.png|jpg> [--lang ja|zh|en] [--json]\n  \
+             用法:\n  solopdf-ocr image <img.png|jpg> [--lang ja|zh|en] [--json] [--photo]\n  \
              solopdf-ocr overlay <src.pdf> <results.json> <dest.pdf>\n  \
              solopdf-ocr engine",
         ),

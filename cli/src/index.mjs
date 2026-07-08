@@ -15,7 +15,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
-import { parse } from '@solopdf/core'
+import { parse, orderLinesForReading } from '@solopdf/core'
 
 // piping into `head` etc. closes stdout early — exit quietly instead of crashing
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0) })
@@ -220,7 +220,7 @@ async function cmdOcr(file) {
       console.error(`  p.${p}/${doc.numPages}: ${lines.length} 行`)
       if (wantMd) {
         mdParts.push(`<!-- p.${p} -->`)
-        for (const l of lines.sort((a, b) => a.y - b.y || a.x - b.x)) mdParts.push(l.t)
+        for (const l of orderLinesForReading(lines)) mdParts.push(l.t)
         mdParts.push('')
       } else {
         // normalized image coords → PDF user space (same math as the app)

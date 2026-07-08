@@ -8,6 +8,7 @@
  *   4b. Markdown: group lines into paragraphs by vertical gaps
  */
 import type { PDFDocumentProxy } from 'pdfjs-dist'
+import { orderLinesForReading } from '@solopdf/core'
 import { t } from './i18n'
 
 export interface OcrLine {
@@ -64,17 +65,18 @@ async function renderPageToJpeg(
   }
 }
 
-async function ocrBytes(bytes: Uint8Array, langs: string[]): Promise<OcrLine[]> {
+async function ocrBytes(bytes: Uint8Array, langs: string[], photo = false): Promise<OcrLine[]> {
   const { invoke } = await import('@tauri-apps/api/core')
   const json = await invoke<string>('ocr_image', bytes, {
-    headers: { 'x-langs': langs.join(',') },
+    headers: { 'x-langs': langs.join(','), 'x-photo': photo ? '1' : '0' },
   })
   return JSON.parse(json) as OcrLine[]
 }
 
-/** OCR one encoded image (already-loaded bytes, e.g. an opened picture) */
+/** OCR one encoded image (opened picture / camera shot) — photo mode:
+ *  document detection + perspective correction + deskew before recognition */
 export async function ocrImageBytes(bytes: Uint8Array, langs: string[]): Promise<OcrLine[]> {
-  return await ocrBytes(bytes, langs)
+  return await ocrBytes(bytes, langs, true)
 }
 
 /** Run OCR over the given pages of a document. */
@@ -157,9 +159,8 @@ export function ocrToMarkdown(
   parts.push('')
   const pageNums = [...results.keys()].sort((a, b) => a - b)
   for (const p of pageNums) {
-    const lines = [...results.get(p)!.lines]
-      .filter((l) => l.t.trim())
-      .sort((a, b) => a.y - b.y || a.x - b.x)
+    // 多栏检测 + 人类阅读顺序(core 共享实现)
+    const lines = orderLinesForReading(results.get(p)!.lines)
     parts.push(`<!-- p.${p} -->`)
     if (!lines.length) {
       parts.push('')
@@ -177,7 +178,8 @@ export function ocrToMarkdown(
       }
     }
     for (const l of lines) {
-      if (lastBottom >= 0 && l.y - lastBottom > medianH * 0.8) flush()
+      // 段落断开:向下的大间隙,或跳回页面上方(换栏/换段)
+      if (lastBottom >= 0 && (l.y - lastBottom > medianH * 0.8 || l.y < lastBottom - medianH * 2)) flush()
       // CJK lines join without spaces; latin lines need one
       const sep = para.length && /[a-zA-Z0-9)]$/.test(para[para.length - 1]) ? ' ' : ''
       para.push(sep + l.t.trim())
@@ -188,18 +190,17 @@ export function ocrToMarkdown(
   return parts.join('\n')
 }
 
-/** plain text (for the image→text panel) */
+/** plain text (for the image→text panel) — reading order, column-aware */
 export function ocrToPlainText(lines: OcrLine[]): string {
-  return [...lines]
-    .filter((l) => l.t.trim())
-    .sort((a, b) => a.y - b.y || a.x - b.x)
+  return orderLinesForReading(lines)
     .map((l) => l.t.trim())
     .join('\n')
 }
 
 /** language hints per UI locale + user override */
-export function langsFor(mode: 'auto' | 'zh-en' | 'ja', uiLocale: string): string[] {
+export function langsFor(mode: 'auto' | 'zh-en' | 'ja' | 'ko', uiLocale: string): string[] {
   if (mode === 'ja') return ['ja', 'en-US']
+  if (mode === 'ko') return ['ko', 'en-US']
   if (mode === 'zh-en') return ['zh-Hans', 'zh-Hant', 'en-US']
   // auto: bias to the UI language first
   if (uiLocale.startsWith('ja')) return ['ja', 'en-US']

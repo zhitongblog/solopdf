@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod preprocess;
 pub mod textlayer;
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -40,18 +41,32 @@ pub fn engine_name() -> &'static str {
 
 /// Recognize text in an encoded image (PNG/JPEG bytes).
 /// `langs` is a priority hint, e.g. ["zh-Hans", "en-US", "ja"].
-pub fn recognize(bytes: &[u8], langs: &[String]) -> Result<Vec<OcrLine>, String> {
+/// `photo`: the input is a camera shot — on Apple platforms the shim finds
+/// the document quad and rectifies perspective first; everywhere the deskew
+/// preprocessor straightens small scan rotations before the engine runs.
+pub fn recognize(bytes: &[u8], langs: &[String], photo: bool) -> Result<Vec<OcrLine>, String> {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
-        vision::recognize(bytes, langs)
+        if photo {
+            // 透视校正在 shim 内完成,deskew 交给校正后的矩形(Vision 容忍度足够)
+            return vision::recognize(bytes, langs, true);
+        }
+        match preprocess::deskew(bytes) {
+            Some((fixed, _deg)) => vision::recognize(&fixed, langs, false),
+            None => vision::recognize(bytes, langs, false),
+        }
     }
     #[cfg(all(not(any(target_os = "macos", target_os = "ios")), any(windows, target_os = "linux")))]
     {
-        ppocr::recognize(bytes, langs)
+        let _ = photo; // Win/Linux 无透视校正,deskew 一律执行
+        match preprocess::deskew(bytes) {
+            Some((fixed, _deg)) => ppocr::recognize(&fixed, langs),
+            None => ppocr::recognize(bytes, langs),
+        }
     }
     #[cfg(not(any(target_os = "macos", target_os = "ios", windows, target_os = "linux")))]
     {
-        let _ = (bytes, langs);
+        let _ = (bytes, langs, photo);
         Err("OCR is not supported on this platform".into())
     }
 }

@@ -16,7 +16,7 @@ const emit = defineEmits<{ close: []; done: [path: string, kind: 'pdf' | 'md'] }
 
 const range = ref<'all' | 'current'>('all')
 const output = ref<'pdf' | 'md'>(props.initialOutput ?? 'pdf')
-const langMode = ref<'auto' | 'zh-en' | 'ja'>('auto')
+const langMode = ref<'auto' | 'zh-en' | 'ja' | 'ko'>('auto')
 const running = ref(false)
 const progress = ref<OcrProgress>({ done: 0, total: 0 })
 const error = ref('')
@@ -92,6 +92,7 @@ async function run(): Promise<void> {
             <option value="auto">{{ t('ocr.langAuto') }}</option>
             <option value="zh-en">{{ t('ocr.langZhEn') }}</option>
             <option value="ja">{{ t('ocr.langJa') }}</option>
+            <option value="ko">{{ t('ocr.langKo') }}</option>
           </select>
         </div>
         <div class="ocr-row">

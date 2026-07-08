@@ -1,8 +1,10 @@
-// PP-OCRv4 ONNX engine (Windows/Linux; on macOS behind the `ppocr` feature
+// PP-OCR ONNX engine (Windows/Linux; on macOS behind the `ppocr` feature
 // for development/testing). Pipeline: DBNet detection → axis-aligned box
 // post-processing → CRNN/SVTR recognition with greedy CTC decode.
 // Models live in assets/ppocr (bundled as tauri resources on Win/Linux):
-//   det.onnx, rec_ch.onnx + keys_ch.txt, rec_japan.onnx + keys_japan.txt
+//   det.onnx + rec_ch.onnx/keys_ch.txt  — PP-OCRv6 small (zh/en, 18k classes)
+//   rec_japan.onnx/keys_japan.txt       — PP-OCRv4 japan
+//   rec_korean.onnx/keys_korean.txt     — PP-OCRv3 korean
 
 use super::OcrLine;
 use image::RgbImage;
@@ -59,15 +61,20 @@ fn load_session(path: &PathBuf) -> Result<Session, String> {
 
 static ENGINE: Mutex<Option<Engine>> = Mutex::new(None);
 
-fn wants_japanese(langs: &[String]) -> bool {
-    langs.first().map(|l| l.starts_with("ja")).unwrap_or(false)
+/// 首选语言 → rec 模型:ja → japan,ko → korean,其余走中英模型
+fn rec_kind_for(langs: &[String]) -> &'static str {
+    match langs.first().map(|l| l.as_str()).unwrap_or("") {
+        l if l.starts_with("ja") => "japan",
+        l if l.starts_with("ko") => "korean",
+        _ => "ch",
+    }
 }
 
 pub fn recognize(bytes: &[u8], langs: &[String]) -> Result<Vec<OcrLine>, String> {
     let img = image::load_from_memory(bytes)
         .map_err(|e| format!("图片解码失败: {e}"))?
         .to_rgb8();
-    let rec_kind = if wants_japanese(langs) { "japan" } else { "ch" };
+    let rec_kind = rec_kind_for(langs);
 
     let mut guard = ENGINE.lock().map_err(|e| e.to_string())?;
     if guard.as_ref().map(|e| e.rec_kind != rec_kind).unwrap_or(true) {

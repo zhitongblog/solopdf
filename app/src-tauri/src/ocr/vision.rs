@@ -5,13 +5,18 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 
 extern "C" {
-    fn solopdf_vision_ocr(bytes: *const u8, len: usize, langs_csv: *const c_char) -> *mut c_char;
+    fn solopdf_vision_ocr(
+        bytes: *const u8,
+        len: usize,
+        langs_csv: *const c_char,
+        photo_mode: std::os::raw::c_int,
+    ) -> *mut c_char;
     fn solopdf_ocr_free(p: *mut c_char);
 }
 
-pub fn recognize(bytes: &[u8], langs: &[String]) -> Result<Vec<OcrLine>, String> {
+pub fn recognize(bytes: &[u8], langs: &[String], photo: bool) -> Result<Vec<OcrLine>, String> {
     let csv = CString::new(langs.join(",")).map_err(|e| e.to_string())?;
-    let raw = unsafe { solopdf_vision_ocr(bytes.as_ptr(), bytes.len(), csv.as_ptr()) };
+    let raw = unsafe { solopdf_vision_ocr(bytes.as_ptr(), bytes.len(), csv.as_ptr(), photo as _) };
     if raw.is_null() {
         return Err("vision shim returned null".into());
     }

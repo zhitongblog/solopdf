@@ -229,7 +229,8 @@ fn urlencoding_decode(s: &str) -> Result<String, String> {
 }
 
 /// OCR one image (PNG/JPEG raw body). Returns the recognized lines as a
-/// JSON string; language hints come via the x-langs header (CSV).
+/// JSON string; language hints via x-langs (CSV); x-photo: 1 marks camera
+/// shots (document detection + perspective correction on Apple platforms).
 #[tauri::command]
 async fn ocr_image(request: tauri::ipc::Request<'_>) -> Result<String, String> {
     let langs: Vec<String> = request
@@ -238,12 +239,18 @@ async fn ocr_image(request: tauri::ipc::Request<'_>) -> Result<String, String> {
         .and_then(|v| v.to_str().ok())
         .map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect())
         .unwrap_or_default();
+    let photo = request
+        .headers()
+        .get("x-photo")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v == "1")
+        .unwrap_or(false);
     let bytes = match request.body() {
         tauri::ipc::InvokeBody::Raw(b) => b.clone(),
         _ => return Err("expected raw image body".into()),
     };
     tauri::async_runtime::spawn_blocking(move || {
-        let lines = ocr::recognize(&bytes, &langs)?;
+        let lines = ocr::recognize(&bytes, &langs, photo)?;
         serde_json::to_string(&lines).map_err(|e| e.to_string())
     })
     .await
