@@ -53,6 +53,13 @@ if [ -d "app/$APP/Contents/Frameworks" ]; then
     done
 fi
 
+# MAS: strip CLI helper binaries (solopdf-ocr) — a bare nested executable
+# without its own bundle + provisioning profile fails validation
+# (errors 90049/90885). The CLI still ships in the dmg / Windows / Linux
+# bundles; MAS users lose nothing app-side (OCR lives in the lib).
+find "app/$APP/Contents/MacOS" -type f ! -name SoloPDF -delete
+ls "app/$APP/Contents/MacOS"
+
 echo "==> Signing .app (sandbox entitlements, no hardened runtime)"
 codesign --force --sign "$MAS_SIGNING_IDENTITY" \
   --entitlements "$ENTITLEMENTS" \
