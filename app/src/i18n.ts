@@ -149,6 +149,19 @@ const zhCN: Dict = {
   'app.ocrBanner': '识别文字 (OCR)',
   'app.ocrDone': 'OCR 完成：{file}',
   'app.copied': '已复制到剪贴板',
+  // 图书模式
+  'tb.bookTip': '图书阅读模式:重排正文,可调底色/字体/字号',
+  'bk.extracting': '正在整理正文… {done}/{total} 页',
+  'bk.noText': '该文档没有文字层(扫描件)——先做 OCR 再进入图书模式',
+  'bk.end': '全书完',
+  'bk.settings': '阅读设置',
+  'bk.bgLabel': '底色',
+  'bk.bg.paper': '纸白', 'bk.bg.sepia': '羊皮纸', 'bk.bg.green': '护眼绿', 'bk.bg.night': '夜间',
+  'bk.fontLabel': '字体',
+  'bk.font.sans': '黑体', 'bk.font.serif': '宋体', 'bk.font.kai': '楷体',
+  'bk.sizeLabel': '字号',
+  'bk.lhLabel': '行距',
+  'bk.widthLabel': '版心',
 }
 
 const zhTW: Dict = {
@@ -272,6 +285,18 @@ const zhTW: Dict = {
   'app.ocrBanner': '辨識文字 (OCR)',
   'app.ocrDone': 'OCR 完成：{file}',
   'app.copied': '已複製到剪貼簿',
+  'tb.bookTip': '圖書閱讀模式:重排內文,可調底色/字體/字號',
+  'bk.extracting': '正在整理內文… {done}/{total} 頁',
+  'bk.noText': '此文件沒有文字層(掃描件)——先做 OCR 再進入圖書模式',
+  'bk.end': '全書完',
+  'bk.settings': '閱讀設定',
+  'bk.bgLabel': '底色',
+  'bk.bg.paper': '紙白', 'bk.bg.sepia': '羊皮紙', 'bk.bg.green': '護眼綠', 'bk.bg.night': '夜間',
+  'bk.fontLabel': '字體',
+  'bk.font.sans': '黑體', 'bk.font.serif': '宋體', 'bk.font.kai': '楷體',
+  'bk.sizeLabel': '字號',
+  'bk.lhLabel': '行距',
+  'bk.widthLabel': '版心',
 }
 
 const en: Dict = {
@@ -395,6 +420,18 @@ const en: Dict = {
   'app.ocrBanner': 'Recognize text (OCR)',
   'app.ocrDone': 'OCR done: {file}',
   'app.copied': 'Copied to clipboard',
+  'tb.bookTip': 'Book mode: reflowed text with adjustable theme, font and size',
+  'bk.extracting': 'Preparing text… {done}/{total} pages',
+  'bk.noText': 'No text layer (scanned document) — run OCR first, then enter book mode',
+  'bk.end': 'The End',
+  'bk.settings': 'Reading settings',
+  'bk.bgLabel': 'Background',
+  'bk.bg.paper': 'Paper', 'bk.bg.sepia': 'Sepia', 'bk.bg.green': 'Green', 'bk.bg.night': 'Night',
+  'bk.fontLabel': 'Font',
+  'bk.font.sans': 'Sans', 'bk.font.serif': 'Serif', 'bk.font.kai': 'Kai',
+  'bk.sizeLabel': 'Size',
+  'bk.lhLabel': 'Line height',
+  'bk.widthLabel': 'Width',
 }
 
 const ja: Dict = {
@@ -518,6 +555,18 @@ const ja: Dict = {
   'app.ocrBanner': '文字を認識 (OCR)',
   'app.ocrDone': 'OCR 完了：{file}',
   'app.copied': 'クリップボードにコピーしました',
+  'tb.bookTip': 'ブックモード:リフローされた本文、背景/フォント/サイズ調整可',
+  'bk.extracting': '本文を整理中… {done}/{total} ページ',
+  'bk.noText': 'テキスト層がありません(スキャン文書)——先に OCR を実行してください',
+  'bk.end': '終',
+  'bk.settings': '閲覧設定',
+  'bk.bgLabel': '背景',
+  'bk.bg.paper': 'ペーパー', 'bk.bg.sepia': 'セピア', 'bk.bg.green': 'グリーン', 'bk.bg.night': 'ナイト',
+  'bk.fontLabel': 'フォント',
+  'bk.font.sans': 'ゴシック', 'bk.font.serif': '明朝', 'bk.font.kai': '楷書',
+  'bk.sizeLabel': 'サイズ',
+  'bk.lhLabel': '行間',
+  'bk.widthLabel': '幅',
 }
 
 const DICTS: Record<Locale, Dict> = { 'zh-CN': zhCN, 'zh-TW': zhTW, en, ja }

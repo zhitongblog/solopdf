@@ -23,6 +23,20 @@ export interface TabState {
   loadError: string | null
   /** user has edited AcroForm fields — "保存已填表单" appears */
   formsDirty: boolean
+  /** 图书阅读模式(重排视图) */
+  bookMode: boolean
+}
+
+export interface BookSettings {
+  /** 底色主题 */
+  bg: 'paper' | 'sepia' | 'green' | 'night'
+  /** 字体栈 */
+  font: 'sans' | 'serif' | 'kai'
+  /** 正文字号 px */
+  size: number
+  lineHeight: number
+  /** 版心最大宽度(em) */
+  maxWidth: number
 }
 
 export interface Settings {
@@ -32,6 +46,7 @@ export interface Settings {
   sidebarTab: 'outline' | 'thumbs' | 'annots'
   sidebarOpen: boolean
   language: 'system' | Locale
+  book: BookSettings
 }
 
 interface PersistedState {
@@ -49,6 +64,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarTab: 'outline',
   sidebarOpen: true,
   language: 'system',
+  book: { bg: 'paper', font: 'sans', size: 18, lineHeight: 1.9, maxWidth: 38 },
 }
 
 export function applyLanguage(): void {
@@ -127,6 +143,7 @@ export function newTab(path: string): TabState {
     sidecarLocation: '',
     loadError: null,
     formsDirty: false,
+    bookMode: false,
   }
   store.tabs.push(t)
   store.activeTabId = t.id

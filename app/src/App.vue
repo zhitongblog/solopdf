@@ -31,6 +31,7 @@ import HighlightPopover from './components/HighlightPopover.vue'
 import WelcomeScreen from './components/WelcomeScreen.vue'
 import OcrDialog from './components/OcrDialog.vue'
 import ImageOcrDialog from './components/ImageOcrDialog.vue'
+import BookView from './components/BookView.vue'
 
 const scrollHost = ref<HTMLDivElement>()
 const selection = ref<SelectionInfo | null>(null)
@@ -96,7 +97,10 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
     const mgr = new AnnotationManager(path, tab.name, tab.stripExcerpts)
     annotManagers.set(tab.id, mgr)
     store.docTick++
-    mgr.onChange = (annots) => { void ctrl.setAnnotations(annots) }
+    mgr.onChange = (annots) => {
+      void ctrl.setAnnotations(annots)
+      store.docTick++ // 图书模式的内联高亮靠它重渲染
+    }
     await mgr.load()
     tab.sidecarLocation = mgr.sidecarLocation
 
@@ -228,6 +232,18 @@ async function exportMd(): Promise<void> {
   }
 }
 
+// ── 图书模式 ──
+function toggleBookMode(): void {
+  const tab = store.activeTab
+  if (!tab) return
+  tab.bookMode = !tab.bookMode
+  if (!tab.bookMode) {
+    // 回原版式:跳到图书里读到的页
+    selection.value = null
+    controllers.get(tab.id)?.scrollToPage(tab.currentPage)
+  }
+}
+
 // ── OCR ──
 function onOcrDone(dest: string, kind: 'pdf' | 'md'): void {
   ocrOpen.value = false
@@ -323,6 +339,7 @@ onMounted(async () => {
     exportMd,
     ocr: await import('./ocr'),
     openImageOcr: (p: string) => { imageOcrPath.value = p },
+    toggleBookMode,
   }
 
   if (isTauri()) {
@@ -396,6 +413,7 @@ watch(() => store.settings.theme, () => {
           @save-filled="saveFilledForm"
           @export-md="exportMd"
           @ocr="ocrOpen = true"
+          @book="toggleBookMode"
         />
         <WelcomeScreen
           v-if="!store.tabs.length"
@@ -405,7 +423,7 @@ watch(() => store.settings.theme, () => {
         />
         <template v-for="tab in store.tabs" :key="tab.id">
           <div
-            v-show="tab.id === store.activeTabId"
+            v-show="tab.id === store.activeTabId && !tab.bookMode"
             class="pv-scroll"
             :data-tab="tab.id"
           >
@@ -415,6 +433,13 @@ watch(() => store.settings.theme, () => {
               <button class="open-btn" @click="onCloseTab(tab.id)">{{ t('app.closeTab') }}</button>
             </div>
           </div>
+          <BookView
+            v-if="tab.bookMode"
+            v-show="tab.id === store.activeTabId"
+            :tab-id="tab.id"
+            @selection="(s) => (selection = s)"
+            @ocr="ocrOpen = true"
+          />
         </template>
         <div v-if="noTextBanner" class="notext-banner">
           {{ t('app.noTextLayer') }}
