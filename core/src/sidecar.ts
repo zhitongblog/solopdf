@@ -55,7 +55,10 @@ function metaLine(meta: SidecarMeta): string {
 }
 
 function anchorLine(a: Annotation): string {
-  return `<!-- solopdf:anchor ${a.id} ${JSON.stringify(a.anchor)} -->`
+  // 颜色随锚点持久化(黄色为缺省,不写,保持旧文件字节稳定)
+  const payload =
+    a.color && a.color !== 'yellow' ? { ...a.anchor, color: a.color } : a.anchor
+  return `<!-- solopdf:anchor ${a.id} ${JSON.stringify(payload)} -->`
 }
 
 /** Render one annotation section (## block). */
@@ -103,9 +106,13 @@ export function parse(text: string): Sidecar {
 
   // anchors by id
   const anchors = new Map<string, AnchorData>()
+  const colors = new Map<string, string>()
   for (const m of text.matchAll(ANCHOR_RE)) {
     try {
-      anchors.set(m[1], JSON.parse(m[2]) as AnchorData)
+      const parsed = JSON.parse(m[2]) as AnchorData & { color?: string }
+      const { color, ...anchor } = parsed
+      anchors.set(m[1], anchor as AnchorData)
+      if (color) colors.set(m[1], color)
     } catch {
       /* corrupt anchor JSON -> treated as orphan below */
     }
@@ -130,7 +137,7 @@ export function parse(text: string): Sidecar {
       },
       excerpt,
       note,
-      color: 'yellow',
+      color: colors.get(id) ?? 'yellow',
       createdAt: '',
       orphan: !anchor,
     })

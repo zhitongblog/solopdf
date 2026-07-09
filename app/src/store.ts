@@ -25,9 +25,13 @@ export interface TabState {
   formsDirty: boolean
   /** 图书阅读模式(重排视图) */
   bookMode: boolean
+  /** 文档类型:EPUB 只有图书视图 */
+  kind: 'pdf' | 'epub'
 }
 
 export interface BookSettings {
+  /** 布局:auto = 桌面翻页(宽屏双页)/手机滚动 */
+  layout: 'auto' | 'paged' | 'scroll'
   /** 底色主题 */
   bg: 'paper' | 'sepia' | 'green' | 'night'
   /** 字体栈 */
@@ -64,7 +68,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarTab: 'outline',
   sidebarOpen: true,
   language: 'system',
-  book: { bg: 'paper', font: 'sans', size: 18, lineHeight: 1.9, maxWidth: 38 },
+  book: { layout: 'auto', bg: 'paper', font: 'sans', size: 18, lineHeight: 1.9, maxWidth: 38 },
 }
 
 export function applyLanguage(): void {
@@ -95,6 +99,7 @@ export const store = reactive({
 export const controllers = new Map<number, PdfViewerController>()
 export const documents = new Map<number, PDFDocumentProxy>()
 export const annotManagers = new Map<number, AnnotationManager>()
+export const epubBooks = new Map<number, import('./book/epub').EpubBook>()
 
 export function effectiveTheme(): 'light' | 'dark' {
   if (store.settings.theme !== 'system') return store.settings.theme
@@ -103,7 +108,12 @@ export function effectiveTheme(): 'light' | 'dark' {
 
 export async function initStore(): Promise<void> {
   const s = (await platform().loadState()) as Partial<PersistedState>
-  if (s.settings) Object.assign(store.settings, s.settings)
+  if (s.settings) {
+    Object.assign(store.settings, s.settings)
+    // 嵌套对象要与默认值深合并:旧版本存的 book 缺新字段(如 layout)
+    // 时,整体覆盖会让新字段变 undefined
+    store.settings.book = { ...DEFAULT_SETTINGS.book, ...(s.settings.book ?? {}) }
+  }
   if (s.recents) store.recents = s.recents
   if (s.positions) store.positions = s.positions
   if (s.hashes) store.hashes = s.hashes
@@ -144,6 +154,7 @@ export function newTab(path: string): TabState {
     loadError: null,
     formsDirty: false,
     bookMode: false,
+    kind: path.toLowerCase().endsWith('.epub') ? 'epub' : 'pdf',
   }
   store.tabs.push(t)
   store.activeTabId = t.id
@@ -159,6 +170,8 @@ export function closeTab(id: number): void {
   controllers.delete(id)
   documents.delete(id)
   annotManagers.delete(id)
+  epubBooks.get(id)?.destroy()
+  epubBooks.delete(id)
   store.tabs.splice(i, 1)
   if (store.activeTabId === id) {
     store.activeTabId = store.tabs[Math.min(i, store.tabs.length - 1)]?.id ?? 0
@@ -171,8 +184,8 @@ export function addRecent(path: string): void {
 
 export function savePosition(tab: TabState): void {
   const ctrl = controllers.get(tab.id)
-  if (!ctrl) return
-  const pos = ctrl.getPosition()
+  if (!ctrl && tab.kind !== 'epub') return
+  const pos = ctrl ? ctrl.getPosition() : { page: tab.currentPage, ratio: 0 }
   store.positions[tab.path] = pos
   const h = store.hashes[tab.path]
   if (h) store.positions[`hash:${h}`] = pos

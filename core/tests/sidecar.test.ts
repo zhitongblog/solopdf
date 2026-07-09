@@ -126,3 +126,21 @@ describe('remove + privacy strip', () => {
     for (let i = 0; i < 50; i++) expect(genId()).toMatch(/^[a-z0-9]{6}$/)
   })
 })
+
+describe('highlight color persistence', () => {
+  it('round-trips non-yellow colors through the sidecar', async () => {
+    const { upsertAnnotation, parse, genId } = await import('../src/sidecar.js')
+    const a = {
+      id: genId(),
+      anchor: { page: 3, quads: [], pre: 'aa', post: 'bb', text: 'needle' },
+      excerpt: 'needle', note: '', color: 'green', createdAt: '',
+    }
+    const text = upsertAnnotation('', a as any, '/tmp/x.pdf', { version: 1, pdfName: 'x' })
+    expect(parse(text).annotations[0].color).toBe('green')
+    // yellow 缺省不写入,旧文件不变
+    const b = { ...a, id: genId(), color: 'yellow' }
+    const text2 = upsertAnnotation(text, b as any, '/tmp/x.pdf', { version: 1, pdfName: 'x' })
+    expect(text2).not.toContain('"color":"yellow"')
+    expect(parse(text2).annotations.find((x) => x.id === b.id)?.color).toBe('yellow')
+  })
+})

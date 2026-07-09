@@ -11,7 +11,7 @@
  */
 import { onMounted, onBeforeUnmount, ref, watch, nextTick } from 'vue'
 import {
-  store, controllers, documents, annotManagers, initStore, newTab, closeTab,
+  store, controllers, documents, annotManagers, epubBooks, initStore, newTab, closeTab,
   addRecent, savePosition, restorePosition, effectiveTheme,
 } from './store'
 import { platform, isTauri, isMobile } from './platform'
@@ -69,6 +69,34 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
   }
   const tab = newTab(path)
   await nextTick() // let the scroll host for this tab mount
+
+  // ── EPUB:只有图书视图,无 pdf.js 管线 ──
+  if (tab.kind === 'epub') {
+    try {
+      const meta = await platform().fileMeta(path)
+      const bytes = await platform().readChunk(path, 0, meta.size)
+      const { EpubBook } = await import('./book/epub')
+      const bk = new EpubBook()
+      bk.load(bytes)
+      epubBooks.set(tab.id, bk)
+      if (bk.title) tab.name = bk.title
+      const mgr = new AnnotationManager(path, tab.name, false)
+      annotManagers.set(tab.id, mgr)
+      mgr.onChange = () => { store.docTick++ }
+      await mgr.load()
+      tab.sidecarLocation = mgr.sidecarLocation
+      const pos = store.positions[path]
+      tab.currentPage = jumpTo?.page ?? pos?.page ?? 1
+      tab.bookMode = true
+      store.docTick++
+      addRecent(path)
+    } catch (err) {
+      tab.loadError = String((err as Error)?.message ?? err)
+      showToast(t('app.openFail', { msg: tab.loadError }))
+    }
+    return
+  }
+
   try {
     const askPassword = (retry: boolean): Promise<string | null> => {
       tab.encrypted = true
@@ -115,6 +143,8 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
 
 function jumpAfterLoad(tabId: number, jump: { page: number; annot?: string }): void {
   setTimeout(() => {
+    const tab = store.tabs.find((x) => x.id === tabId)
+    if (tab?.kind === 'epub') { tab.currentPage = jump.page; return }
     const ctrl = controllers.get(tabId)
     if (!ctrl) return
     if (jump.annot) ctrl.flashAnnotation(jump.annot)
@@ -150,8 +180,8 @@ async function highlightSelection(color: string): Promise<void> {
   const tab = store.activeTab
   if (!sel || !tab) return
   const mgr = annotManagers.get(tab.id)
-  const ctrl = controllers.get(tab.id)
-  if (!mgr || !ctrl) return
+  const ctrl = controllers.get(tab.id) // epub 标签页没有 controller
+  if (!mgr) return
   // encrypted privacy prompt — once per doc
   if (tab.encrypted && !privacyAsked.has(tab.id)) {
     privacyAsked.add(tab.id)
@@ -162,7 +192,8 @@ async function highlightSelection(color: string): Promise<void> {
   }
   try {
     await mgr.addFromSelection(sel, color)
-    ctrl.clearSelection()
+    if (ctrl) ctrl.clearSelection()
+    else { window.getSelection()?.removeAllRanges(); selection.value = null }
     showToast(t('app.highlighted', { file: mgr.sidecarLocation.split('/').pop()! }))
   } catch (err) {
     showToast(t('app.annotSaveFail', { msg: (err as Error).message }))
@@ -191,7 +222,7 @@ function onKey(e: KeyboardEvent): void {
   else if (mod && e.key === ',') { e.preventDefault(); settingsOpen.value = !settingsOpen.value }
   else if (mod && e.key === 'b') { e.preventDefault(); store.settings.sidebarOpen = !store.settings.sidebarOpen }
   else if (!mod && e.key === 'Escape') { searchOpen.value = false; settingsOpen.value = false }
-  else if (!mod && tab && ctrl && !isTyping(e)) {
+  else if (!mod && tab && ctrl && !tab.bookMode && !isTyping(e)) {
     if (e.key === 'j' || e.key === 'PageDown') ctrl.scrollToPage(Math.min(tab.currentPage + 1, tab.numPages))
     else if (e.key === 'k' || e.key === 'PageUp') ctrl.scrollToPage(Math.max(tab.currentPage - 1, 1))
     else if (e.key === 'Home') ctrl.scrollToPage(1)
@@ -235,7 +266,7 @@ async function exportMd(): Promise<void> {
 // ── 图书模式 ──
 function toggleBookMode(): void {
   const tab = store.activeTab
-  if (!tab) return
+  if (!tab || tab.kind === 'epub') return
   tab.bookMode = !tab.bookMode
   if (!tab.bookMode) {
     // 回原版式:跳到图书里读到的页
@@ -340,6 +371,8 @@ onMounted(async () => {
     ocr: await import('./ocr'),
     openImageOcr: (p: string) => { imageOcrPath.value = p },
     toggleBookMode,
+    epubBooks,
+    closeTab,
   }
 
   if (isTauri()) {
@@ -399,14 +432,14 @@ watch(() => store.settings.theme, () => {
     <TabBar @new="pickAndOpen" @close="onCloseTab" />
     <div class="app-main">
       <div
-        v-if="store.settings.sidebarOpen && store.activeTab"
+        v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind !== 'epub'"
         class="sidebar-backdrop"
         @click="store.settings.sidebarOpen = false"
       ></div>
-      <Sidebar v-if="store.settings.sidebarOpen && store.activeTab" />
+      <Sidebar v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind !== 'epub'" />
       <div class="app-content">
         <Toolbar
-          v-if="store.activeTab"
+          v-if="store.activeTab && store.activeTab.kind !== 'epub'"
           @search="searchOpen = !searchOpen"
           @settings="settingsOpen = true"
           @print="doPrint"
@@ -437,6 +470,7 @@ watch(() => store.settings.theme, () => {
             v-if="tab.bookMode"
             v-show="tab.id === store.activeTabId"
             :tab-id="tab.id"
+            :source="tab.kind"
             @selection="(s) => (selection = s)"
             @ocr="ocrOpen = true"
           />

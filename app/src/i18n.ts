@@ -162,6 +162,11 @@ const zhCN: Dict = {
   'bk.sizeLabel': '字号',
   'bk.lhLabel': '行距',
   'bk.widthLabel': '版心',
+  'bk.layoutLabel': '布局',
+  'bk.layout.auto': '自动(桌面翻页/手机滚动)',
+  'bk.layout.paged': '翻页(宽屏双页)',
+  'bk.layout.scroll': '滚动',
+  'bk.toc': '目录',
 }
 
 const zhTW: Dict = {
@@ -297,6 +302,11 @@ const zhTW: Dict = {
   'bk.sizeLabel': '字號',
   'bk.lhLabel': '行距',
   'bk.widthLabel': '版心',
+  'bk.layoutLabel': '佈局',
+  'bk.layout.auto': '自動(桌面翻頁/手機捲動)',
+  'bk.layout.paged': '翻頁(寬螢幕雙頁)',
+  'bk.layout.scroll': '捲動',
+  'bk.toc': '目錄',
 }
 
 const en: Dict = {
@@ -432,6 +442,11 @@ const en: Dict = {
   'bk.sizeLabel': 'Size',
   'bk.lhLabel': 'Line height',
   'bk.widthLabel': 'Width',
+  'bk.layoutLabel': 'Layout',
+  'bk.layout.auto': 'Auto (paged on desktop)',
+  'bk.layout.paged': 'Paged (two-up on wide screens)',
+  'bk.layout.scroll': 'Scroll',
+  'bk.toc': 'Contents',
 }
 
 const ja: Dict = {
@@ -567,6 +582,11 @@ const ja: Dict = {
   'bk.sizeLabel': 'サイズ',
   'bk.lhLabel': '行間',
   'bk.widthLabel': '幅',
+  'bk.layoutLabel': 'レイアウト',
+  'bk.layout.auto': '自動(デスクトップはページめくり)',
+  'bk.layout.paged': 'ページめくり(ワイドは見開き)',
+  'bk.layout.scroll': 'スクロール',
+  'bk.toc': '目次',
 }
 
 const DICTS: Record<Locale, Dict> = { 'zh-CN': zhCN, 'zh-TW': zhTW, en, ja }

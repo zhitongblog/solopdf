@@ -29,7 +29,7 @@ export class TauriBackend implements PlatformBackend {
   async pickFiles(): Promise<string[] | null> {
     const sel = await open({
       multiple: true,
-      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      filters: [{ name: 'PDF / EPUB', extensions: ['pdf', 'epub'] }],
     })
     if (!sel) return null
     return Array.isArray(sel) ? sel : [sel]
