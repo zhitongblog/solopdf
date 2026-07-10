@@ -11,14 +11,14 @@
  */
 import { ref, shallowRef, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import type { ReflowBlock } from '@solopdf/core'
-import { store, documents, annotManagers, epubBooks } from '../store'
+import { store, documents, annotManagers, epubBooks, txtBooks } from '../store'
 import { isMobile } from '../platform'
 import { t } from '../i18n'
 import type { SelectionInfo } from '../viewer/controller'
 import { extractBook } from '../book/extract'
 import { applyMarks } from '../book/marks'
 
-const props = defineProps<{ tabId: number; source: 'pdf' | 'epub' }>()
+const props = defineProps<{ tabId: number; source: 'pdf' | 'epub' | 'txt' }>()
 const emit = defineEmits<{ selection: [sel: SelectionInfo | null]; ocr: [] }>()
 
 const SECTION = 120
@@ -78,6 +78,14 @@ const totalSections = computed(() =>
     ? (epub.value?.chapters.length ?? 0)
     : Math.ceil(blocks.value.length / SECTION),
 )
+/** 章节目录(epub 用解析出的 nav/NCX,txt 用章节检测结果) */
+const tocEntries = computed(() =>
+  props.source === 'epub'
+    ? (epub.value?.toc ?? [])
+    : props.source === 'txt'
+      ? (txtBooks.get(props.tabId)?.toc ?? [])
+      : [],
+)
 const pdfSections = computed(() => {
   const out: { idx: number; blocks: ReflowBlock[]; start: number }[] = []
   for (let i = 0; i < blocks.value.length; i += SECTION) {
@@ -89,6 +97,7 @@ const pdfSections = computed(() => {
 /** 页码(pdf=原页;epub=章序) → 节序 + 块序 */
 function locate(page: number): { sec: number; block?: number } {
   if (props.source === 'epub') return { sec: Math.min(Math.max(page - 1, 0), totalSections.value - 1) }
+  // txt/pdf 共用 blocks 定位
   const bi = blocks.value.findIndex((b) => b.page >= page)
   const i = bi < 0 ? blocks.value.length - 1 : bi
   return { sec: Math.floor(i / SECTION), block: i }
@@ -108,6 +117,11 @@ onMounted(async () => {
         empty.value = res.empty
       } finally { extracting.value = false }
     }
+  } else if (props.source === 'txt') {
+    const book = txtBooks.get(props.tabId)
+    blocks.value = book?.blocks ?? []
+    empty.value = !blocks.value.length
+    extracting.value = false
   } else {
     empty.value = (epub.value?.probeTextLength() ?? 0) < 10
     extracting.value = false
@@ -379,7 +393,7 @@ function tocJump(chapter: number): void {
 
     <!-- 滚动布局 -->
     <div v-else-if="layout === 'scroll'" class="bk-page">
-      <template v-if="source === 'pdf'">
+      <template v-if="source !== 'epub'">
         <template v-for="s in pdfSections" :key="s.idx">
           <div v-if="visibleSections.has(s.idx)" :data-section="s.idx" class="bk-section">
             <component
@@ -407,7 +421,7 @@ function tocJump(chapter: number): void {
     <!-- 翻页布局:当前节多列排版,横移翻页 -->
     <div v-else class="bk-paged-viewport">
       <div ref="pagedContent" class="bk-paged-content" :style="pagedStyle">
-        <template v-if="source === 'pdf'">
+        <template v-if="source !== 'epub'">
           <component
             v-for="(b, i) in pdfSections[secIdx]?.blocks ?? []" :key="(pdfSections[secIdx]?.start ?? 0) + i"
             :is="b.type === 'heading' ? 'h' + Math.min((b.level ?? 3) + 1, 6) : 'p'"
@@ -424,12 +438,12 @@ function tocJump(chapter: number): void {
       </div>
     </div>
 
-    <button v-if="source === 'epub' && epub?.toc.length" class="bk-toc-btn" :title="t('bk.toc')" @click.stop="tocOpen = !tocOpen">☰</button>
+    <button v-if="tocEntries.length" class="bk-toc-btn" :title="t('bk.toc')" @click.stop="tocOpen = !tocOpen">☰</button>
     <button class="bk-aa" :title="t('bk.settings')" @click.stop="settingsOpen = !settingsOpen">Aa</button>
 
     <div v-if="tocOpen" class="bk-settings bk-toc" @click.stop>
       <div
-        v-for="(e, i) in epub!.toc" :key="i"
+        v-for="(e, i) in tocEntries" :key="i"
         class="bk-toc-item" :style="{ paddingLeft: 8 + e.depth * 14 + 'px' }"
         @click="tocJump(e.chapter)"
       >{{ e.title }}</div>

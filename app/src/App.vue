@@ -11,7 +11,7 @@
  */
 import { onMounted, onBeforeUnmount, ref, watch, nextTick } from 'vue'
 import {
-  store, controllers, documents, annotManagers, epubBooks, initStore, newTab, closeTab,
+  store, controllers, documents, annotManagers, epubBooks, txtBooks, initStore, newTab, closeTab,
   addRecent, savePosition, restorePosition, effectiveTheme,
 } from './store'
 import { platform, isTauri, isMobile } from './platform'
@@ -69,6 +69,38 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
   }
   const tab = newTab(path)
   await nextTick() // let the scroll host for this tab mount
+
+  // ── TXT:解码(UTF-8 → GBK 回退)→ 章节/段落 → 图书视图 ──
+  if (tab.kind === 'txt') {
+    try {
+      const meta = await platform().fileMeta(path)
+      const bytes = await platform().readChunk(path, 0, meta.size)
+      let text: string
+      try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+      } catch {
+        text = new TextDecoder('gb18030').decode(bytes) // 网文 TXT 常见 GBK/GB18030
+      }
+      const { txtToBlocks } = await import('@solopdf/core')
+      const book = txtToBlocks(text)
+      txtBooks.set(tab.id, book)
+      tab.numPages = Math.max(book.toc.length, 1)
+      const mgr = new AnnotationManager(path, tab.name, false)
+      annotManagers.set(tab.id, mgr)
+      mgr.onChange = () => { store.docTick++ }
+      await mgr.load()
+      tab.sidecarLocation = mgr.sidecarLocation
+      const pos = store.positions[path]
+      tab.currentPage = jumpTo?.page ?? pos?.page ?? 1
+      tab.bookMode = true
+      store.docTick++
+      addRecent(path)
+    } catch (err) {
+      tab.loadError = String((err as Error)?.message ?? err)
+      showToast(t('app.openFail', { msg: tab.loadError }))
+    }
+    return
+  }
 
   // ── EPUB:只有图书视图,无 pdf.js 管线 ──
   if (tab.kind === 'epub') {
@@ -144,7 +176,7 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
 function jumpAfterLoad(tabId: number, jump: { page: number; annot?: string }): void {
   setTimeout(() => {
     const tab = store.tabs.find((x) => x.id === tabId)
-    if (tab?.kind === 'epub') { tab.currentPage = jump.page; return }
+    if (tab && tab.kind !== 'pdf') { tab.currentPage = jump.page; return }
     const ctrl = controllers.get(tabId)
     if (!ctrl) return
     if (jump.annot) ctrl.flashAnnotation(jump.annot)
@@ -266,7 +298,7 @@ async function exportMd(): Promise<void> {
 // ── 图书模式 ──
 function toggleBookMode(): void {
   const tab = store.activeTab
-  if (!tab || tab.kind === 'epub') return
+  if (!tab || tab.kind !== 'pdf') return
   tab.bookMode = !tab.bookMode
   if (!tab.bookMode) {
     // 回原版式:跳到图书里读到的页
@@ -432,14 +464,14 @@ watch(() => store.settings.theme, () => {
     <TabBar @new="pickAndOpen" @close="onCloseTab" />
     <div class="app-main">
       <div
-        v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind !== 'epub'"
+        v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind === 'pdf'"
         class="sidebar-backdrop"
         @click="store.settings.sidebarOpen = false"
       ></div>
-      <Sidebar v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind !== 'epub'" />
+      <Sidebar v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind === 'pdf'" />
       <div class="app-content">
         <Toolbar
-          v-if="store.activeTab && store.activeTab.kind !== 'epub'"
+          v-if="store.activeTab && store.activeTab.kind === 'pdf'"
           @search="searchOpen = !searchOpen"
           @settings="settingsOpen = true"
           @print="doPrint"

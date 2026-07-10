@@ -25,8 +25,8 @@ export interface TabState {
   formsDirty: boolean
   /** 图书阅读模式(重排视图) */
   bookMode: boolean
-  /** 文档类型:EPUB 只有图书视图 */
-  kind: 'pdf' | 'epub'
+  /** 文档类型:EPUB/TXT 只有图书视图 */
+  kind: 'pdf' | 'epub' | 'txt'
 }
 
 export interface BookSettings {
@@ -100,6 +100,7 @@ export const controllers = new Map<number, PdfViewerController>()
 export const documents = new Map<number, PDFDocumentProxy>()
 export const annotManagers = new Map<number, AnnotationManager>()
 export const epubBooks = new Map<number, import('./book/epub').EpubBook>()
+export const txtBooks = new Map<number, import('@solopdf/core').TxtBook>()
 
 export function effectiveTheme(): 'light' | 'dark' {
   if (store.settings.theme !== 'system') return store.settings.theme
@@ -154,7 +155,9 @@ export function newTab(path: string): TabState {
     loadError: null,
     formsDirty: false,
     bookMode: false,
-    kind: path.toLowerCase().endsWith('.epub') ? 'epub' : 'pdf',
+    kind: path.toLowerCase().endsWith('.epub') ? 'epub'
+      : path.toLowerCase().endsWith('.txt') ? 'txt'
+      : 'pdf',
   }
   store.tabs.push(t)
   store.activeTabId = t.id
@@ -172,6 +175,7 @@ export function closeTab(id: number): void {
   annotManagers.delete(id)
   epubBooks.get(id)?.destroy()
   epubBooks.delete(id)
+  txtBooks.delete(id)
   store.tabs.splice(i, 1)
   if (store.activeTabId === id) {
     store.activeTabId = store.tabs[Math.min(i, store.tabs.length - 1)]?.id ?? 0
@@ -184,7 +188,7 @@ export function addRecent(path: string): void {
 
 export function savePosition(tab: TabState): void {
   const ctrl = controllers.get(tab.id)
-  if (!ctrl && tab.kind !== 'epub') return
+  if (!ctrl && tab.kind === 'pdf') return
   const pos = ctrl ? ctrl.getPosition() : { page: tab.currentPage, ratio: 0 }
   store.positions[tab.path] = pos
   const h = store.hashes[tab.path]
