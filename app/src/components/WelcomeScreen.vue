@@ -3,6 +3,15 @@ import { store } from '../store'
 import { isTauri } from '../platform'
 import { t } from '../i18n'
 defineEmits<{ open: []; openPath: [path: string]; ocrImage: [] }>()
+
+async function openDoaipm(): Promise<void> {
+  if (isTauri()) {
+    const { openUrl } = await import('@tauri-apps/plugin-opener')
+    await openUrl('https://doaipm.com')
+  } else {
+    window.open('https://doaipm.com', '_blank')
+  }
+}
 </script>
 
 <template>
@@ -23,5 +32,6 @@ defineEmits<{ open: []; openPath: [path: string]; ocrImage: [] }>()
       </div>
     </div>
     <p class="drop-hint">{{ t('wc.hint') }}</p>
+    <a class="wc-brand" href="javascript:void 0" @click.prevent="openDoaipm">{{ t('wc.brand') }}</a>
   </div>
 </template>

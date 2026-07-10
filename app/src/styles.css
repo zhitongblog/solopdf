@@ -421,3 +421,9 @@ h4.bk-block { font-size: 1.15em; }
 .bk-toc { bottom: 126px; max-height: 55vh; overflow-y: auto; }
 .bk-toc-item { padding: 7px 8px; cursor: pointer; border-radius: 6px; font-size: 13px; }
 .bk-toc-item:hover { background: var(--bg); }
+
+.welcome .wc-brand {
+  margin-top: 26px; font-size: 12px; color: var(--fg-dim);
+  text-decoration: none; cursor: pointer;
+}
+.welcome .wc-brand:hover { color: var(--accent); text-decoration: underline; }
