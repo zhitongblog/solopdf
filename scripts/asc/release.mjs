@@ -73,7 +73,8 @@ try {
 const allVers = (await api('GET', `/v1/apps/${APP}/appStoreVersions?limit=20`)).data;
 const verIds = {};
 for (const [platform, plan] of Object.entries(M.platforms)) {
-  let ver = allVers.find((v) => v.attributes.platform === platform && v.attributes.appStoreState === 'PREPARE_FOR_SUBMISSION');
+  const EDITABLE = ['PREPARE_FOR_SUBMISSION', 'REJECTED', 'DEVELOPER_REJECTED', 'METADATA_REJECTED', 'INVALID_BINARY'];
+  let ver = allVers.find((v) => v.attributes.platform === platform && EDITABLE.includes(v.attributes.appStoreState));
   if (!ver) {
     ver = (await api('POST', '/v1/appStoreVersions', { data: { type: 'appStoreVersions',
       attributes: { platform, versionString: plan.versionString },

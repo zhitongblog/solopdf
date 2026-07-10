@@ -91,7 +91,15 @@ export const reviewContact = {
   contactPhone:     process.env.ASC_CONTACT_PHONE || '+86 17326068045',
   contactEmail:     process.env.ASC_CONTACT_EMAIL || 'lixd220@gmail.com',
   demoAccountRequired: false,
-  notes: `SoloPDF is a fully local PDF reader (desktop-class engine on both macOS and iOS). No account is needed; there is no server component. To test: open any PDF (on iOS, via the Files picker or the bundled Files-app integration), highlight text to see the Markdown sidecar note, and try the outline / thumbnails / search / dark mode. The app collects no data of any kind — see https://solopdf.doaipm.com/privacy/.`,
+  notes: `SoloPDF is a fully local PDF reader (desktop-class engine on both macOS and iOS). No account is needed; there is no server component.
+
+SAMPLE PDF (per your request): download https://solopdf.doaipm.com/sample.pdf — on iOS, open Safari, download the file, then in SoloPDF tap "Open PDF" and pick it from Files > Downloads. On macOS, use File > Open. You can also use any of your own PDFs.
+
+To test: open the sample PDF, highlight text to see the Markdown sidecar note, try the outline / thumbnails / search / dark mode / book reading mode (📖), and OCR on scanned documents.
+
+Support page with contact information: https://solopdf.doaipm.com/#support (email lixd220@gmail.com, GitHub issues).
+
+Regarding the previous macOS rejection (2.1a blank window): the root cause was a missing com.apple.security.network.client entitlement, which prevented WKWebView's networking process from starting under the App Sandbox. This build (1.3.1) includes the corrected entitlements; we reproduced the blank window locally with the old entitlements and verified the fix. The app itself still makes zero network requests.`,
 };
 
 // Age rating → 4+ (everything none/false). Apple's schema requires ALL these keys.
@@ -121,6 +129,6 @@ export const screenshots = {
 
 // Per-platform release plan: store version string must match the attached build's train.
 export const platforms = {
-  IOS:    { versionString: '0.1.1', buildVersion: '0.1.1' },
-  MAC_OS: { versionString: '1.0.0', buildVersion: '1.0.0' },
+  IOS:    { versionString: '0.4.0', buildVersion: '0.4.0' },
+  MAC_OS: { versionString: '1.3.1', buildVersion: '1.3.1' },
 };

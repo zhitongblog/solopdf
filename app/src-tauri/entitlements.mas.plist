@@ -24,6 +24,20 @@
 	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
 	<true/>
 
+	<!-- WKWebView 的 Networking 子进程在沙盒下没有它起不来 → 启动白屏。
+	     SoloPDF MAS 1.0.0 被拒(2.1a blank window)的根因;本地以同款
+	     entitlements 重签复现并验证修复。应用本身仍零网络请求。 -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+
+	<!-- 打印(⌘P 走 WKWebView 原生打印,沙盒需显式授权)。 -->
+	<key>com.apple.security.print</key>
+	<true/>
+
+	<!-- 安全作用域书签:重开"最近文件"/恢复阅读位置。 -->
+	<key>com.apple.security.files.bookmarks.app-scope</key>
+	<true/>
+
 	<!-- User opens PDFs via the open dialog / drag-drop, and saves exported
 	     Markdown / filled-form copies via the save dialog. Sidecar writes to
 	     unauthorized folders fall back to the app container (built-in). -->
