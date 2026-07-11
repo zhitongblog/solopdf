@@ -127,6 +127,6 @@ export const screenshots = {
 
 // Per-platform release plan: store version string must match the attached build's train.
 export const platforms = {
-  IOS:    { versionString: '0.4.2', buildVersion: '0.4.2' },
-  MAC_OS: { versionString: '1.3.1', buildVersion: '1.3.1' },
+  IOS:    { versionString: '0.4.4', buildVersion: '0.4.4' },
+  MAC_OS: { versionString: '1.3.2', buildVersion: '1.3.2' },
 };
