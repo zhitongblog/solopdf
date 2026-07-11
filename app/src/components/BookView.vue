@@ -19,7 +19,7 @@ import { extractBook } from '../book/extract'
 import { applyMarks } from '../book/marks'
 
 const props = defineProps<{ tabId: number; source: 'pdf' | 'epub' | 'txt' }>()
-const emit = defineEmits<{ selection: [sel: SelectionInfo | null]; ocr: [] }>()
+const emit = defineEmits<{ selection: [sel: SelectionInfo | null]; ocr: []; chrome: [] }>()
 
 const SECTION = 120
 
@@ -438,6 +438,7 @@ function tocJump(chapter: number): void {
       </div>
     </div>
 
+    <button class="bk-chrome-btn" :title="t('bk.chrome')" @click.stop="emit('chrome')">‹</button>
     <button v-if="tocEntries.length" class="bk-toc-btn" :title="t('bk.toc')" @click.stop="tocOpen = !tocOpen">☰</button>
     <button class="bk-aa" :title="t('bk.settings')" @click.stop="settingsOpen = !settingsOpen">Aa</button>
 

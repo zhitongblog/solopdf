@@ -40,6 +40,7 @@ const settingsOpen = ref(false)
 const ocrOpen = ref(false)
 const imageOcrPath = ref('')
 const imageOcrBytes = ref<{ bytes: Uint8Array; name: string } | null>(null)
+const chromeReveal = ref(false) // 图书模式下临时唤出标签栏/工具栏
 const toast = ref('')
 const noTextBanner = ref(false)
 const pwRequest = ref<{ retry: boolean; resolve: (pw: string | null) => void } | null>(null)
@@ -300,6 +301,7 @@ function toggleBookMode(): void {
   const tab = store.activeTab
   if (!tab || tab.kind !== 'pdf') return
   tab.bookMode = !tab.bookMode
+  chromeReveal.value = false
   if (!tab.bookMode) {
     // 回原版式:跳到图书里读到的页
     selection.value = null
@@ -461,7 +463,7 @@ watch(() => store.settings.theme, () => {
 
 <template>
   <div class="app">
-    <TabBar @new="pickAndOpen" @close="onCloseTab" />
+    <TabBar v-if="!store.activeTab?.bookMode || chromeReveal" @new="pickAndOpen" @close="onCloseTab" />
     <div class="app-main">
       <div
         v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind === 'pdf'"
@@ -471,7 +473,7 @@ watch(() => store.settings.theme, () => {
       <Sidebar v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind === 'pdf'" />
       <div class="app-content">
         <Toolbar
-          v-if="store.activeTab && store.activeTab.kind === 'pdf'"
+          v-if="store.activeTab && store.activeTab.kind === 'pdf' && (!store.activeTab.bookMode || chromeReveal)"
           @search="searchOpen = !searchOpen"
           @settings="settingsOpen = true"
           @print="doPrint"
@@ -505,6 +507,7 @@ watch(() => store.settings.theme, () => {
             :source="tab.kind"
             @selection="(s) => (selection = s)"
             @ocr="ocrOpen = true"
+            @chrome="chromeReveal = !chromeReveal"
           />
         </template>
         <div v-if="noTextBanner" class="notext-banner">

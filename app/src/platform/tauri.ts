@@ -32,7 +32,15 @@ export class TauriBackend implements PlatformBackend {
       filters: [{ name: 'Documents', extensions: ['pdf', 'epub', 'txt'] }],
     })
     if (!sel) return null
-    return Array.isArray(sel) ? sel : [sel]
+    // 平台差异(App Review 2.1a "error when open a PDF" 的根因):
+    //  - 桌面返回 string / string[]
+    //  - iOS/Android 返回 FileResponse 对象(路径在 .path,且可能是 file:// URL)
+    // 直接把对象/URL 交给 fs 就是 ENOENT。统一收敛成纯路径:
+    const items = Array.isArray(sel) ? sel : [sel]
+    return items
+      .map((it) => (typeof it === 'string' ? it : ((it as { path?: string }).path ?? '')))
+      .filter(Boolean)
+      .map((s) => (s.startsWith('file://') ? decodeURIComponent(s.replace(/^file:\/\//, '')) : s))
   }
 
   async loadState(): Promise<Record<string, unknown>> {
