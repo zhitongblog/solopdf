@@ -19,18 +19,27 @@ const appInfo = (await api('GET', `/v1/apps/${APP}/appInfos`)).data
 const ilocs = (await api('GET', `/v1/appInfos/${appInfo.id}/appInfoLocalizations?limit=50`)).data;
 for (const [locale, a] of Object.entries(M.appInfoLocalizations)) {
   const ex = ilocs.find((l) => l.attributes.locale === locale);
-  if (ex) await api('PATCH', `/v1/appInfoLocalizations/${ex.id}`, { data: { type: 'appInfoLocalizations', id: ex.id, attributes: a } });
-  else await api('POST', '/v1/appInfoLocalizations', { data: { type: 'appInfoLocalizations', attributes: { locale, ...a },
-    relationships: { appInfo: { data: { type: 'appInfos', id: appInfo.id } } } } });
-  log('appInfo loc', locale);
+  try {
+    if (ex) await api('PATCH', `/v1/appInfoLocalizations/${ex.id}`, { data: { type: 'appInfoLocalizations', id: ex.id, attributes: a } });
+    else await api('POST', '/v1/appInfoLocalizations', { data: { type: 'appInfoLocalizations', attributes: { locale, ...a },
+      relationships: { appInfo: { data: { type: 'appInfos', id: appInfo.id } } } } });
+    log('appInfo loc', locale);
+  } catch (e) {
+    // 已上架后 name 等字段锁定 — 保持现状即可
+    log('appInfo loc', locale, 'skipped:', String(e.message).slice(0, 60));
+  }
 }
-await api('PATCH', `/v1/appInfos/${appInfo.id}`, { data: { type: 'appInfos', id: appInfo.id,
-  relationships: { primaryCategory: { data: { type: 'appCategories', id: M.appFields.primaryCategory } } } } });
-await api('PATCH', `/v1/apps/${APP}`, { data: { type: 'apps', id: APP, attributes: { contentRightsDeclaration: M.appFields.contentRightsDeclaration } } });
-log('category / content rights set');
+try {
+  await api('PATCH', `/v1/appInfos/${appInfo.id}`, { data: { type: 'appInfos', id: appInfo.id,
+    relationships: { primaryCategory: { data: { type: 'appCategories', id: M.appFields.primaryCategory } } } } });
+  await api('PATCH', `/v1/apps/${APP}`, { data: { type: 'apps', id: APP, attributes: { contentRightsDeclaration: M.appFields.contentRightsDeclaration } } });
+  log('category / content rights set');
+} catch (e) { log('app-level fields skipped (locked after release):', String(e.message).slice(0, 60)); }
 
-const decl = (await api('GET', `/v1/appInfos/${appInfo.id}/ageRatingDeclaration`)).data;
-if (decl) { await api('PATCH', `/v1/ageRatingDeclarations/${decl.id}`, { data: { type: 'ageRatingDeclarations', id: decl.id, attributes: M.ageRating } }); log('age rating 4+'); }
+try {
+  const decl = (await api('GET', `/v1/appInfos/${appInfo.id}/ageRatingDeclaration`)).data;
+  if (decl) { await api('PATCH', `/v1/ageRatingDeclarations/${decl.id}`, { data: { type: 'ageRatingDeclarations', id: decl.id, attributes: M.ageRating } }); log('age rating 4+'); }
+} catch (e) { log('age rating skipped:', String(e.message).slice(0, 60)); }
 
 // ---------- free pricing (one-time; skips if a schedule already exists) ----------
 try {

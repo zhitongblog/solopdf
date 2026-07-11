@@ -91,15 +91,13 @@ export const reviewContact = {
   contactPhone:     process.env.ASC_CONTACT_PHONE || '+86 17326068045',
   contactEmail:     process.env.ASC_CONTACT_EMAIL || 'lixd220@gmail.com',
   demoAccountRequired: false,
-  notes: `SoloPDF is a fully local PDF reader (desktop-class engine on both macOS and iOS). No account is needed; there is no server component.
+  notes: `SoloPDF is a fully local PDF reader. No account needed, no server component.
 
-SAMPLE PDF (per your request): download https://solopdf.doaipm.com/sample.pdf — on iOS, open Safari, download the file, then in SoloPDF tap "Open PDF" and pick it from Files > Downloads. On macOS, use File > Open. You can also use any of your own PDFs.
+FIX FOR THE PREVIOUS REJECTION (2.1a "error when open a PDF document"): the iOS file picker returned file:// URLs which our file layer treated as raw paths, so opening any picked document failed. We reproduced your exact flow (Open PDF > Files picker > select a PDF) on an iPad simulator, fixed the path normalization, and verified end-to-end that picked PDFs now open correctly (build 0.4.2).
 
-To test: open the sample PDF, highlight text to see the Markdown sidecar note, try the outline / thumbnails / search / dark mode / book reading mode (📖), and OCR on scanned documents.
+SAMPLE PDF: https://solopdf.doaipm.com/sample.pdf — download in Safari, then in SoloPDF tap "Open PDF" and pick it from Files > Downloads (or use any of your own PDFs).
 
-Support page with contact information: https://solopdf.doaipm.com/#support (email lixd220@gmail.com, GitHub issues).
-
-Regarding the previous macOS rejection (2.1a blank window): the root cause was a missing com.apple.security.network.client entitlement, which prevented WKWebView's networking process from starting under the App Sandbox. This build (1.3.1) includes the corrected entitlements; we reproduced the blank window locally with the old entitlements and verified the fix. The app itself still makes zero network requests.`,
+Support page: https://solopdf.doaipm.com/#support (email lixd220@gmail.com).`,
 };
 
 // Age rating → 4+ (everything none/false). Apple's schema requires ALL these keys.
@@ -129,6 +127,6 @@ export const screenshots = {
 
 // Per-platform release plan: store version string must match the attached build's train.
 export const platforms = {
-  IOS:    { versionString: '0.4.0', buildVersion: '0.4.0' },
+  IOS:    { versionString: '0.4.2', buildVersion: '0.4.2' },
   MAC_OS: { versionString: '1.3.1', buildVersion: '1.3.1' },
 };
