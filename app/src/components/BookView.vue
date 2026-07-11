@@ -37,6 +37,8 @@ const secIdx = ref(0)
 const pageIdx = ref(0)
 const pageCount = ref(1)
 let pendingLastPage = false
+/** syncPagedPage/onScroll 自己写入的块序 —— bookBlock watcher 据此忽略内部更新 */
+let lastInternalBlock = -1
 let cancelled = false
 let io: IntersectionObserver | null = null
 let ro: ResizeObserver | null = null
@@ -147,7 +149,7 @@ onMounted(async () => {
   window.addEventListener('keydown', onKey, { capture: true })
   ro = new ResizeObserver(() => { if (layout.value === 'paged') void remeasure(true) })
   if (host.value) ro.observe(host.value)
-  await enterAt(tab.value?.currentPage ?? 1)
+  await enterAt(tab.value?.currentPage ?? 1, tab.value?.bookBlock || undefined)
 })
 
 onBeforeUnmount(() => {
@@ -158,22 +160,27 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey, { capture: true } as any)
 })
 
-async function enterAt(page: number): Promise<void> {
-  const { sec } = locate(page)
+async function enterAt(page: number, block?: number): Promise<void> {
+  // block(块序)可选:TXT 的 page 粒度是"章",恢复进度时用块精确定位
+  const sec = block != null && props.source !== 'epub'
+    ? Math.min(Math.floor(block / SECTION), Math.max(totalSections.value - 1, 0))
+    : locate(page).sec
+  const sel = block != null && props.source !== 'epub' ? `[data-block="${block}"]` : `[data-page="${page}"]`
   if (layout.value === 'scroll') {
     if (!visibleSections.value.has(sec)) {
       const next = new Set(visibleSections.value); next.add(sec); visibleSections.value = next
     }
     await nextTick()
     setupIO()
-    host.value?.querySelector(`[data-page="${page}"]`)?.scrollIntoView({ block: 'start' })
+    host.value?.querySelector(sel)?.scrollIntoView({ block: 'start' })
   } else {
     secIdx.value = sec
     await nextTick()
     await remeasure()
-    // 定位到该页第一块所在列
-    const el = pagedContent.value?.querySelector(`[data-page="${page}"]`) as HTMLElement | null
+    // 定位到目标块所在列
+    const el = pagedContent.value?.querySelector(sel) as HTMLElement | null
     if (el) pageIdx.value = Math.min(Math.floor(el.offsetLeft / stepW()), pageCount.value - 1)
+    syncPagedPage()
     applySectionMarks()
   }
 }
@@ -209,6 +216,8 @@ function onScroll(): void {
       .elementsFromPoint(rect.left + rect.width / 2, rect.top + Math.min(80, rect.height / 3))
       .find((e) => (e as HTMLElement).dataset?.page)
     const p = el ? parseInt((el as HTMLElement).dataset.page!, 10) : NaN
+    const blk = (el as HTMLElement | undefined)?.dataset?.block
+    if (blk) { lastInternalBlock = parseInt(blk, 10); tb.bookBlock = lastInternalBlock }
     if (!Number.isNaN(p) && p !== tb.currentPage) tb.currentPage = p
   })
 }
@@ -221,9 +230,12 @@ function stepW(): number {
 const pagedStyle = computed(() => {
   const w = stepW()
   const cols = doublePage.value ? 2 : 1
+  // 列步进(colW+gap)乘每页列数必须恰好等于页宽 w,否则 translateX
+  // 每翻一页漂移 (colW+gap)*cols-w 像素,页数一多就"两页同框"。
+  // 取 pad=gap/2:第 n 页首列正好落在 n*w+pad。
   const gap = 48
-  const pad = 40
-  const colW = (w - pad * 2 - gap * (cols - 1)) / cols
+  const pad = gap / 2
+  const colW = w / cols - gap
   return {
     columnWidth: `${colW}px`,
     columnGap: `${gap}px`,
@@ -237,13 +249,47 @@ async function remeasure(keepAnchor = false): Promise<void> {
   const el = pagedContent.value
   if (!el) return
   const w = stepW()
+  if (!w) return // 隐藏标签页(display:none)宽为 0,除零会把 pageCount 算成 NaN
   const anchorPage = keepAnchor ? tab.value?.currentPage : undefined
-  pageCount.value = Math.max(1, Math.ceil((el.scrollWidth - 1) / w))
+  // 两遍布局钉宽:先 max-content 让引擎自由排列量出内容量,再把容器
+  // 宽度钉成"恰好 N 列"的精确值(列宽=w/cols-gap,pad=gap/2,故每页
+  // 恰占 w)。不钉宽的话 WebKit 会走"溢出列"路径,而溢出列的横向
+  // 步进是坏的(实测隔一个容器宽才排一列),翻页必然错位/两页同框。
+  const cols = doublePage.value ? 2 : 1
+  const gap = 48
+  const colW = w / cols - gap
+  const widthFor = (k: number) => k * (colW + gap) // 含两侧 pad(2*gap/2)
+  el.style.width = 'max-content'
+  void el.offsetWidth
+  let n = Math.max(cols, Math.round(el.scrollWidth / (colW + gap)))
+  el.style.width = `${widthFor(n)}px`
+  void el.offsetWidth
+  let guard = 0
+  while (el.scrollWidth > el.offsetWidth + 1 && guard++ < 16) { // 溢出 → 加列
+    n += 1
+    el.style.width = `${widthFor(n)}px`
+    void el.offsetWidth
+  }
+  while (n > cols && guard++ < 32) { // 收掉估多了的空尾列
+    el.style.width = `${widthFor(n - 1)}px`
+    void el.offsetWidth
+    if (el.scrollWidth > el.offsetWidth + 1) {
+      el.style.width = `${widthFor(n)}px`
+      void el.offsetWidth
+      break
+    }
+    n -= 1
+  }
+  pageCount.value = Math.max(1, Math.ceil(n / cols))
   if (pendingLastPage) {
     pageIdx.value = pageCount.value - 1
     pendingLastPage = false
   } else if (anchorPage !== undefined) {
-    const a = el.querySelector(`[data-page="${anchorPage}"]`) as HTMLElement | null
+    // 非 epub 优先按块序锚定:TXT 的 page 是章粒度,按 page 锚会拽回章首
+    const blk = props.source !== 'epub' ? tab.value?.bookBlock : 0
+    const a = (blk
+      ? el.querySelector(`[data-block="${blk}"]`)
+      : el.querySelector(`[data-page="${anchorPage}"]`)) as HTMLElement | null
     if (a) pageIdx.value = Math.min(Math.floor(a.offsetLeft / w), pageCount.value - 1)
   }
   pageIdx.value = Math.min(pageIdx.value, pageCount.value - 1)
@@ -264,6 +310,7 @@ function syncPagedPage(): void {
     if (b.offsetLeft <= x + stepW() * 0.6 && (!best || b.offsetLeft > best.offsetLeft)) best = b
   })
   const p = best?.dataset.page ? parseInt(best.dataset.page, 10) : NaN
+  if (best?.dataset.block) { lastInternalBlock = parseInt(best.dataset.block, 10); tb.bookBlock = lastInternalBlock }
   if (!Number.isNaN(p) && p !== tb.currentPage) tb.currentPage = p
 }
 
@@ -285,7 +332,17 @@ async function turn(dir: 1 | -1): Promise<void> {
   syncPagedPage()
 }
 
-function onZoneClick(e: MouseEvent): void {
+/** 面板开着时,点内容区先收面板(该次点击不再翻页) */
+function closePanels(): boolean {
+  if (!settingsOpen.value && !tocOpen.value) return false
+  settingsOpen.value = false
+  tocOpen.value = false
+  return true
+}
+
+function onHostClick(e: MouseEvent): void {
+  if (closePanels()) return
+  if (layout.value !== 'paged') return
   if (window.getSelection()?.toString()) return
   const w = stepW()
   const x = e.clientX - (host.value?.getBoundingClientRect().left ?? 0)
@@ -298,7 +355,10 @@ function onTouchStart(e: TouchEvent): void { touchX = e.touches[0].clientX; touc
 function onTouchEnd(e: TouchEvent): void {
   const dx = e.changedTouches[0].clientX - touchX
   const dy = e.changedTouches[0].clientY - touchY
-  if (Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.5) void turn(dx < 0 ? 1 : -1)
+  if (Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+    if (closePanels()) return
+    void turn(dx < 0 ? 1 : -1)
+  }
 }
 
 function onKey(e: KeyboardEvent): void {
@@ -328,11 +388,20 @@ watch(() => [book.value.size, book.value.lineHeight, book.value.font, book.value
   if (layout.value === 'paged') { await remeasure(true); applySectionMarks() }
   else { await enterAt(tab.value?.currentPage ?? 1); applyAllScrollMarks() }
 })
+// 进度恢复晚于挂载时(fileHash 是异步的):bookBlock 被外部写入 → 定位过去。
+// 内部翻页写入(lastInternalBlock)要忽略,否则翻到"续排页"(该页只有上一块
+// 的续行,无块起点)会被拽回上一页。
+watch(() => tab.value?.bookBlock, (b) => {
+  if (b == null || b === lastInternalBlock || props.source === 'epub') return
+  if (extracting.value || empty.value) return
+  void enterAt(tab.value?.currentPage ?? 1, b)
+})
+
 // 外部跳转(深链/批注跳回):其他代码把 currentPage 改到视口外时跟随
 watch(() => tab.value?.currentPage, (p) => {
   if (p == null || layout.value !== 'paged') return
   const el = pagedContent.value?.querySelector(`[data-page="${p}"]`) as HTMLElement | null
-  if (!el) { void enterAt(p); return }
+  if (!el) { void enterAt(p, tab.value?.bookBlock || undefined); return }
   const idx = Math.floor(el.offsetLeft / stepW())
   if (Math.abs(idx - pageIdx.value) > (doublePage.value ? 1 : 0)) pageIdx.value = Math.min(idx, pageCount.value - 1)
 })
@@ -399,7 +468,7 @@ function tocJump(chapter: number): void {
     :class="{ 'bk-paged': layout === 'paged' }"
     :style="rootStyle"
     @scroll="onScroll"
-    @click="layout === 'paged' ? onZoneClick($event) : undefined"
+    @click="onHostClick"
     @touchstart="layout === 'paged' ? onTouchStart($event) : undefined"
     @touchend="layout === 'paged' ? onTouchEnd($event) : undefined"
   >

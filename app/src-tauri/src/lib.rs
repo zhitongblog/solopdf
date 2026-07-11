@@ -295,13 +295,24 @@ async fn ocr_make_searchable(
     .map_err(|e| e.to_string())?
 }
 
-/// Files/deep-links this process was launched with (file association).
+/// Files/deep-links this process was launched with (file association),
+/// plus any RunEvent::Opened files that arrived before the frontend was
+/// ready(iOS 冷启动"用 SoloPDF 打开":Opened 事件先于前端监听器注册,
+/// 直接 emit 会丢——先缓冲,前端起来后由这里一次性取走)。
 #[tauri::command]
 fn startup_files(state: tauri::State<StartupArgs>) -> Vec<String> {
-    state.0.clone()
+    state.frontend_ready.store(true, std::sync::atomic::Ordering::SeqCst);
+    let mut out = state.argv.clone();
+    out.append(&mut state.pending.lock().unwrap());
+    out
 }
 
-struct StartupArgs(Vec<String>);
+struct StartupArgs {
+    argv: Vec<String>,
+    /// Opened 事件在前端就绪前收到的文件
+    pending: std::sync::Mutex<Vec<String>>,
+    frontend_ready: std::sync::atomic::AtomicBool,
+}
 
 // ── debug bridge (SOLOPDF_DEBUG=1 only) ────────────────────────────────────
 // curl -X POST 127.0.0.1:14310/eval --data 'return 1+1'  → JS eval in webview.
@@ -409,7 +420,11 @@ pub fn run() {
         }
     }));
     builder
-        .manage(StartupArgs(collect_open_args(std::env::args())))
+        .manage(StartupArgs {
+            argv: collect_open_args(std::env::args()),
+            pending: std::sync::Mutex::new(Vec::new()),
+            frontend_ready: std::sync::atomic::AtomicBool::new(false),
+        })
         .manage(std::sync::Arc::new(DebugBridge::new()))
         .invoke_handler(tauri::generate_handler![
             file_meta,
@@ -459,7 +474,12 @@ pub fn run() {
             if let tauri::RunEvent::Opened { urls } = &event {
                 let files: Vec<String> = urls.iter().map(|u| u.to_string()).collect();
                 if !files.is_empty() {
-                    let _ = app.emit("solopdf://open-files", files);
+                    let args = app.state::<StartupArgs>();
+                    if args.frontend_ready.load(std::sync::atomic::Ordering::SeqCst) {
+                        let _ = app.emit("solopdf://open-files", files);
+                    } else {
+                        args.pending.lock().unwrap().extend(files);
+                    }
                 }
             }
             let _ = (&app, &event);

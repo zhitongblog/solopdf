@@ -27,6 +27,9 @@ export interface TabState {
   bookMode: boolean
   /** 文档类型:EPUB/TXT 只有图书视图 */
   kind: 'pdf' | 'epub' | 'txt'
+  /** 图书模式的精确位置(块序):TXT 的 page 粒度是"章",长章恢复
+   *  到章首体验差——存/恢复都以块为准,page 仅作章级回退 */
+  bookBlock: number
 }
 
 export interface BookSettings {
@@ -155,6 +158,7 @@ export function newTab(path: string): TabState {
     loadError: null,
     formsDirty: false,
     bookMode: false,
+    bookBlock: 0,
     kind: path.toLowerCase().endsWith('.epub') ? 'epub'
       : path.toLowerCase().endsWith('.txt') ? 'txt'
       : 'pdf',
@@ -189,7 +193,8 @@ export function addRecent(path: string): void {
 export function savePosition(tab: TabState): void {
   const ctrl = controllers.get(tab.id)
   if (!ctrl && tab.kind === 'pdf') return
-  const pos = ctrl ? ctrl.getPosition() : { page: tab.currentPage, ratio: 0 }
+  // 图书标签页:ratio 字段复用为块序(整数),恢复时精确到段落
+  const pos = ctrl ? ctrl.getPosition() : { page: tab.currentPage, ratio: tab.bookBlock || 0 }
   store.positions[tab.path] = pos
   const h = store.hashes[tab.path]
   if (h) store.positions[`hash:${h}`] = pos

@@ -391,6 +391,8 @@ h4.bk-block { font-size: 1.15em; }
 .bk-scroll.bk-paged { overflow: hidden; }
 .bk-paged-viewport { position: absolute; inset: 0 0 40px 0; overflow: hidden; }
 .bk-paged-content {
+  /* width 由 remeasure() 两遍布局后内联钉死为恰好 N 列;这里的
+     max-content 只是量内容那一遍的初始状态。 */
   height: 100%; box-sizing: border-box; column-fill: auto; width: max-content; min-width: 100%;
   transition: transform 0.18s ease-out;
 }

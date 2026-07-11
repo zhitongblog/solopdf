@@ -12,7 +12,7 @@
 import { onMounted, onBeforeUnmount, ref, watch, nextTick } from 'vue'
 import {
   store, controllers, documents, annotManagers, epubBooks, txtBooks, initStore, newTab, closeTab,
-  addRecent, savePosition, restorePosition, effectiveTheme,
+  addRecent, savePosition, restorePosition, effectiveTheme, type TabState,
 } from './store'
 import { platform, isTauri, isMobile } from './platform'
 import { t } from './i18n'
@@ -59,6 +59,24 @@ function applyTheme(): void {
 watch(() => store.settings.theme, applyTheme)
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme)
 
+/**
+ * TXT/EPUB 的进度记忆 hash 回退:微信/Files"用 SoloPDF 打开"每次拷进
+ * Inbox 的路径都不同,路径键永远 miss——按内容 hash 补一次(PDF 那侧
+ * restorePosition 已有同款逻辑)。顺便把 hash 记下,之后 savePosition
+ * 会同时写 hash 键。
+ */
+function restoreBookByHash(tab: TabState, hadPos: boolean): void {
+  void platform().fileHash(tab.path).then((h) => {
+    store.hashes[tab.path] = h
+    if (hadPos) return
+    const byHash = store.positions[`hash:${h}`]
+    if (byHash && store.tabs.some((x) => x.id === tab.id)) {
+      tab.bookBlock = byHash.ratio || 0
+      tab.currentPage = byHash.page
+    }
+  }).catch(() => {})
+}
+
 // ── open/close ──
 async function openPath(path: string, jumpTo?: { page: number; annot?: string }): Promise<void> {
   // focus existing tab for same path
@@ -93,6 +111,8 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
       tab.sidecarLocation = mgr.sidecarLocation
       const pos = store.positions[path]
       tab.currentPage = jumpTo?.page ?? pos?.page ?? 1
+      if (!jumpTo && pos) tab.bookBlock = pos.ratio || 0
+      restoreBookByHash(tab, !!(jumpTo || pos))
       tab.bookMode = true
       store.docTick++
       addRecent(path)
@@ -120,6 +140,7 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
       tab.sidecarLocation = mgr.sidecarLocation
       const pos = store.positions[path]
       tab.currentPage = jumpTo?.page ?? pos?.page ?? 1
+      restoreBookByHash(tab, !!(jumpTo || pos))
       tab.bookMode = true
       store.docTick++
       addRecent(path)
@@ -177,7 +198,7 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
 function jumpAfterLoad(tabId: number, jump: { page: number; annot?: string }): void {
   setTimeout(() => {
     const tab = store.tabs.find((x) => x.id === tabId)
-    if (tab && tab.kind !== 'pdf') { tab.currentPage = jump.page; return }
+    if (tab && tab.kind !== 'pdf') { tab.bookBlock = 0; tab.currentPage = jump.page; return }
     const ctrl = controllers.get(tabId)
     if (!ctrl) return
     if (jump.annot) ctrl.flashAnnotation(jump.annot)
