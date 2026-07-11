@@ -169,6 +169,7 @@ const zhCN: Dict = {
   'bk.layout.scroll': '滚动',
   'bk.toc': '目录',
   'bk.chrome': '显示/隐藏标签栏与工具栏',
+  'bk.fullscreen': '全屏',
 }
 
 const zhTW: Dict = {
@@ -311,6 +312,7 @@ const zhTW: Dict = {
   'bk.layout.scroll': '捲動',
   'bk.toc': '目錄',
   'bk.chrome': '顯示/隱藏分頁列與工具列',
+  'bk.fullscreen': '全螢幕',
 }
 
 const en: Dict = {
@@ -453,6 +455,7 @@ const en: Dict = {
   'bk.layout.scroll': 'Scroll',
   'bk.toc': 'Contents',
   'bk.chrome': 'Show/hide tabs and toolbar',
+  'bk.fullscreen': 'Fullscreen',
 }
 
 const ja: Dict = {
@@ -595,6 +598,7 @@ const ja: Dict = {
   'bk.layout.scroll': 'スクロール',
   'bk.toc': '目次',
   'bk.chrome': 'タブとツールバーを表示/隠す',
+  'bk.fullscreen': 'フルスクリーン',
 }
 
 const DICTS: Record<Locale, Dict> = { 'zh-CN': zhCN, 'zh-TW': zhTW, en, ja }

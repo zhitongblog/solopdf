@@ -1,6 +1,6 @@
 [package]
 name = "solopdf"
-version = "0.4.0"
+version = "0.4.3"
 description = "SoloPDF — free, ad-free, local-first PDF reader with highlights-as-Markdown"
 authors = ["alexlee"]
 edition = "2021"

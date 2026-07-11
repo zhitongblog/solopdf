@@ -436,3 +436,19 @@ h4.bk-block { font-size: 1.15em; }
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
 .bk-chrome-btn:hover { opacity: 0.9; }
+
+
+/* 真全屏:内容吃满安全区(刘海/状态栏底下同底色),文字避开 inset */
+.bk-scroll { padding-top: 0; }
+.bk-page { padding-top: calc(28px + env(safe-area-inset-top, 0px)); }
+.bk-paged-viewport { top: 0; }
+.bk-paged-content { padding-top: calc(20px + env(safe-area-inset-top, 0px)) !important; }
+.bk-chrome-btn { top: calc(10px + env(safe-area-inset-top, 0px)); }
+.bk-fs-btn {
+  position: absolute; left: 62px; top: calc(10px + env(safe-area-inset-top, 0px)); z-index: 20;
+  width: 38px; height: 38px; border-radius: 19px; font-size: 17px;
+  background: var(--bk-fg); color: var(--bk-bg); opacity: 0.45;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.bk-fs-btn:hover { opacity: 0.9; }
+.bk-paged-bar { padding-bottom: env(safe-area-inset-bottom, 0px); height: calc(40px + env(safe-area-inset-bottom, 0px)); }

@@ -12,7 +12,7 @@
 import { ref, shallowRef, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import type { ReflowBlock } from '@solopdf/core'
 import { store, documents, annotManagers, epubBooks, txtBooks } from '../store'
-import { isMobile } from '../platform'
+import { isMobile, isTauri } from '../platform'
 import { t } from '../i18n'
 import type { SelectionInfo } from '../viewer/controller'
 import { extractBook } from '../book/extract'
@@ -46,7 +46,8 @@ const book = computed(() => store.settings.book)
 const epub = computed(() => (props.source === 'epub' ? epubBooks.get(props.tabId) : undefined))
 
 const layout = computed<'scroll' | 'paged'>(() =>
-  book.value.layout === 'auto' ? (isMobile() ? 'scroll' : 'paged') : book.value.layout,
+  // auto = 翻页(手机单页左右滑,桌面宽屏双页)——阅读 app 的通用预期
+  book.value.layout === 'auto' ? 'paged' : book.value.layout,
 )
 
 const THEMES = {
@@ -70,6 +71,20 @@ const rootStyle = computed(() => {
     '--bk-lh': String(book.value.lineHeight),
     '--bk-maxw': `${book.value.maxWidth}em`,
   } as Record<string, string>
+})
+
+// 真全屏:iOS 内嵌 WKWebView 的布局视口固定为"窗口减安全区",
+// viewport-fit=cover 只把 html 背景延伸到刘海/home 条区域。所以把
+// 文档背景跟着阅读主题走,视口外的安全区就是同色沉浸,而不是白带。
+watch(() => [tab.value?.bookMode ?? true, book.value.bg] as const, ([on, bg]) => {
+  // body 也要设:视口外区域(underpage)取的是 body 的背景,html 的不生效
+  const c = on ? THEMES[bg as keyof typeof THEMES].bg : ''
+  document.documentElement.style.background = c
+  document.body.style.background = c
+}, { immediate: true })
+onBeforeUnmount(() => {
+  document.documentElement.style.background = ''
+  document.body.style.background = ''
 })
 
 // ── 数据源抽象 ──
@@ -364,6 +379,13 @@ function onSelChange(): void {
   })
 }
 
+async function toggleFullscreen(): Promise<void> {
+  if (!isTauri() || isMobile()) return
+  const { getCurrentWindow } = await import('@tauri-apps/api/window')
+  const w = getCurrentWindow()
+  await w.setFullscreen(!(await w.isFullscreen()))
+}
+
 function tocJump(chapter: number): void {
   tocOpen.value = false
   if (chapter > 0) void enterAt(chapter)
@@ -439,6 +461,7 @@ function tocJump(chapter: number): void {
     </div>
 
     <button class="bk-chrome-btn" :title="t('bk.chrome')" @click.stop="emit('chrome')">‹</button>
+    <button v-if="!isMobile()" class="bk-fs-btn" :title="t('bk.fullscreen')" @click.stop="toggleFullscreen">⛶</button>
     <button v-if="tocEntries.length" class="bk-toc-btn" :title="t('bk.toc')" @click.stop="tocOpen = !tocOpen">☰</button>
     <button class="bk-aa" :title="t('bk.settings')" @click.stop="settingsOpen = !settingsOpen">Aa</button>
 
