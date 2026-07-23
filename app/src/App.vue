@@ -434,21 +434,19 @@ onMounted(async () => {
     const { invoke } = await import('@tauri-apps/api/core')
     // deep links + files passed by OS (file association / second instance)
     const { listen } = await import('@tauri-apps/api/event')
-    await listen<string[]>('solopdf://open-files', (e) => {
-      for (const f of e.payload) {
-        if (f.startsWith('solopdf://')) handleDeepLink(f)
-        else if (f.startsWith('file://')) {
-          // RunEvent::Opened delivers file URLs (Finder double-click, iOS
-          // Files "open with") — decode to a plain path
-          void openPath(decodeURIComponent(f.replace(/^file:\/\//, '')))
-        } else void openPath(f)
-      }
-    })
-    const args = await invoke<string[]>('startup_files')
-    for (const f of args) {
+    // RunEvent::Opened delivers file:// URLs (Finder double-click, iOS Files
+    // "open with") — both live (event) and buffered-at-cold-launch
+    // (startup_files) arrivals need the same decode to a plain path
+    const openOsFile = (f: string): void => {
       if (f.startsWith('solopdf://')) handleDeepLink(f)
+      else if (f.startsWith('file://')) void openPath(decodeURIComponent(f.replace(/^file:\/\//, '')))
       else void openPath(f)
     }
+    await listen<string[]>('solopdf://open-files', (e) => {
+      for (const f of e.payload) openOsFile(f)
+    })
+    const args = await invoke<string[]>('startup_files')
+    for (const f of args) openOsFile(f)
     // debug bridge polling (only when app launched with SOLOPDF_DEBUG=1)
     if (await invoke<boolean>('debug_enabled')) {
       setInterval(async () => {
