@@ -47,6 +47,12 @@ for key in LSSupportsOpeningDocumentsInPlace UISupportsDocumentBrowser; do
   fi
 done
 
+# export compliance: no networking/custom crypto — without this ASC blocks
+# review submission (usesNonExemptEncryption null)
+IOS_PLIST=app/src-tauri/gen/apple/solopdf_iOS/Info.plist
+/usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$IOS_PLIST" 2>/dev/null ||
+  /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$IOS_PLIST"
+
 echo "==> Writing ExportOptions.plist"
 cat > "$EXPORT_PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

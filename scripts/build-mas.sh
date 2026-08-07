@@ -35,6 +35,10 @@ cd ..
 PLIST="app/$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $MAS_VERSION" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $MAS_BUILD_NUMBER" "$PLIST"
+# export compliance: no networking/custom crypto — without this ASC blocks
+# review submission (usesNonExemptEncryption null)
+/usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" 2>/dev/null ||
+  /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$PLIST"
 
 echo "==> Embedding provisioning profile + privacy manifest"
 cp "$MAS_PROVISIONING_PROFILE" "app/$APP/Contents/embedded.provisionprofile"

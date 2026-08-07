@@ -24,6 +24,9 @@ const zhHans = {
   keywords: 'pdf,阅读器,无广告,批注,高亮,笔记,markdown,表单填写,pdf阅读,本地',
   promotionalText: '干净、快速、本地运行的 PDF 阅读器 —— 高亮自动变成 Markdown 笔记。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
+  whatsNew: `• 修复:双击 / "打开方式"打开文件时,应用启动后文件未加载的问题
+• 图书模式:调整字号后不再跳页;跨设备/路径也能记住阅读进度
+• 稳定性与细节改进`,
 };
 
 const zhHant = {
@@ -40,6 +43,9 @@ const zhHant = {
   keywords: 'pdf,閱讀器,無廣告,批註,螢光筆,筆記,markdown,表單填寫,pdf閱讀,本地',
   promotionalText: '乾淨、快速、本地執行的 PDF 閱讀器 —— 螢光標記自動變成 Markdown 筆記。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
+  whatsNew: `• 修正:雙擊 / 「打開方式」開啟檔案時,應用啟動後檔案未載入的問題
+• 圖書模式:調整字號後不再跳頁;跨裝置/路徑也能記住閱讀進度
+• 穩定性與細節改進`,
 };
 
 const enUS = {
@@ -56,6 +62,9 @@ Everything runs on your device. No network calls, no data collection.`,
   keywords: 'pdf,reader,annotate,highlight,markdown,notes,forms,viewer,offline,documents',
   promotionalText: 'A clean, fast, local-first PDF reader — highlights become Markdown notes.',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
+  whatsNew: `• Fixed: opening a file by double-click / "Open With" launched the app without loading the file
+• Book mode: no more page jumps after font-size changes; reading progress survives device/path changes
+• Stability and polish`,
 };
 
 const ja = {
@@ -72,6 +81,9 @@ const ja = {
   keywords: 'pdf,リーダー,注釈,ハイライト,ノート,markdown,フォーム,閲覧,オフライン',
   promotionalText: '広告なし・完全ローカルの PDF リーダー。ハイライトが Markdown ノートになります。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
+  whatsNew: `• 修正:ダブルクリック / 「このアプリで開く」で起動した際、ファイルが読み込まれない問題
+• ブックモード:文字サイズ変更後のページずれを解消。読書位置をデバイス/パスをまたいで記憶
+• 安定性の向上と細かな改善`,
 };
 
 // whatsNew is intentionally absent — Apple rejects it on an app's first version.
@@ -127,6 +139,6 @@ export const screenshots = {
 
 // Per-platform release plan: store version string must match the attached build's train.
 export const platforms = {
-  IOS:    { versionString: '0.4.4', buildVersion: '0.4.4' },
-  MAC_OS: { versionString: '1.3.2', buildVersion: '1.3.2' },
+  IOS:    { versionString: '0.5.0', buildVersion: '0.5.0' },
+  MAC_OS: { versionString: '1.4.0', buildVersion: '1.4.0' },
 };
