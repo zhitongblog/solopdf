@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { store } from '../store'
 import { t, LOCALES } from '../i18n'
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; stats: [] }>()
 </script>
 
 <template>
@@ -44,6 +44,13 @@ const emit = defineEmits<{ close: [] }>()
           <div class="sr-sub">{{ t('st.updateSub') }}</div>
         </div>
         <input type="checkbox" v-model="store.settings.updateCheck" />
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="sr-label">{{ t('st.stats') }}</div>
+          <div class="sr-sub">{{ t('st.statsSub') }}</div>
+        </div>
+        <button @click="emit('stats')">{{ t('st.open') }}</button>
       </div>
       <div class="modal-actions">
         <button class="primary" @click="emit('close')">{{ t('st.done') }}</button>

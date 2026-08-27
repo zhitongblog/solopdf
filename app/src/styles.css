@@ -868,3 +868,37 @@ h4.bk-block { font-size: 1.15em; }
 .dc-pop.phone .dc-word { font-size: 20px; }
 .dc-pop.phone .dc-def { font-size: 15px; }
 .dc-pop.phone .dc-actions button { min-height: 44px; }
+
+/* ── reading statistics ── */
+.sx-shell {
+  width: min(560px, 94vw); max-height: 86vh; display: flex; flex-direction: column;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 14px; box-shadow: var(--shadow); overflow: hidden;
+}
+.sx-shell.phone {
+  width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; border: none;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.sx-body { flex: 1; overflow: auto; padding: 14px 16px; }
+.sx-body h4 {
+  margin: 18px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--fg-dim);
+}
+.sx-cards { display: flex; gap: 10px; }
+.sx-card {
+  flex: 1; background: var(--bg-hover); border-radius: 10px; padding: 12px; text-align: center;
+}
+.sx-num { font-size: 20px; font-weight: 600; }
+.sx-cap { font-size: 11px; color: var(--fg-dim); margin-top: 2px; }
+.sx-bars {
+  display: flex; align-items: flex-end; gap: 4px; height: 52px; margin: 14px 0 4px;
+}
+.sx-bar { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; opacity: 0.75; }
+.sx-row {
+  display: flex; align-items: baseline; gap: 10px; padding: 7px 0;
+  border-bottom: 1px solid var(--border); font-size: 13px;
+}
+.sx-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sx-time { color: var(--fg); flex: none; }
+.sx-turns { color: var(--fg-dim); font-size: 11px; flex: none; }
+.dt-footer .danger, .dt-actions .danger { color: #d94f4f; }

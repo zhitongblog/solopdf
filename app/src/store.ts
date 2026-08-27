@@ -123,6 +123,7 @@ interface PersistedState {
   hashes: Record<string, string>
   docPrefs: Record<string, DocPrefs>
   bookmarks: Record<string, Bookmark[]>
+  stats: import('./stats').Stats
 }
 
 /** phones and tablets get different reading defaults from desktops — see the
@@ -168,6 +169,7 @@ export const store = reactive({
   hashes: {} as Record<string, string>,
   docPrefs: {} as Record<string, DocPrefs>,
   bookmarks: {} as Record<string, Bookmark[]>,
+  stats: { docs: {}, days: {} } as import('./stats').Stats,
   loaded: false,
 
   get activeTab(): TabState | undefined {
@@ -210,13 +212,17 @@ export async function initStore(): Promise<void> {
   if (s.hashes) store.hashes = s.hashes
   if (s.docPrefs) store.docPrefs = s.docPrefs
   if (s.bookmarks) store.bookmarks = s.bookmarks
+  if (s.stats) store.stats = { docs: s.stats.docs ?? {}, days: s.stats.days ?? {} }
   applyLanguage()
   watch(() => store.settings.language, applyLanguage)
   store.loaded = true
   // persist on change, debounced
   let t = 0
   watch(
-    () => [store.settings, store.recents, store.positions, store.hashes, store.docPrefs, store.bookmarks],
+    () => [
+      store.settings, store.recents, store.positions, store.hashes,
+      store.docPrefs, store.bookmarks, store.stats,
+    ],
     () => {
       clearTimeout(t)
       t = window.setTimeout(persist, 400)
@@ -233,6 +239,7 @@ async function persist(): Promise<void> {
     hashes: { ...store.hashes },
     docPrefs: { ...store.docPrefs },
     bookmarks: { ...store.bookmarks },
+    stats: { docs: { ...store.stats.docs }, days: { ...store.stats.days } },
   })
 }
 

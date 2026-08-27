@@ -39,6 +39,8 @@ import AnnotToolLayer from './components/AnnotToolLayer.vue'
 import DocTools from './components/doctools/DocTools.vue'
 import ReadAloudBar from './components/ReadAloudBar.vue'
 import DictPopup from './components/DictPopup.vue'
+import StatsPanel from './components/StatsPanel.vue'
+import { startStats, stopStats, noteTurn } from './stats'
 import { speaker, startReading, stopReading } from './readaloud'
 import type { AnnotationKind } from '@solopdf/core'
 
@@ -52,6 +54,7 @@ const tool = ref<'none' | 'note' | 'region'>('none')
 const docToolsOpen = ref(false)
 const readAloud = ref(false)
 const dictWord = ref<{ word: string; anchor: DOMRect | null } | null>(null)
+const statsOpen = ref(false)
 const ocrOpen = ref(false)
 const imageOcrPath = ref('')
 const imageOcrBytes = ref<{ bytes: Uint8Array; name: string } | null>(null)
@@ -195,7 +198,10 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
     if (prefs.pageRotations) ctrl.setPageRotations(prefs.pageRotations)
     if (prefs.crop) ctrl.crop = prefs.crop
     controllers.set(tab.id, ctrl)
-    ctrl.onVisiblePage = (p) => { tab.currentPage = p }
+    ctrl.onVisiblePage = (p) => {
+      if (p !== tab.currentPage) noteTurn()
+      tab.currentPage = p
+    }
     ctrl.onSelection = (sel) => { selection.value = sel && store.activeTabId === tab.id ? sel : null }
     ctrl.onFormsDirty = () => { tab.formsDirty = true }
     await ctrl.init()
@@ -536,6 +542,7 @@ onMounted(async () => {
   applyTheme()
   initWakeLock()
   setKeepAwake(store.settings.keepAwake)
+  startStats()
   window.addEventListener('keydown', onKey)
   window.addEventListener('focus', onFocus)
   window.addEventListener('resize', onResize)
@@ -563,6 +570,7 @@ onMounted(async () => {
     openDocTools: () => { docToolsOpen.value = true },
     setReadAloud: (on: boolean) => { readAloud.value = on },
     lookupWord: (w: string) => { dictWord.value = { word: w, anchor: null } },
+    openStats: () => { statsOpen.value = true },
     readAloudRef: readAloud,
     tts: { speaker, startReading, stopReading },
     epubBooks,
@@ -608,6 +616,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('focus', onFocus)
   window.removeEventListener('resize', onResize)
+  stopStats()
   clearTimeout(resizeTimer)
   clearInterval(posTimer)
 })
@@ -763,7 +772,12 @@ watch(() => store.settings.theme, () => {
       @toast="showToast"
       @open="(p) => { docToolsOpen = false; void openPath(p) }"
     />
-    <SettingsPanel v-if="settingsOpen" @close="settingsOpen = false" />
+    <StatsPanel v-if="statsOpen" @close="statsOpen = false" @toast="showToast" />
+    <SettingsPanel
+      v-if="settingsOpen"
+      @close="settingsOpen = false"
+      @stats="settingsOpen = false; statsOpen = true"
+    />
     <OcrDialog v-if="ocrOpen && store.activeTab" @close="ocrOpen = false" @done="onOcrDone" />
     <ImageOcrDialog
       v-if="imageOcrPath"
