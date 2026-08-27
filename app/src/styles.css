@@ -1039,3 +1039,27 @@ h4.bk-block { font-size: 1.15em; }
   display: flex; align-items: center; justify-content: center;
   min-width: 200px; height: 60%; color: #8a8f98; font-size: 13px;
 }
+
+/* ── settings ── */
+.st-shell {
+  width: min(560px, 94vw); max-height: 86vh; display: flex; flex-direction: column;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 14px; box-shadow: var(--shadow); overflow: hidden;
+}
+.st-shell.phone {
+  width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; border: none;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.st-body { flex: 1; overflow: auto; padding: 4px 16px 14px; }
+.st-body h4 {
+  margin: 18px 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--fg-dim);
+}
+.st-body h4:first-child { margin-top: 10px; }
+.st-swatches { display: flex; gap: 6px; }
+.st-swatches .swatch.on { border-color: var(--fg); }
+.st-wide { width: 100%; }
+.st-note { padding: 6px 0 0; line-height: 1.6; }
+.st-cache-btns { display: flex; gap: 6px; }
+.st-shell.phone .settings-row { min-height: 48px; }
+.st-shell.phone .st-body input[type='checkbox'] { width: 22px; height: 22px; }

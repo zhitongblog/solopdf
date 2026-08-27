@@ -215,6 +215,26 @@ const zhCN: Dict = {
   'st.stats': '阅读统计',
   'st.statsSub': '时长、连续天数、每本书的进度——只存在本机',
   'st.open': '查看',
+  // settings groups
+  'st.g.general': '通用',
+  'st.g.reading': '阅读',
+  'st.g.marks': '标注',
+  'st.g.speech': '朗读',
+  'st.g.dictionary': '词典',
+  'st.g.privacy': '隐私与数据',
+  'st.layoutSub': '新打开的 PDF 用哪种版式',
+  'st.keepAwakeSub': '手机默认开，桌面默认关',
+  'st.defaultColor': '默认高亮颜色',
+  'st.defaultColorSub': '划选后一下就能高亮；换颜色会记住',
+  'st.reset': '重置',
+  'st.webLookup': '网页搜索地址',
+  'st.webLookupSub': '只有你点「网页搜索」时才会用到；%s 会替换成查询词',
+  'st.userDicts': '把 word<TAB>释义 的 .txt 放进应用数据目录的 dictionaries/ 就能加自己的词典。',
+  'st.caches': '缓存',
+  'st.cachesSub': '全库搜索索引与书架封面，删掉只是下次重建',
+  'st.clearIndex': '清索引',
+  'st.clearCovers': '清封面',
+  'st.privacyNote': 'SoloPDF 不做任何遥测。除更新检查（上面可关）和你主动点的网页搜索之外，它不发起任何网络请求。',
   'sx.title': '阅读统计',
   'sx.localOnly': '只存在本机，从不上传',
   'sx.today': '今日',
@@ -621,6 +641,26 @@ const zhTW: Dict = {
   'st.stats': '閱讀統計',
   'st.statsSub': '時長、連續天數、每本書的進度——只存在本機',
   'st.open': '檢視',
+  // settings groups
+  'st.g.general': '一般',
+  'st.g.reading': '閱讀',
+  'st.g.marks': '註解',
+  'st.g.speech': '朗讀',
+  'st.g.dictionary': '詞典',
+  'st.g.privacy': '隱私與資料',
+  'st.layoutSub': '新開啟的 PDF 用哪種版式',
+  'st.keepAwakeSub': '手機預設開，桌面預設關',
+  'st.defaultColor': '預設螢光色',
+  'st.defaultColorSub': '劃選後一下就能標示；換顏色會記住',
+  'st.reset': '重設',
+  'st.webLookup': '網頁搜尋網址',
+  'st.webLookupSub': '只有你按「網頁搜尋」時才會用到；%s 會替換成查詢詞',
+  'st.userDicts': '把 word<TAB>釋義 的 .txt 放進應用資料目錄的 dictionaries/ 就能加自己的詞典。',
+  'st.caches': '快取',
+  'st.cachesSub': '全庫搜尋索引與書架封面，刪掉只是下次重建',
+  'st.clearIndex': '清索引',
+  'st.clearCovers': '清封面',
+  'st.privacyNote': 'SoloPDF 不做任何遙測。除更新檢查（上面可關）與你主動按的網頁搜尋之外，不發起任何網路請求。',
   'sx.title': '閱讀統計',
   'sx.localOnly': '只存在本機，從不上傳',
   'sx.today': '今日',
@@ -1015,6 +1055,26 @@ const en: Dict = {
   'st.stats': 'Reading statistics',
   'st.statsSub': 'Time, streaks and per-book progress — kept on this device only',
   'st.open': 'Open',
+  // settings groups
+  'st.g.general': 'General',
+  'st.g.reading': 'Reading',
+  'st.g.marks': 'Marks',
+  'st.g.speech': 'Read aloud',
+  'st.g.dictionary': 'Dictionary',
+  'st.g.privacy': 'Privacy and data',
+  'st.layoutSub': 'Layout a newly opened PDF starts in',
+  'st.keepAwakeSub': 'On by default on phones, off on desktops',
+  'st.defaultColor': 'Default highlight colour',
+  'st.defaultColorSub': 'One tap after selecting; changing it is remembered',
+  'st.reset': 'Reset',
+  'st.webLookup': 'Web search URL',
+  'st.webLookupSub': 'Used only when you press "Search the web"; %s becomes the word',
+  'st.userDicts': 'Drop word<TAB>definition .txt files into dictionaries/ in the app data folder to add your own.',
+  'st.caches': 'Caches',
+  'st.cachesSub': 'Library search indexes and shelf covers — clearing only costs a rebuild',
+  'st.clearIndex': 'Clear indexes',
+  'st.clearCovers': 'Clear covers',
+  'st.privacyNote': 'SoloPDF has no telemetry. Apart from the update check above and a web search you press yourself, it makes no network requests.',
   'sx.title': 'Reading statistics',
   'sx.localOnly': 'On this device only, never uploaded',
   'sx.today': 'Today',
@@ -1409,6 +1469,26 @@ const ja: Dict = {
   'st.stats': '読書統計',
   'st.statsSub': '時間・連続日数・本ごとの進捗 — この端末にのみ保存',
   'st.open': '開く',
+  // settings groups
+  'st.g.general': '一般',
+  'st.g.reading': '読書',
+  'st.g.marks': '注釈',
+  'st.g.speech': '読み上げ',
+  'st.g.dictionary': '辞書',
+  'st.g.privacy': 'プライバシーとデータ',
+  'st.layoutSub': '新しく開いた PDF の初期レイアウト',
+  'st.keepAwakeSub': 'スマホは既定でオン、デスクトップはオフ',
+  'st.defaultColor': '既定のハイライト色',
+  'st.defaultColorSub': '選択後ワンタップで引けます。変更は記憶されます',
+  'st.reset': 'リセット',
+  'st.webLookup': 'ウェブ検索 URL',
+  'st.webLookupSub': '「ウェブで検索」を押したときだけ使います。%s が語に置き換わります',
+  'st.userDicts': 'アプリデータの dictionaries/ に word<TAB>語義 の .txt を置けば自分の辞書を追加できます。',
+  'st.caches': 'キャッシュ',
+  'st.cachesSub': '全体検索の索引と本棚の表紙 — 消しても作り直すだけです',
+  'st.clearIndex': '索引を消去',
+  'st.clearCovers': '表紙を消去',
+  'st.privacyNote': 'SoloPDF はテレメトリを一切送りません。上の更新確認と、自分で押したウェブ検索以外、ネットワークに出ません。',
   'sx.title': '読書統計',
   'sx.localOnly': 'この端末にのみ保存、送信しません',
   'sx.today': '今日',
@@ -1630,10 +1710,21 @@ export function setLocale(l: Locale): void {
 }
 
 /** reactive translate; {var} placeholders via vars */
+/** Mac writes ⌘; everyone else writes Ctrl. Phones have no keyboard at all,
+ *  so a shortcut hint there is just noise taking up a button. */
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+const IS_TOUCH = /iPhone|iPad|Android/i.test(navigator.userAgent)
+
+function adaptShortcuts(s: string): string {
+  if (IS_TOUCH) return s.replace(/\s*\((?:⌘|Ctrl\+|Esc)[^)]*\)/g, '')
+  if (!IS_MAC) return s.replace(/⌘/g, 'Ctrl+')
+  return s
+}
+
 export function t(key: string, vars?: Record<string, string | number>): string {
   let s = DICTS[currentLocale.value][key] ?? DICTS['zh-CN'][key] ?? key
   if (vars) for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, String(v))
-  return s
+  return adaptShortcuts(s)
 }
 
 /** computed wrapper for templates that need reactivity via composition */

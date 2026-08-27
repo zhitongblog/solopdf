@@ -40,6 +40,7 @@ export class TauriBackend implements PlatformBackend {
     return items
       .map((it) => (typeof it === 'string' ? it : ((it as { path?: string }).path ?? '')))
       .filter(Boolean)
+      // content:// survives verbatim — openPath's importer resolves it
       .map((s) => (s.startsWith('file://') ? decodeURIComponent(s.replace(/^file:\/\//, '')) : s))
   }
 
@@ -84,6 +85,12 @@ export class TauriBackend implements PlatformBackend {
   }
 
   async importDocument(path: string): Promise<string> {
+    // Android hands out content:// URIs, which are not paths at all — pull
+    // the bytes through the ContentResolver and land them in our folder.
+    if (path.startsWith('content://')) {
+      const res = await invoke<{ path: string; copied: boolean }>('import_content_uri', { uri: path })
+      return res.path
+    }
     // Desktop paths are stable; only phones need the copy, and doing it on
     // desktop would silently duplicate every book someone opens.
     if (!/iPhone|iPad|Android/i.test(navigator.userAgent)) return path

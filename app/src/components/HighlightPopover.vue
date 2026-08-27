@@ -10,6 +10,7 @@
 import { computed, ref } from 'vue'
 import type { AnnotationKind } from '@solopdf/core'
 import type { SelectionInfo } from '../viewer/controller'
+import { store } from '../store'
 import { isMobile } from '../platform'
 import { t } from '../i18n'
 
@@ -27,7 +28,9 @@ const KIND_GLYPH: Record<string, string> = {
   highlight: '▮', underline: 'U̲', strike: 'S̶', squiggly: '∿',
 }
 
-const color = ref<string>('yellow')
+// remembering the last colour is what makes one tap enough on the next
+// highlight; the setting is where that memory lives
+const color = ref<string>(store.settings.defaultColor)
 const kind = ref<AnnotationKind>('highlight')
 
 const docked = computed(() => isMobile() || window.innerWidth < 560)
@@ -48,7 +51,7 @@ const style = computed(() => {
         v-for="c in COLORS" :key="c"
         class="swatch" :class="[`sw-${c}`, { on: color === c }]"
         :title="t('hl.' + c)"
-        @click="color = c; $emit('pick', c, kind)"
+        @click="color = c; store.settings.defaultColor = c; $emit('pick', c, kind)"
       />
     </div>
     <div class="hl-row hl-kinds">

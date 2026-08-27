@@ -106,10 +106,12 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
   // path — and with it the sidecar, the reading position and the shelf entry
   // — survives the next launch. Desktop returns the path unchanged.
   let path = rawPath
+  let importError = ''
   try {
     path = await platform().importDocument(rawPath)
   } catch (err) {
-    showToast(t('app.importFail', { msg: String((err as Error).message ?? err) }))
+    importError = String((err as Error).message ?? err)
+    showToast(t('app.importFail', { msg: importError }))
   }
   // focus existing tab for same path
   const existing = store.tabs.find((t) => t.path === path)
@@ -300,7 +302,11 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
     // shelf cover: one extra small render, after the page the reader wanted
     void ctrl.renderToCanvas(1, 0.35).then((c) => captureCover(path, c)).catch(() => {})
   } catch (err) {
-    tab.loadError = String((err as Error)?.message ?? err)
+    // an import failure is the real cause when the open then fails too —
+    // showing only "no such file" would send debugging the wrong way
+    tab.loadError = importError
+      ? `${t('app.importFail', { msg: importError })}`
+      : String((err as Error)?.message ?? err)
     showToast(t('app.openFail', { msg: tab.loadError }))
   }
 }
@@ -673,7 +679,19 @@ onMounted(async () => {
     const openOsFile = (f: string): void => {
       if (f.startsWith('solopdf://')) handleDeepLink(f)
       else if (f.startsWith('file://')) void openPath(decodeURIComponent(f.replace(/^file:\/\//, '')))
+      // content:// (Android "open with") goes through openPath untouched —
+      // the importer turns it into a path we own
       else void openPath(f)
+    }
+    // Android delivers "open with" through the deep-link plugin's URL event
+    // rather than RunEvent::Opened, which only exists on Apple platforms.
+    // getCurrent() covers the cold-launch case: the plugin reads the launch
+    // intent in load(), which happens before this listener exists.
+    if (/Android/i.test(navigator.userAgent)) {
+      const dl = await import('@tauri-apps/plugin-deep-link')
+      await dl.onOpenUrl((urls) => { for (const u of urls) openOsFile(u) }).catch(() => {})
+      const launched = await dl.getCurrent().catch(() => null)
+      for (const u of launched ?? []) openOsFile(u)
     }
     await listen<string[]>('solopdf://open-files', (e) => {
       for (const f of e.payload) openOsFile(f)

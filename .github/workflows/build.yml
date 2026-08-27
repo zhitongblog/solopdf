@@ -46,6 +46,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @solopdf/core build
       - run: pnpm --filter @solopdf/core test
+      - run: node scripts/check-i18n.mjs
+      - name: Rust tests (pdfops / djvu)
+        run: cargo test --lib --manifest-path app/src-tauri/Cargo.toml
 
       - name: Build Tauri app
         run: pnpm --filter solopdf-app tauri build
@@ -71,5 +74,73 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: solopdf-${{ matrix.target }}
+          path: out/*
+          if-no-files-found: error
+
+  # Android is its own job: it needs the SDK/NDK and cross-compiles four ABIs,
+  # so folding it into the desktop matrix would slow every platform down.
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: sdkmanager --install "ndk;26.1.10909125" "platforms;android-34"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+          key: android
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @solopdf/core build
+
+      - name: Build APK + AAB
+        env:
+          NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/26.1.10909125
+          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
+          # Release signing needs a keystore the maintainer owns; without one
+          # this produces an UNSIGNED release build, which is still useful for
+          # sideloading and for catching build breakage.
+          ANDROID_KEY_PATH: ${{ secrets.ANDROID_KEY_PATH }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: |
+          cd app && pnpm tauri android init
+          cd ..
+          # the manifest patch (open-with + deep link) lives in the script
+          bash scripts/build-android.sh release || bash scripts/build-android.sh
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p out
+          find app/src-tauri/gen/android/app/build/outputs \
+            \( -name "*.apk" -o -name "*.aab" \) -exec cp {} out/ \;
+          ls -la out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: solopdf-android
           path: out/*
           if-no-files-found: error

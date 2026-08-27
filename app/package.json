@@ -1,7 +1,7 @@
 {
   "name": "solopdf-app",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "scripts": {
     "predev": "node scripts/copy-pdfjs-assets.mjs",
@@ -14,6 +14,7 @@
   "dependencies": {
     "@solopdf/core": "workspace:*",
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-deep-link": "^2.4.9",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "fflate": "^0.8.3",

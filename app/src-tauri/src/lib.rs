@@ -11,6 +11,8 @@ use tauri::{Emitter, Manager};
 pub mod ocr;
 pub mod pdfops;
 pub mod djvu;
+#[cfg(target_os = "android")]
+pub mod android;
 
 #[derive(Serialize)]
 struct FileMeta {
@@ -761,6 +763,60 @@ fn hash_file(path: &Path) -> Result<String, String> {
     Ok(format!("{:016x}", hasher.finish()))
 }
 
+/// Android hands out `content://` URIs. Pull the bytes through the
+/// ContentResolver and drop them into the same Library folder the iOS import
+/// uses, so everything downstream sees one kind of thing: a path.
+#[cfg(target_os = "android")]
+#[tauri::command]
+async fn import_content_uri(app: tauri::AppHandle, uri: String) -> Result<ImportResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (name, bytes) = android::read_content_uri(&uri)?;
+        if bytes.is_empty() {
+            return Err("文件是空的，或没有读取权限".into());
+        }
+        let dir = library_dir(&app)?;
+        // dedupe by content hash, exactly like import_document — the same
+        // book shared twice must not become two shelf entries
+        let mut hasher = twox_hash::XxHash3_64::new();
+        hasher.write(&bytes);
+        let hash = format!("{:016x}", hasher.finish());
+        let index_path = dir.join("index.json");
+        let mut index: serde_json::Map<String, serde_json::Value> = fs::read_to_string(&index_path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        if let Some(existing) = index.get(&hash).and_then(|v| v.as_str()) {
+            let p = dir.join(existing);
+            if p.is_file() {
+                return Ok(ImportResult { path: p.to_string_lossy().into_owned(), copied: false });
+            }
+        }
+        let mut target = name.clone();
+        let (stem, ext) = match name.rsplit_once('.') {
+            Some((s, e)) => (s.to_string(), format!(".{e}")),
+            None => (name.clone(), String::new()),
+        };
+        let mut n = 2;
+        while dir.join(&target).exists() {
+            target = format!("{stem} {n}{ext}");
+            n += 1;
+        }
+        let dest = dir.join(&target);
+        fs::write(&dest, &bytes).map_err(|e| format!("导入失败: {e}"))?;
+        index.insert(hash, serde_json::Value::String(target));
+        let _ = fs::write(&index_path, serde_json::to_string_pretty(&index).unwrap_or_default());
+        Ok(ImportResult { path: dest.to_string_lossy().into_owned(), copied: true })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+async fn import_content_uri(_app: tauri::AppHandle, uri: String) -> Result<ImportResult, String> {
+    Ok(ImportResult { path: uri, copied: false })
+}
+
 /// Copy a document into the app's own Library folder, deduplicated by content
 /// hash. Returns the stable path to use from now on.
 #[tauri::command]
@@ -1096,7 +1152,10 @@ impl DebugBridge {
 }
 
 fn debug_enabled_env() -> bool {
-    std::env::var("SOLOPDF_DEBUG").map(|v| v == "1").unwrap_or(false)
+    // Android has no way to pass an env var to a launched activity, and a
+    // debug APK is exactly the build where the bridge should be on anyway.
+    let default_on = cfg!(all(debug_assertions, target_os = "android"));
+    std::env::var("SOLOPDF_DEBUG").map(|v| v == "1").unwrap_or(default_on)
 }
 
 #[tauri::command]
@@ -1116,7 +1175,6 @@ fn debug_report(bridge: tauri::State<std::sync::Arc<DebugBridge>>, id: u64, resu
     }
 }
 
-#[cfg(not(target_os = "android"))]
 fn start_debug_server(bridge: std::sync::Arc<DebugBridge>) {
     std::thread::spawn(move || {
         let server = match tiny_http::Server::http("127.0.0.1:14310") {
@@ -1216,6 +1274,7 @@ pub fn run() {
             djvu_page,
             djvu_text,
             import_document,
+            import_content_uri,
             list_imported,
             library_path,
             scan_folder,
@@ -1247,7 +1306,6 @@ pub fn run() {
             print_webview,
         ])
         .setup(|app| {
-            #[cfg(not(target_os = "android"))]
             if debug_enabled_env() {
                 let bridge = app.state::<std::sync::Arc<DebugBridge>>();
                 start_debug_server(bridge.inner().clone());

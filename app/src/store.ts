@@ -103,6 +103,8 @@ export interface Settings {
   tts: TtsSettings
   /** comic reader */
   comic: ComicSettings
+  /** colour a fresh highlight gets */
+  defaultColor: string
   /** where the dictionary's explicit "search the web" button goes; %s = word.
    *  Never used automatically — SoloPDF makes no network request on its own. */
   webLookupUrl: string
@@ -160,6 +162,7 @@ export const DEFAULT_SETTINGS: Settings = {
   bookAutoSpeed: MOBILE ? 30 : 40,
   tts: { rate: 1, pitch: 1, voiceURI: '', lang: '' },
   comic: { spread: MOBILE ? 1 : 2, rtl: false, fit: 'height' },
+  defaultColor: 'yellow',
   webLookupUrl: 'https://www.google.com/search?q=define+%s',
 }
 
