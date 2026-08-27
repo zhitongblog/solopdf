@@ -280,6 +280,11 @@ const zhCN: Dict = {
   'cm.fitBoth': '完整显示',
   'cm.empty': '这个压缩包里没有图片',
   'cm.noImages': '压缩包里没有找到图片（CBZ/CBR 应当是图片的打包）',
+  // mobi / azw3
+  'mb.mobiBad': '这不是一个可读的 MOBI/AZW3 文件',
+  'mb.mobiDrm': '这本书有 DRM 保护，SoloPDF 无法打开（也不会尝试破解）',
+  'mb.mobiCompression': '这本书用了旧的 HUFF/CDIC 压缩，暂不支持——用 Calibre 转成 EPUB 即可',
+  'mb.mobiEmpty': '没有解析出正文内容',
   // sidebar
   'sb.outline': '目录',
   'sb.thumbs': '缩略图',
@@ -678,6 +683,11 @@ const zhTW: Dict = {
   'cm.fitBoth': '完整顯示',
   'cm.empty': '這個壓縮檔裡沒有圖片',
   'cm.noImages': '壓縮檔裡找不到圖片（CBZ/CBR 應該是圖片的打包）',
+  // mobi / azw3
+  'mb.mobiBad': '這不是一個可讀的 MOBI/AZW3 檔案',
+  'mb.mobiDrm': '這本書有 DRM 保護，SoloPDF 無法開啟（也不會嘗試破解）',
+  'mb.mobiCompression': '這本書用了舊的 HUFF/CDIC 壓縮，暫不支援——用 Calibre 轉成 EPUB 即可',
+  'mb.mobiEmpty': '沒有解析出正文內容',
   'sb.outline': '目錄',
   'sb.thumbs': '縮圖',
   'sb.annots': '批註',
@@ -1064,6 +1074,11 @@ const en: Dict = {
   'cm.fitBoth': 'Fit whole page',
   'cm.empty': 'No images in this archive',
   'cm.noImages': 'No images found — a CBZ/CBR should be a bundle of page images',
+  // mobi / azw3
+  'mb.mobiBad': "That isn't a readable MOBI/AZW3 file",
+  'mb.mobiDrm': 'This book is DRM-protected. SoloPDF cannot open it, and does not try to break it',
+  'mb.mobiCompression': 'This book uses the old HUFF/CDIC compression, which is not supported — convert it to EPUB with Calibre',
+  'mb.mobiEmpty': 'No readable text was found',
   'sb.outline': 'Outline',
   'sb.thumbs': 'Pages',
   'sb.annots': 'Notes',
@@ -1450,6 +1465,11 @@ const ja: Dict = {
   'cm.fitBoth': '全体を表示',
   'cm.empty': 'このアーカイブに画像がありません',
   'cm.noImages': '画像が見つかりません（CBZ/CBR はページ画像の束です）',
+  // mobi / azw3
+  'mb.mobiBad': '読み取れる MOBI/AZW3 ファイルではありません',
+  'mb.mobiDrm': 'この本には DRM があり、SoloPDF では開けません（解除も行いません）',
+  'mb.mobiCompression': '旧式の HUFF/CDIC 圧縮のため未対応です — Calibre で EPUB に変換してください',
+  'mb.mobiEmpty': '本文を取り出せませんでした',
   'sb.outline': '目次',
   'sb.thumbs': 'ページ',
   'sb.annots': 'ノート',

@@ -80,6 +80,16 @@
         "description": "Comic book archive",
         "role": "Viewer",
         "mimeType": "application/vnd.comicbook+zip"
+      },
+      {
+        "ext": [
+          "mobi",
+          "azw3"
+        ],
+        "name": "Kindle Book",
+        "description": "Kindle e-book",
+        "role": "Viewer",
+        "mimeType": "application/x-mobipocket-ebook"
       }
     ],
     "iOS": {

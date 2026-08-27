@@ -182,14 +182,23 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
     return
   }
 
-  // ── EPUB:只有图书视图,无 pdf.js 管线 ──
-  if (tab.kind === 'epub') {
+  // ── EPUB / MOBI / AZW3:只有图书视图,无 pdf.js 管线 ──
+  if (tab.kind === 'epub' || tab.kind === 'mobi') {
     try {
       const meta = await platform().fileMeta(path)
       const bytes = await platform().readChunk(path, 0, meta.size)
-      const { EpubBook } = await import('./book/epub')
-      const bk = new EpubBook()
-      bk.load(bytes)
+      let bk: import('./book/epub').EpubBook | import('./book/mobi').MobiBook
+      if (tab.kind === 'mobi') {
+        const { MobiBook } = await import('./book/mobi')
+        const m = new MobiBook()
+        m.load(bytes)
+        bk = m
+      } else {
+        const { EpubBook } = await import('./book/epub')
+        const e = new EpubBook()
+        e.load(bytes)
+        bk = e
+      }
       epubBooks.set(tab.id, bk)
       if (bk.title) tab.name = bk.title
       const mgr = new AnnotationManager(path, tab.name, false)
@@ -205,8 +214,11 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
       addRecent(path)
       noteOpened(tab)
     } catch (err) {
-      tab.loadError = String((err as Error)?.message ?? err)
-      showToast(t('app.openFail', { msg: tab.loadError }))
+      const raw = String((err as Error)?.message ?? err)
+      // the MOBI reader speaks in codes so the message can be translated
+      const msg = raw.startsWith('mobi') ? t('mb.' + raw) : raw
+      tab.loadError = msg
+      showToast(t('app.openFail', { msg }))
     }
     return
   }
@@ -744,7 +756,7 @@ watch(() => store.settings.theme, () => {
             v-else-if="tab.bookMode"
             v-show="tab.id === store.activeTabId"
             :tab-id="tab.id"
-            :source="tab.kind"
+            :source="tab.kind === 'mobi' ? 'epub' : tab.kind"
             @selection="(s) => (selection = s)"
             @ocr="ocrOpen = true"
             @chrome="chromeReveal = !chromeReveal"

@@ -27,7 +27,7 @@ export interface TabState {
   /** 图书阅读模式(重排视图) */
   bookMode: boolean
   /** 文档类型:EPUB/TXT 走图书视图,漫画走 ComicView */
-  kind: 'pdf' | 'epub' | 'txt' | 'comic'
+  kind: 'pdf' | 'epub' | 'txt' | 'comic' | 'mobi'
   /** 图书模式的精确位置(块序):TXT 的 page 粒度是"章",长章恢复
    *  到章首体验差——存/恢复都以块为准,page 仅作章级回退 */
   bookBlock: number
@@ -196,7 +196,12 @@ export const store = reactive({
 export const controllers = new Map<number, PdfViewerController>()
 export const documents = new Map<number, PDFDocumentProxy>()
 export const annotManagers = new Map<number, AnnotationManager>()
-export const epubBooks = new Map<number, import('./book/epub').EpubBook>()
+/** EPUB and MOBI/KF8 share a chapter interface, so they share a registry —
+ *  BookView only ever asks for chapters, toc and chapterHtml(). */
+export const epubBooks = new Map<
+  number,
+  import('./book/epub').EpubBook | import('./book/mobi').MobiBook
+>()
 export const txtBooks = new Map<number, import('@solopdf/core').TxtBook>()
 export const comicBooks = new Map<number, import('./book/comic').ComicBook>()
 
@@ -281,6 +286,7 @@ export function newTab(path: string): TabState {
     kind: /\.epub$/i.test(path) ? 'epub'
       : /\.txt$/i.test(path) ? 'txt'
       : /\.(cbz|cbr)$/i.test(path) ? 'comic'
+      : /\.(mobi|azw3|azw|prc)$/i.test(path) ? 'mobi'
       : 'pdf',
   }
   store.tabs.push(t)
