@@ -58,6 +58,12 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 [target.'cfg(not(target_os = "android"))'.dependencies]
 tiny_http = "0.12"
 
+# Debug builds run the same lopdf/flate/image code the release build does,
+# and un-optimised miniz turns a one-second page operation into a minute.
+# Optimise dependencies only — our own crate stays debuggable.
+[profile.dev.package."*"]
+opt-level = 2
+
 [profile.release]
 opt-level = "s"
 lto = true

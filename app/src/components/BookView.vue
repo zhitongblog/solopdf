@@ -11,7 +11,7 @@
  */
 import { ref, shallowRef, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import type { ReflowBlock } from '@solopdf/core'
-import { store, documents, annotManagers, epubBooks, txtBooks } from '../store'
+import { store, documents, annotManagers, epubBooks, txtBooks, bookApis } from '../store'
 import { isMobile, isTauri } from '../platform'
 import { t } from '../i18n'
 import type { SelectionInfo } from '../viewer/controller'
@@ -150,10 +150,40 @@ onMounted(async () => {
   ro = new ResizeObserver(() => { if (layout.value === 'paged') void remeasure(true) })
   if (host.value) ro.observe(host.value)
   await enterAt(tab.value?.currentPage ?? 1, tab.value?.bookBlock || undefined)
+  // read-aloud reaches in here: it needs the blocks currently on screen and
+  // a way to turn the page when it runs out of them
+  bookApis.set(props.tabId, {
+    blocks: () => {
+      const root = layout.value === 'paged' ? pagedContent.value : host.value
+      if (!root) return []
+      const all = [...root.querySelectorAll<HTMLElement>('[data-page]')]
+      if (layout.value !== 'paged') return all
+      //翻页版式:只念当前这一屏(多列布局里"页"是靠 offsetLeft 分的)
+      const w = stepW()
+      const from = pageIdx.value * w
+      const to = from + w * (doublePage.value ? 1 : 1) + w * 0.5
+      return all.filter((el) => el.offsetLeft >= from - 1 && el.offsetLeft < to)
+    },
+    advance: async () => {
+      if (layout.value === 'paged') {
+        const atEnd = pageIdx.value >= pageCount.value - 1 && secIdx.value >= totalSections.value - 1
+        if (atEnd) return false
+        await turn(1)
+        return true
+      }
+      const h = host.value
+      if (!h) return false
+      const before = h.scrollTop
+      h.scrollTop = before + h.clientHeight * 0.9
+      await nextTick()
+      return h.scrollTop > before
+    },
+  })
 })
 
 onBeforeUnmount(() => {
   cancelled = true
+  bookApis.delete(props.tabId)
   stopAuto()
   io?.disconnect()
   ro?.disconnect()

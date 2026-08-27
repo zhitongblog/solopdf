@@ -99,6 +99,17 @@ export interface Settings {
   keepAwake: boolean
   /** book-mode auto-scroll speed in px/second */
   bookAutoSpeed: number
+  /** read-aloud voice settings */
+  tts: TtsSettings
+}
+
+export interface TtsSettings {
+  rate: number
+  pitch: number
+  /** empty = let the engine pick by language */
+  voiceURI: string
+  /** BCP-47 hint used when no voice is chosen */
+  lang: string
 }
 
 interface PersistedState {
@@ -131,6 +142,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // phones are where a sleeping screen actually interrupts reading
   keepAwake: MOBILE,
   bookAutoSpeed: MOBILE ? 30 : 40,
+  tts: { rate: 1, pitch: 1, voiceURI: '', lang: '' },
 }
 
 export function applyLanguage(): void {
@@ -166,6 +178,15 @@ export const annotManagers = new Map<number, AnnotationManager>()
 export const epubBooks = new Map<number, import('./book/epub').EpubBook>()
 export const txtBooks = new Map<number, import('@solopdf/core').TxtBook>()
 
+/** Book-mode hooks the reader needs from outside the component: which blocks
+ *  are on screen, and how to turn to the next lot. Registered by BookView. */
+export interface BookApi {
+  blocks(): HTMLElement[]
+  /** advance one screen/section; false when the book ends */
+  advance(): Promise<boolean>
+}
+export const bookApis = new Map<number, BookApi>()
+
 export function effectiveTheme(): 'light' | 'dark' {
   if (store.settings.theme !== 'system') return store.settings.theme
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
@@ -178,6 +199,7 @@ export async function initStore(): Promise<void> {
     // 嵌套对象要与默认值深合并:旧版本存的 book 缺新字段(如 layout)
     // 时,整体覆盖会让新字段变 undefined
     store.settings.book = { ...DEFAULT_SETTINGS.book, ...(s.settings.book ?? {}) }
+    store.settings.tts = { ...DEFAULT_SETTINGS.tts, ...(s.settings.tts ?? {}) }
   }
   if (s.recents) store.recents = s.recents
   if (s.positions) store.positions = s.positions
@@ -246,6 +268,7 @@ export function closeTab(id: number): void {
   epubBooks.get(id)?.destroy()
   epubBooks.delete(id)
   txtBooks.delete(id)
+  bookApis.delete(id)
   store.tabs.splice(i, 1)
   if (store.activeTabId === id) {
     store.activeTabId = store.tabs[Math.min(i, store.tabs.length - 1)]?.id ?? 0

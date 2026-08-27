@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use tauri::{Emitter, Manager};
 
 pub mod ocr;
+pub mod pdfops;
 
 #[derive(Serialize)]
 struct FileMeta {
@@ -264,6 +265,27 @@ fn save_to_documents(app: tauri::AppHandle, name: String, text: String) -> Resul
     Ok(dest.to_string_lossy().into_owned())
 }
 
+/// Mobile export of binary data (page images): raw body, name in a header.
+#[tauri::command]
+fn save_bytes_to_documents(app: tauri::AppHandle, request: tauri::ipc::Request) -> Result<String, String> {
+    let raw = request
+        .headers()
+        .get("x-name")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| "缺少名称".to_string())?;
+    let name = safe_asset_name(&urlencoding_decode(raw)?)?;
+    let dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let dest = dir.join(name);
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => {
+            fs::write(&dest, bytes).map_err(|e| format!("保存失败: {e}"))?;
+            Ok(dest.to_string_lossy().into_owned())
+        }
+        _ => Err("expected raw body".into()),
+    }
+}
+
 /// Filled-form PDF save: raw binary body (no JSON copy), dest in header.
 #[tauri::command]
 fn save_pdf_bytes(request: tauri::ipc::Request) -> Result<(), String> {
@@ -371,6 +393,304 @@ async fn ocr_make_searchable(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+// ── document operations (pdfops) ─────────────────────────────────────────
+// Every one of these READS a source file and WRITES a new one. `dest` is
+// optional: on iOS there are no save dialogs, so None means "app Documents
+// dir", the same rule ocr_make_searchable already follows.
+
+fn resolve_dest(app: &tauri::AppHandle, src: &str, dest: Option<String>, suffix: &str, ext: &str) -> Result<PathBuf, String> {
+    if let Some(d) = dest {
+        return Ok(PathBuf::from(d));
+    }
+    let dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stem = Path::new(src)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "document".into());
+    Ok(dir.join(format!("{stem}{suffix}.{ext}")))
+}
+
+fn write_out(dest: PathBuf, bytes: Vec<u8>) -> Result<String, String> {
+    fs::write(&dest, bytes).map_err(|e| format!("写入失败: {e}"))?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+async fn pdf_write_annotations(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    annots: Vec<pdfops::AnnotSpec>,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-annotated", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::write_annotations(&pdf, password.as_deref(), &annots)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_rotate_pages(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    pages: Vec<u32>,
+    degrees: i64,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-rotated", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::rotate_pages(&pdf, password.as_deref(), &pages, degrees)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_arrange_pages(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    order: Vec<u32>,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-pages", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::arrange_pages(&pdf, password.as_deref(), &order)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_merge(
+    app: tauri::AppHandle,
+    src_paths: Vec<String>,
+    dest_path: Option<String>,
+) -> Result<String, String> {
+    let first = src_paths.first().cloned().unwrap_or_default();
+    let dest = resolve_dest(&app, &first, dest_path, "-merged", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut inputs = Vec::new();
+        for p in &src_paths {
+            inputs.push((fs::read(p).map_err(|e| format!("读取 {p} 失败: {e}"))?, None));
+        }
+        write_out(dest, pdfops::merge(&inputs)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_split(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_dir: Option<String>,
+    password: Option<String>,
+    ranges: Vec<(u32, u32)>,
+) -> Result<Vec<String>, String> {
+    let dir = match dest_dir {
+        Some(d) => PathBuf::from(d),
+        None => app.path().document_dir().map_err(|e| e.to_string())?,
+    };
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stem = Path::new(&src_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "document".into());
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        let parts = pdfops::split(&pdf, password.as_deref(), &ranges)?;
+        let mut out = Vec::new();
+        for (i, bytes) in parts.into_iter().enumerate() {
+            let (from, to) = ranges[i];
+            out.push(write_out(dir.join(format!("{stem}-{from}-{to}.pdf")), bytes)?);
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_from_images(
+    app: tauri::AppHandle,
+    image_paths: Vec<String>,
+    dest_path: Option<String>,
+    dpi: f32,
+) -> Result<String, String> {
+    let first = image_paths.first().cloned().unwrap_or_default();
+    let dest = resolve_dest(&app, &first, dest_path, "", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut images = Vec::new();
+        for p in &image_paths {
+            images.push(fs::read(p).map_err(|e| format!("读取 {p} 失败: {e}"))?);
+        }
+        write_out(dest, pdfops::images_to_pdf(&images, dpi)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(serde::Serialize)]
+struct CompressResult {
+    path: String,
+    before: u64,
+    after: u64,
+}
+
+#[tauri::command]
+async fn pdf_compress(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    max_dim: u32,
+    quality: u8,
+) -> Result<CompressResult, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-compressed", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        let before = pdf.len() as u64;
+        let out = pdfops::compress_pdf(&pdf, password.as_deref(), max_dim, quality)?;
+        let after = out.len() as u64;
+        Ok(CompressResult { path: write_out(dest, out)?, before, after })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(serde::Deserialize)]
+struct StampInput {
+    page: u32,
+    rect: [f32; 4],
+    /// path of a PNG saved by save_signature (or a temp text stamp)
+    image_path: String,
+}
+
+#[tauri::command]
+async fn pdf_stamp(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    stamps: Vec<StampInput>,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-signed", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        let mut specs = Vec::new();
+        for s in &stamps {
+            specs.push(pdfops::StampSpec {
+                page: s.page,
+                rect: s.rect,
+                png: fs::read(&s.image_path).map_err(|e| format!("读取签名失败: {e}"))?,
+            });
+        }
+        write_out(dest, pdfops::stamp_images(&pdf, password.as_deref(), &specs)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_set_password(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    current: Option<String>,
+    user: String,
+    owner: String,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-protected", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::set_password(&pdf, current.as_deref(), &user, &owner)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_remove_password(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: String,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-unlocked", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::remove_password(&pdf, &password)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ── signature library ────────────────────────────────────────────────────
+// Signatures live in appData, not beside any document: they are a property
+// of the person, and they must never leak into a folder that gets shared.
+
+fn signatures_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("signatures");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+#[tauri::command]
+fn save_signature(app: tauri::AppHandle, request: tauri::ipc::Request) -> Result<String, String> {
+    let raw = request
+        .headers()
+        .get("x-name")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| "缺少名称".to_string())?;
+    let name = safe_asset_name(&urlencoding_decode(raw)?)?;
+    let dest = signatures_dir(&app)?.join(name);
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => {
+            fs::write(&dest, bytes).map_err(|e| format!("保存签名失败: {e}"))?;
+            Ok(dest.to_string_lossy().into_owned())
+        }
+        _ => Err("expected raw body".into()),
+    }
+}
+
+#[tauri::command]
+fn list_signatures(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let dir = signatures_dir(&app)?;
+    let mut out: Vec<String> = fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|x| x == "png").unwrap_or(false))
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    out.sort();
+    Ok(out)
+}
+
+#[tauri::command]
+fn delete_signature(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let dir = signatures_dir(&app)?;
+    let p = PathBuf::from(&path);
+    // only ever delete inside our own folder
+    if !p.starts_with(&dir) {
+        return Err("路径不在签名目录内".into());
+    }
+    fs::remove_file(p).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_file_bytes(path: String) -> Result<tauri::ipc::Response, String> {
+    Ok(tauri::ipc::Response::new(fs::read(&path).unwrap_or_default()))
 }
 
 /// Files/deep-links this process was launched with (file association),
@@ -511,12 +831,27 @@ pub fn run() {
             write_sidecar,
             write_sidecar_asset,
             read_sidecar_asset,
+            pdf_write_annotations,
+            pdf_rotate_pages,
+            pdf_arrange_pages,
+            pdf_merge,
+            pdf_split,
+            pdf_from_images,
+            pdf_compress,
+            pdf_stamp,
+            pdf_set_password,
+            pdf_remove_password,
+            save_signature,
+            list_signatures,
+            delete_signature,
+            read_file_bytes,
             load_state,
             save_state,
             file_hash,
             reveal_file,
             save_pdf_bytes,
             save_to_documents,
+            save_bytes_to_documents,
             startup_files,
             ocr_image,
             ocr_engine,

@@ -36,6 +36,9 @@ import ImageOcrDialog from './components/ImageOcrDialog.vue'
 import BookView from './components/BookView.vue'
 import ViewMenu from './components/ViewMenu.vue'
 import AnnotToolLayer from './components/AnnotToolLayer.vue'
+import DocTools from './components/doctools/DocTools.vue'
+import ReadAloudBar from './components/ReadAloudBar.vue'
+import { speaker, startReading, stopReading } from './readaloud'
 import type { AnnotationKind } from '@solopdf/core'
 
 const scrollHost = ref<HTMLDivElement>()
@@ -45,6 +48,8 @@ const settingsOpen = ref(false)
 const viewMenuOpen = ref(false)
 /** armed annotation tool; 'none' means normal reading/selection */
 const tool = ref<'none' | 'note' | 'region'>('none')
+const docToolsOpen = ref(false)
+const readAloud = ref(false)
 const ocrOpen = ref(false)
 const imageOcrPath = ref('')
 const imageOcrBytes = ref<{ bytes: Uint8Array; name: string } | null>(null)
@@ -547,6 +552,10 @@ onMounted(async () => {
     toggleBookmark,
     highlightSelection,
     setTool: (k: 'none' | 'note' | 'region') => { tool.value = k },
+    openDocTools: () => { docToolsOpen.value = true },
+    setReadAloud: (on: boolean) => { readAloud.value = on },
+    readAloudRef: readAloud,
+    tts: { speaker, startReading, stopReading },
     epubBooks,
     closeTab,
   }
@@ -595,6 +604,8 @@ onBeforeUnmount(() => {
 })
 
 watch(() => store.settings.keepAwake, (on) => setKeepAwake(on))
+// speech that keeps reading a document you navigated away from is a bug
+watch(() => store.activeTabId, () => { readAloud.value = false })
 
 // zoom / dark-pdf propagation
 watch(() => store.settings.darkPdf, (m) => {
@@ -627,6 +638,9 @@ watch(() => store.settings.theme, () => {
           @book="toggleBookMode"
           @view="viewMenuOpen = !viewMenuOpen"
           @bookmark="toggleBookmark"
+          @doc-tools="docToolsOpen = true"
+          @speak="readAloud = !readAloud"
+          :speaking="readAloud"
           @tool="(k) => (tool = tool === k ? 'none' : k)"
           :bookmarked="!!currentBookmark"
           :tool="tool"
@@ -722,6 +736,14 @@ watch(() => store.settings.theme, () => {
       v-if="viewMenuOpen && store.activeTab && store.activeTab.kind === 'pdf'"
       @close="viewMenuOpen = false"
       @toast="showToast"
+    />
+    <ReadAloudBar v-if="readAloud && store.activeTab" @close="readAloud = false" />
+
+    <DocTools
+      v-if="docToolsOpen && store.activeTab && store.activeTab.kind === 'pdf'"
+      @close="docToolsOpen = false"
+      @toast="showToast"
+      @open="(p) => { docToolsOpen = false; void openPath(p) }"
     />
     <SettingsPanel v-if="settingsOpen" @close="settingsOpen = false" />
     <OcrDialog v-if="ocrOpen && store.activeTab" @close="ocrOpen = false" @done="onOcrDone" />

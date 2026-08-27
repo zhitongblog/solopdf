@@ -15,7 +15,7 @@ interface FlatNode {
   map: number[]
 }
 
-function flatten(root: HTMLElement): { flat: string; nodes: FlatNode[] } {
+export function flatten(root: HTMLElement): { flat: string; nodes: FlatNode[] } {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: (n) =>
       (n.parentElement?.closest('mark') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
@@ -41,7 +41,7 @@ function flatten(root: HTMLElement): { flat: string; nodes: FlatNode[] } {
 }
 
 /** 把 [from, to)(压缩坐标)范围包进 mark */
-function wrapRange(nodes: FlatNode[], from: number, to: number, cls: string, id: string): void {
+export function wrapRange(nodes: FlatNode[], from: number, to: number, cls: string, id: string): void {
   // 倒序处理,避免前面的切割使后面的偏移失效
   const touched = nodes.filter((fn) => fn.start < to && fn.start + fn.flat.length > from)
   for (const fn of touched.reverse()) {
@@ -57,6 +57,33 @@ function wrapRange(nodes: FlatNode[], from: number, to: number, cls: string, id:
     target.parentNode?.replaceChild(mark, target)
     mark.appendChild(target)
   }
+}
+
+/**
+ * 朗读跟随:把当前句子包成 <mark class="bk-speak">,换句时先拆掉旧的。
+ * 复用批注那套跨节点切割逻辑 —— CSS Custom Highlight API 更干净,但
+ * 它要 Safari 17.2+,而本项目最低支持 iOS 14。
+ */
+export function markSpeaking(root: HTMLElement, text: string): HTMLElement | null {
+  clearSpeaking(root)
+  const needle = text.replace(/\s+/g, '')
+  if (needle.length < 1) return null
+  const { flat, nodes } = flatten(root)
+  const at = flat.indexOf(needle)
+  if (at < 0) return null
+  wrapRange(nodes, at, at + needle.length, 'bk-speak', '__speak')
+  return root.querySelector('mark[data-annot="__speak"]')
+}
+
+/** 拆掉朗读标记并把被切开的文本节点合回去 */
+export function clearSpeaking(root: HTMLElement): void {
+  root.querySelectorAll('mark[data-annot="__speak"]').forEach((m) => {
+    const parent = m.parentNode
+    if (!parent) return
+    while (m.firstChild) parent.insertBefore(m.firstChild, m)
+    parent.removeChild(m)
+    ;(parent as HTMLElement).normalize?.()
+  })
 }
 
 /** 对 root 内的内容套用批注标记(只处理给定页/章的批注) */

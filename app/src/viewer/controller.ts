@@ -30,6 +30,7 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 import { TextLayer, OPS, AnnotationLayer, AnnotationMode } from 'pdfjs-dist'
 import { SimpleLinkService } from 'pdfjs-dist/web/pdf_viewer.mjs'
 import { buildPageIndex, matchOnPage, type PageTextIndex } from '@solopdf/core'
+import { splitSentences } from '../tts'
 import type { Annotation, Quad } from '@solopdf/core'
 import {
   NO_CROP, cropOffset, displaySize, normRotation, pdfRectToView, rotatedSize, viewToPdf,
@@ -813,6 +814,93 @@ export class PdfViewerController {
     s.textItems = items
     s.textIndex = buildPageIndex(strings)
     return s.textIndex
+  }
+
+  /**
+   * Raw page text split into sentences, each carrying the text-item range it
+   * came from so the caller can light it up while it is being read.
+   *
+   * Deliberately NOT built on the normalized search index: that index strips
+   * whitespace (great for CJK anchoring, terrible for a speech engine, which
+   * would run every English word together).
+   */
+  async pageSentences(pageNum: number): Promise<{ text: string; itemRange: [number, number] }[]> {
+    const s = this.slots[pageNum - 1]
+    if (!s) return []
+    // guarantee s.textItems: the caller turns our itemRange into quads via
+    // quadsForCharRange, which reads that cache and would otherwise be empty
+    // on any page the user hasn't scrolled past yet
+    await this.getPageIndex(pageNum)
+    if (!s.page) s.page = await this.doc.getPage(pageNum)
+    const tc = await s.page.getTextContent()
+    type Item = { str: string; hasEOL?: boolean }
+    const items = (tc.items as Item[]).filter((it) => 'str' in it)
+    // rebuild a plain string, remembering which item each character came from
+    let text = ''
+    const owner: number[] = []
+    for (let i = 0; i < items.length; i++) {
+      let chunk = items[i].str
+      if (items[i].hasEOL) chunk += '\n'
+      // pdf.js emits per-run items; two Latin runs that meet without any
+      // whitespace would otherwise be spoken as one mangled word
+      if (
+        text && chunk &&
+        !/\s$/.test(text) && !/^\s/.test(chunk) &&
+        /[A-Za-z0-9)\]]$/.test(text) && /^[A-Za-z0-9(\[]/.test(chunk)
+      ) {
+        text += ' '
+        owner.push(i)
+      }
+      for (let k = 0; k < chunk.length; k++) owner.push(i)
+      text += chunk
+    }
+    const out: { text: string; itemRange: [number, number] }[] = []
+    let cursor = 0
+    for (const sentence of splitSentences(text)) {
+      const at = text.indexOf(sentence, cursor)
+      if (at < 0) {
+        out.push({ text: sentence, itemRange: [0, 0] })
+        continue
+      }
+      cursor = at + sentence.length
+      out.push({
+        text: sentence,
+        itemRange: [owner[at] ?? 0, owner[Math.max(at, cursor - 1)] ?? 0],
+      })
+    }
+    return out.filter((x) => x.text.trim().length > 0)
+  }
+
+  /** transient "being read aloud" overlay; pass null to clear */
+  setSpeaking(page: number | null, quads: Quad[] = []): void {
+    for (const s of this.slots) s.hlLayer?.querySelectorAll('.pv-speak').forEach((el) => el.remove())
+    if (page == null || !quads.length) return
+    const i = page - 1
+    const s = this.slots[i]
+    if (!s?.hlLayer) return
+    for (const q of quads) {
+      const div = document.createElement('div')
+      div.className = 'pv-speak'
+      const v = pdfRectToView(q, this.boxes[i], this.rotationOf(i), this.scale)
+      div.style.cssText = `left:${v.left}px;top:${v.top}px;width:${v.width}px;height:${v.height}px`
+      s.hlLayer.appendChild(div)
+    }
+  }
+
+  /** scroll just enough to bring a quad into view (no jump when already visible) */
+  revealQuad(page: number, quad: Quad): void {
+    const i = page - 1
+    const s = this.slots[i]
+    if (!s) return
+    const r = pdfRectToView(quad, this.boxes[i], this.rotationOf(i), this.scale)
+    const off = cropOffset(this.boxes[i], this.rotationOf(i), this.crop, this.scale)
+    const base = this.scrollMode === 'paged' ? 0 : s.top
+    const top = base + r.top - off.y
+    const view = this.scroll.scrollTop
+    const h = this.scroll.clientHeight
+    if (top < view + h * 0.1 || top > view + h * 0.8) {
+      this.scroll.scrollTop = Math.max(0, top - h * 0.35)
+    }
   }
 
   /** rough quads for a char range on a page (item-level granularity) */

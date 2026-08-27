@@ -4,10 +4,10 @@ import { store, controllers } from '../store'
 import { isMobile, isTauri } from '../platform'
 import { t } from '../i18n'
 
-defineProps<{ bookmarked?: boolean; tool?: 'none' | 'note' | 'region' }>()
+defineProps<{ bookmarked?: boolean; tool?: 'none' | 'note' | 'region'; speaking?: boolean }>()
 defineEmits<{
   search: []; settings: []; print: []; saveFilled: []; exportMd: []; ocr: []
-  book: []; view: []; bookmark: []; tool: [kind: 'note' | 'region']
+  book: []; view: []; bookmark: []; tool: [kind: 'note' | 'region']; docTools: []; speak: []
 }>()
 
 const tab = computed(() => store.activeTab)
@@ -66,8 +66,10 @@ function zoom(dir: 1 | -1): void {
     >{{ t('tb.saveFilled') }}</button>
     <span class="hint" :title="tab.sidecarLocation">{{ tab.encrypted ? '🔒 ' : '' }}{{ tab.sidecarLocation ? t('tb.annotTo') + tab.sidecarLocation.split('/').pop() : '' }}</span>
     <div class="sep" />
+    <button v-if="isTauri()" :title="t('tb.docTools')" @click="$emit('docTools')">🛠</button>
     <button v-if="isTauri()" :title="t('tb.ocrTip')" @click="$emit('ocr')">{{ t('tb.ocr') }}</button>
     <button :title="t('tb.exportMdTip')" @click="$emit('exportMd')">MD↓</button>
+    <button :class="{ active: speaking }" :title="t('tb.speak')" @click="$emit('speak')">🔊</button>
     <button :title="t('tb.search')" @click="$emit('search')">🔍</button>
     <button v-if="!isMobile()" :title="t('tb.print')" @click="$emit('print')">🖨</button>
     <button :title="t('tb.settings')" @click="$emit('settings')">⚙︎</button>
