@@ -694,6 +694,124 @@ fn define_word(_word: String) -> &'static str {
     "unsupported"
 }
 
+// ── mobile document import ───────────────────────────────────────────────
+//
+// iOS hands us a file in one of two ways, and NEITHER gives a path that
+// survives a relaunch:
+//   - the document picker copies into a temporary sandbox location
+//   - "open with" from Files/WeChat/Mail copies into Documents/Inbox with a
+//     fresh, unpredictable name every single time
+//
+// Security-scoped bookmarks are the API answer, but they don't fix the Inbox
+// case at all (each copy is a genuinely new file). So SoloPDF imports:
+// documents are copied once into <Documents>/Library, which we own, which
+// UIFileSharingEnabled exposes in the Files app, and which the sidecar can
+// be written next to. Re-importing the same book maps back to the same file
+// by content hash, so reading progress and annotations follow it.
+
+#[derive(Serialize)]
+struct ImportResult {
+    path: String,
+    /// false when the content hash matched something already on the shelf
+    copied: bool,
+}
+
+fn library_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().document_dir().map_err(|e| e.to_string())?.join("Library");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+fn hash_file(path: &Path) -> Result<String, String> {
+    let mut f = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = twox_hash::XxHash3_64::new();
+    let mut buf = vec![0u8; 1024 * 1024];
+    loop {
+        let n = f.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        hasher.write(&buf[..n]);
+    }
+    Ok(format!("{:016x}", hasher.finish()))
+}
+
+/// Copy a document into the app's own Library folder, deduplicated by content
+/// hash. Returns the stable path to use from now on.
+#[tauri::command]
+async fn import_document(app: tauri::AppHandle, src_path: String) -> Result<ImportResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let src = PathBuf::from(&src_path);
+        if !src.is_file() {
+            return Err(format!("文件不存在: {src_path}"));
+        }
+        let dir = library_dir(&app)?;
+        // already ours? then there is nothing to import
+        if src.starts_with(&dir) {
+            return Ok(ImportResult { path: src_path.clone(), copied: false });
+        }
+        let hash = hash_file(&src)?;
+        let index_path = dir.join("index.json");
+        let mut index: serde_json::Map<String, serde_json::Value> = fs::read_to_string(&index_path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        if let Some(existing) = index.get(&hash).and_then(|v| v.as_str()) {
+            let p = dir.join(existing);
+            if p.is_file() {
+                return Ok(ImportResult { path: p.to_string_lossy().into_owned(), copied: false });
+            }
+        }
+
+        let stem = src.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
+        let ext = src.extension().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut name = if ext.is_empty() { stem.clone() } else { format!("{stem}.{ext}") };
+        // a different book with the same name must not overwrite the first
+        let mut n = 2;
+        while dir.join(&name).exists() {
+            name = if ext.is_empty() { format!("{stem} {n}") } else { format!("{stem} {n}.{ext}") };
+            n += 1;
+        }
+        let dest = dir.join(&name);
+        fs::copy(&src, &dest).map_err(|e| format!("导入失败: {e}"))?;
+        index.insert(hash, serde_json::Value::String(name));
+        let _ = fs::write(&index_path, serde_json::to_string_pretty(&index).unwrap_or_default());
+        Ok(ImportResult { path: dest.to_string_lossy().into_owned(), copied: true })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Everything already imported — lets the shelf rebuild itself after the
+/// app's settings are lost but the files are still there.
+#[tauri::command]
+fn list_imported(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let dir = library_dir(&app)?;
+    let mut out: Vec<String> = fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_file()
+                && p.extension()
+                    .map(|e| {
+                        let e = e.to_string_lossy().to_lowercase();
+                        ["pdf", "epub", "txt", "cbz", "cbr", "mobi", "azw3"].contains(&e.as_str())
+                    })
+                    .unwrap_or(false)
+        })
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    out.sort();
+    Ok(out)
+}
+
+/// Where imported documents live, for the UI to show.
+#[tauri::command]
+fn library_path(app: tauri::AppHandle) -> Result<String, String> {
+    Ok(library_dir(&app)?.to_string_lossy().into_owned())
+}
+
 // ── library ──────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -1063,6 +1181,9 @@ pub fn run() {
             pdf_remove_password,
             define_word,
             read_user_dicts,
+            import_document,
+            list_imported,
+            library_path,
             scan_folder,
             write_cover,
             read_cover,

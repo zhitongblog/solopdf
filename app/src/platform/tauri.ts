@@ -83,6 +83,18 @@ export class TauriBackend implements PlatformBackend {
     return buf.byteLength ? new Uint8Array(buf) : null
   }
 
+  async importDocument(path: string): Promise<string> {
+    // Desktop paths are stable; only phones need the copy, and doing it on
+    // desktop would silently duplicate every book someone opens.
+    if (!/iPhone|iPad|Android/i.test(navigator.userAgent)) return path
+    const res = await invoke<{ path: string; copied: boolean }>('import_document', { srcPath: path })
+    return res.path
+  }
+
+  async listImported(): Promise<string[]> {
+    return await invoke<string[]>('list_imported')
+  }
+
   async saveText(suggestedName: string, text: string): Promise<string | null> {
     if (/iPhone|iPad|Android/i.test(navigator.userAgent)) {
       // no save dialogs on mobile — write to the app Documents folder,

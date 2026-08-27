@@ -106,6 +106,14 @@ export class WebBackend implements PlatformBackend {
     return new Uint8Array(await res.arrayBuffer())
   }
 
+  async importDocument(path: string): Promise<string> {
+    return path // the browser harness reads fixtures straight off disk
+  }
+
+  async listImported(): Promise<string[]> {
+    return []
+  }
+
   async saveText(suggestedName: string, text: string): Promise<string | null> {
     const res = await fetch(`/__fixtures/${encodeURIComponent(suggestedName)}`, {
       method: 'PUT',

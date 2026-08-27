@@ -47,4 +47,12 @@ export interface PlatformBackend {
   writeSidecarAsset(pdfPath: string, name: string, bytes: Uint8Array): Promise<string>
   /** read one back; null when missing */
   readSidecarAsset(pdfPath: string, name: string): Promise<Uint8Array | null>
+  /**
+   * Mobile only: copy a document into the app's own Library folder and return
+   * the stable path. On desktop this is the identity function — a path there
+   * already survives a relaunch.
+   */
+  importDocument(path: string): Promise<string>
+  /** documents already imported (mobile shelf recovery) */
+  listImported(): Promise<string[]>
 }

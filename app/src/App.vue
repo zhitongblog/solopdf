@@ -41,7 +41,7 @@ import DictPopup from './components/DictPopup.vue'
 import StatsPanel from './components/StatsPanel.vue'
 import LibraryView from './components/LibraryView.vue'
 import LibrarySearch from './components/LibrarySearch.vue'
-import { noteOpened, captureCover } from './library'
+import { noteOpened, captureCover, addToLibrary } from './library'
 import { startStats, stopStats, noteTurn } from './stats'
 import { speaker, startReading, stopReading } from './readaloud'
 import type { AnnotationKind } from '@solopdf/core'
@@ -99,7 +99,17 @@ function restoreBookByHash(tab: TabState, hadPos: boolean): void {
 }
 
 // ── open/close ──
-async function openPath(path: string, jumpTo?: { page: number; annot?: string }): Promise<void> {
+async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string }): Promise<void> {
+  // Phones hand us a throwaway path (picker temp dir, or a fresh Inbox copy
+  // on every "open with"). Import once into our own Library folder so the
+  // path — and with it the sidecar, the reading position and the shelf entry
+  // — survives the next launch. Desktop returns the path unchanged.
+  let path = rawPath
+  try {
+    path = await platform().importDocument(rawPath)
+  } catch (err) {
+    showToast(t('app.importFail', { msg: String((err as Error).message ?? err) }))
+  }
   // focus existing tab for same path
   const existing = store.tabs.find((t) => t.path === path)
   if (existing) {
@@ -551,6 +561,10 @@ onMounted(async () => {
   initWakeLock()
   setKeepAwake(store.settings.keepAwake)
   startStats()
+  // a phone that lost its settings still has its books
+  void platform().listImported().then((paths) => {
+    for (const p of paths) addToLibrary(p)
+  }).catch(() => {})
   window.addEventListener('keydown', onKey)
   window.addEventListener('focus', onFocus)
   window.addEventListener('resize', onResize)
