@@ -8,6 +8,7 @@
   "dependencies": {
     "@napi-rs/canvas": "^1.0.2",
     "@solopdf/core": "workspace:*",
+    "fflate": "^0.8.3",
     "pdfjs-dist": "^5.4.0"
   }
 }

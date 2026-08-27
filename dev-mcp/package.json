@@ -7,8 +7,10 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
-    "zod": "^3.24.0",
+    "@napi-rs/canvas": "^1.0.2",
     "@solopdf/core": "workspace:*",
-    "pdfjs-dist": "^5.4.0"
+    "fflate": "^0.8.3",
+    "pdfjs-dist": "^5.4.0",
+    "zod": "^3.24.0"
   }
 }

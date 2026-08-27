@@ -5,7 +5,7 @@ description = "SoloPDF — free, ad-free, local-first PDF reader with highlights
 authors = ["alexlee"]
 edition = "2021"
 autobins = false
-# two [[bin]]s (app + solopdf-ocr): tauri needs to know which one is the app
+# three [[bin]]s (app + two CLI drivers): tauri needs to know which is the app
 default-run = "SoloPDF"
 
 # Match tauri.conf.json mainBinaryName exactly — SoloMD shipped a Windows
@@ -18,6 +18,11 @@ path = "src/main.rs"
 [[bin]]
 name = "solopdf-ocr"
 path = "src/bin/ocr_cli.rs"
+
+# Document-operations CLI driver — shipped artifact (see README)
+[[bin]]
+name = "solopdf-doc"
+path = "src/bin/doc_cli.rs"
 
 [lib]
 name = "solopdf_lib"

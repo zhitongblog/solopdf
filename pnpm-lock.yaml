@@ -59,6 +59,9 @@ importers:
       '@solopdf/core':
         specifier: workspace:*
         version: link:../core
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
       pdfjs-dist:
         specifier: ^5.4.0
         version: 5.7.284
@@ -77,9 +80,15 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.12.0
         version: 1.29.0(zod@3.25.76)
+      '@napi-rs/canvas':
+        specifier: ^1.0.2
+        version: 1.0.2
       '@solopdf/core':
         specifier: workspace:*
         version: link:../core
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
       pdfjs-dist:
         specifier: ^5.4.0
         version: 5.7.284
