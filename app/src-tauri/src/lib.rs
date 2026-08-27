@@ -694,6 +694,167 @@ fn define_word(_word: String) -> &'static str {
     "unsupported"
 }
 
+// ── library ──────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct ScannedFile {
+    path: String,
+    name: String,
+    size: u64,
+    modified: u64,
+}
+
+/// Find readable documents under a folder. Depth-limited and count-capped:
+/// someone will point this at their home directory, and a shelf that hangs
+/// for a minute is worse than one that says "too many files".
+#[tauri::command]
+async fn scan_folder(path: String, max_depth: u32) -> Result<Vec<ScannedFile>, String> {
+    const EXTS: [&str; 7] = ["pdf", "epub", "txt", "cbz", "cbr", "mobi", "azw3"];
+    const MAX_FILES: usize = 5000;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut out = Vec::new();
+        let mut stack = vec![(PathBuf::from(&path), 0u32)];
+        while let Some((dir, depth)) = stack.pop() {
+            if out.len() >= MAX_FILES {
+                break;
+            }
+            let Ok(entries) = fs::read_dir(&dir) else { continue };
+            for entry in entries.flatten() {
+                let p = entry.path();
+                let Ok(md) = entry.metadata() else { continue };
+                if md.is_dir() {
+                    // hidden folders are caches and version-control noise
+                    let hidden = p
+                        .file_name()
+                        .map(|n| n.to_string_lossy().starts_with('.'))
+                        .unwrap_or(false);
+                    if !hidden && depth < max_depth {
+                        stack.push((p, depth + 1));
+                    }
+                    continue;
+                }
+                let ext = p
+                    .extension()
+                    .map(|e| e.to_string_lossy().to_lowercase())
+                    .unwrap_or_default();
+                if !EXTS.contains(&ext.as_str()) {
+                    continue;
+                }
+                out.push(ScannedFile {
+                    name: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                    path: p.to_string_lossy().into_owned(),
+                    size: md.len(),
+                    modified: md
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0),
+                });
+                if out.len() >= MAX_FILES {
+                    break;
+                }
+            }
+        }
+        out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn covers_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("covers");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// Cover thumbnails live in appData keyed by a hash of the path — never
+/// beside the document, which may sit in a folder the user shares.
+#[tauri::command]
+fn write_cover(app: tauri::AppHandle, request: tauri::ipc::Request) -> Result<String, String> {
+    let raw = request
+        .headers()
+        .get("x-key")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| "缺少 key".to_string())?;
+    let key = safe_asset_name(&urlencoding_decode(raw)?)?;
+    let dest = covers_dir(&app)?.join(format!("{key}.jpg"));
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => {
+            fs::write(&dest, bytes).map_err(|e| format!("封面写入失败: {e}"))?;
+            Ok(dest.to_string_lossy().into_owned())
+        }
+        _ => Err("expected raw body".into()),
+    }
+}
+
+#[tauri::command]
+fn read_cover(app: tauri::AppHandle, key: String) -> Result<tauri::ipc::Response, String> {
+    let key = safe_asset_name(&key)?;
+    let p = covers_dir(&app)?.join(format!("{key}.jpg"));
+    Ok(tauri::ipc::Response::new(fs::read(p).unwrap_or_default()))
+}
+
+fn cache_dir(app: &tauri::AppHandle, kind: &str) -> Result<PathBuf, String> {
+    let kind = safe_asset_name(kind)?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("cache").join(kind);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// Generic app-data cache (search indexes today). Keyed, never beside the
+/// user's documents, and wholly disposable — clear_cache is a supported
+/// operation, not a repair.
+#[tauri::command]
+fn write_cache(app: tauri::AppHandle, request: tauri::ipc::Request) -> Result<(), String> {
+    let header = |k: &str| -> Result<String, String> {
+        let raw = request
+            .headers()
+            .get(k)
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| format!("缺少 {k}"))?;
+        urlencoding_decode(raw)
+    };
+    let kind = header("x-kind")?;
+    let key = safe_asset_name(&header("x-key")?)?;
+    let dest = cache_dir(&app, &kind)?.join(key);
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => {
+            fs::write(&dest, bytes).map_err(|e| format!("缓存写入失败: {e}"))
+        }
+        _ => Err("expected raw body".into()),
+    }
+}
+
+#[tauri::command]
+fn read_cache(app: tauri::AppHandle, kind: String, key: String) -> Result<tauri::ipc::Response, String> {
+    let key = safe_asset_name(&key)?;
+    let p = cache_dir(&app, &kind)?.join(key);
+    Ok(tauri::ipc::Response::new(fs::read(p).unwrap_or_default()))
+}
+
+#[tauri::command]
+fn list_cache(app: tauri::AppHandle, kind: String) -> Result<Vec<String>, String> {
+    let dir = cache_dir(&app, &kind)?;
+    Ok(fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+        .collect())
+}
+
+#[tauri::command]
+fn clear_cache(app: tauri::AppHandle, kind: String) -> Result<(), String> {
+    let dir = cache_dir(&app, &kind)?;
+    fs::remove_dir_all(&dir).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn file_exists(path: String) -> bool {
+    Path::new(&path).is_file()
+}
+
 // ── signature library ────────────────────────────────────────────────────
 // Signatures live in appData, not beside any document: they are a property
 // of the person, and they must never leak into a folder that gets shared.
@@ -902,6 +1063,14 @@ pub fn run() {
             pdf_remove_password,
             define_word,
             read_user_dicts,
+            scan_folder,
+            write_cover,
+            read_cover,
+            file_exists,
+            write_cache,
+            read_cache,
+            list_cache,
+            clear_cache,
             save_signature,
             list_signatures,
             delete_signature,

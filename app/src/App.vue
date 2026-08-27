@@ -30,7 +30,6 @@ import SearchBar from './components/SearchBar.vue'
 import PasswordDialog from './components/PasswordDialog.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import HighlightPopover from './components/HighlightPopover.vue'
-import WelcomeScreen from './components/WelcomeScreen.vue'
 import OcrDialog from './components/OcrDialog.vue'
 import ImageOcrDialog from './components/ImageOcrDialog.vue'
 import BookView from './components/BookView.vue'
@@ -40,6 +39,9 @@ import DocTools from './components/doctools/DocTools.vue'
 import ReadAloudBar from './components/ReadAloudBar.vue'
 import DictPopup from './components/DictPopup.vue'
 import StatsPanel from './components/StatsPanel.vue'
+import LibraryView from './components/LibraryView.vue'
+import LibrarySearch from './components/LibrarySearch.vue'
+import { noteOpened, captureCover } from './library'
 import { startStats, stopStats, noteTurn } from './stats'
 import { speaker, startReading, stopReading } from './readaloud'
 import type { AnnotationKind } from '@solopdf/core'
@@ -55,6 +57,7 @@ const docToolsOpen = ref(false)
 const readAloud = ref(false)
 const dictWord = ref<{ word: string; anchor: DOMRect | null } | null>(null)
 const statsOpen = ref(false)
+const librarySearchOpen = ref(false)
 const ocrOpen = ref(false)
 const imageOcrPath = ref('')
 const imageOcrBytes = ref<{ bytes: Uint8Array; name: string } | null>(null)
@@ -134,6 +137,7 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
       tab.bookMode = true
       store.docTick++
       addRecent(path)
+      noteOpened(tab)
     } catch (err) {
       tab.loadError = String((err as Error)?.message ?? err)
       showToast(t('app.openFail', { msg: tab.loadError }))
@@ -162,6 +166,7 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
       tab.bookMode = true
       store.docTick++
       addRecent(path)
+      noteOpened(tab)
     } catch (err) {
       tab.loadError = String((err as Error)?.message ?? err)
       showToast(t('app.openFail', { msg: tab.loadError }))
@@ -217,8 +222,11 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
     tab.sidecarLocation = mgr.sidecarLocation
 
     addRecent(path)
+    noteOpened(tab)
     restorePosition(tab)
     if (jumpTo) jumpAfterLoad(tab.id, jumpTo)
+    // shelf cover: one extra small render, after the page the reader wanted
+    void ctrl.renderToCanvas(1, 0.35).then((c) => captureCover(path, c)).catch(() => {})
   } catch (err) {
     tab.loadError = String((err as Error)?.message ?? err)
     showToast(t('app.openFail', { msg: tab.loadError }))
@@ -571,6 +579,7 @@ onMounted(async () => {
     setReadAloud: (on: boolean) => { readAloud.value = on },
     lookupWord: (w: string) => { dictWord.value = { word: w, anchor: null } },
     openStats: () => { statsOpen.value = true },
+    openLibrarySearch: () => { librarySearchOpen.value = true },
     readAloudRef: readAloud,
     tts: { speaker, startReading, stopReading },
     epubBooks,
@@ -663,11 +672,13 @@ watch(() => store.settings.theme, () => {
           :bookmarked="!!currentBookmark"
           :tool="tool"
         />
-        <WelcomeScreen
+        <LibraryView
           v-if="!store.tabs.length"
-          @open="pickAndOpen"
-          @open-path="openPath"
+          @pick="pickAndOpen"
+          @open="openPath"
           @ocr-image="pickImageForOcr"
+          @search="librarySearchOpen = true"
+          @toast="showToast"
         />
         <template v-for="tab in store.tabs" :key="tab.id">
           <div
@@ -771,6 +782,12 @@ watch(() => store.settings.theme, () => {
       @close="docToolsOpen = false"
       @toast="showToast"
       @open="(p) => { docToolsOpen = false; void openPath(p) }"
+    />
+    <LibrarySearch
+      v-if="librarySearchOpen"
+      @close="librarySearchOpen = false"
+      @toast="showToast"
+      @open="(p, page, annot) => { librarySearchOpen = false; void openPath(p, { page, annot }) }"
     />
     <StatsPanel v-if="statsOpen" @close="statsOpen = false" @toast="showToast" />
     <SettingsPanel

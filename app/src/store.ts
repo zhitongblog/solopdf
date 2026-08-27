@@ -124,6 +124,8 @@ interface PersistedState {
   docPrefs: Record<string, DocPrefs>
   bookmarks: Record<string, Bookmark[]>
   stats: import('./stats').Stats
+  library: Record<string, import('./library').LibraryItem>
+  libraryFolders: string[]
 }
 
 /** phones and tablets get different reading defaults from desktops — see the
@@ -170,6 +172,8 @@ export const store = reactive({
   docPrefs: {} as Record<string, DocPrefs>,
   bookmarks: {} as Record<string, Bookmark[]>,
   stats: { docs: {}, days: {} } as import('./stats').Stats,
+  library: {} as Record<string, import('./library').LibraryItem>,
+  libraryFolders: [] as string[],
   loaded: false,
 
   get activeTab(): TabState | undefined {
@@ -213,6 +217,8 @@ export async function initStore(): Promise<void> {
   if (s.docPrefs) store.docPrefs = s.docPrefs
   if (s.bookmarks) store.bookmarks = s.bookmarks
   if (s.stats) store.stats = { docs: s.stats.docs ?? {}, days: s.stats.days ?? {} }
+  if (s.library) store.library = s.library
+  if (s.libraryFolders) store.libraryFolders = s.libraryFolders
   applyLanguage()
   watch(() => store.settings.language, applyLanguage)
   store.loaded = true
@@ -221,7 +227,7 @@ export async function initStore(): Promise<void> {
   watch(
     () => [
       store.settings, store.recents, store.positions, store.hashes,
-      store.docPrefs, store.bookmarks, store.stats,
+      store.docPrefs, store.bookmarks, store.stats, store.library, store.libraryFolders,
     ],
     () => {
       clearTimeout(t)
@@ -240,6 +246,8 @@ async function persist(): Promise<void> {
     docPrefs: { ...store.docPrefs },
     bookmarks: { ...store.bookmarks },
     stats: { docs: { ...store.stats.docs }, days: { ...store.stats.days } },
+    library: { ...store.library },
+    libraryFolders: [...store.libraryFolders],
   })
 }
 
