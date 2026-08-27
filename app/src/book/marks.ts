@@ -71,6 +71,7 @@ export function applyMarks(root: HTMLElement, annots: Annotation[]): void {
     if (needle.length < 2) continue
     const at = flat.indexOf(needle)
     if (at < 0) continue
-    wrapRange(nodes, at, at + needle.length, `bk-hl bk-hl-${a.color}`, a.id)
+    // 类型决定画法(整片底色 / 一条线),颜色决定色相 —— 与 PDF 视图同款
+    wrapRange(nodes, at, at + needle.length, `bk-hl bk-hl-${a.color} bk-mk-${a.kind ?? 'highlight'}`, a.id)
   }
 }

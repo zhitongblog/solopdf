@@ -266,8 +266,24 @@ html.dark .pv-page .annotationLayer :is(input, textarea, select) {
 .hl-pop {
   position: fixed; z-index: 50; background: var(--bg-panel);
   border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow);
-  padding: 6px; display: flex; gap: 4px; align-items: center;
+  padding: 6px 8px; display: flex; flex-direction: column; gap: 6px;
 }
+.hl-pop .hl-row { display: flex; gap: 6px; align-items: center; }
+.hl-pop .swatch.on { border-color: var(--fg); }
+.hl-kind, .hl-act {
+  min-width: 30px; height: 26px; padding: 0 6px; font-size: 13px; line-height: 1;
+}
+.hl-kind.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.hl-sep { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
+/* Phones: dock to the bottom — a popover pinned to the selection is exactly
+   where the thumb already is, and covers the text you just selected. */
+.hl-pop.docked {
+  left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom));
+  top: auto; border-radius: 14px; padding: 10px 12px; gap: 10px;
+}
+.hl-pop.docked .hl-row { justify-content: center; gap: 12px; }
+.hl-pop.docked .swatch { width: 30px; height: 30px; }
+.hl-pop.docked .hl-kind, .hl-pop.docked .hl-act { min-width: 44px; height: 40px; font-size: 16px; }
 .hl-pop .swatch { width: 20px; height: 20px; border-radius: 50%; border: 2px solid transparent; padding: 0; }
 .hl-pop .swatch:hover { transform: scale(1.15); }
 .sw-yellow { background: #ffd500; }
@@ -428,6 +444,16 @@ h4.bk-block { font-size: 1.15em; }
 .bk-hl-green { background: rgba(129, 199, 132, 0.45); }
 .bk-hl-blue { background: rgba(100, 181, 246, 0.45); }
 .bk-hl-pink { background: rgba(244, 143, 177, 0.45); }
+/* book-mode mark kinds: same palette, different stroke — text-decoration is
+   the right tool here (unlike the PDF layer, these marks wrap real text) */
+.bk-mk-underline, .bk-mk-strike, .bk-mk-squiggly { background: none; }
+.bk-mk-underline { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 2px; }
+.bk-mk-strike { text-decoration: line-through; text-decoration-thickness: 2px; }
+.bk-mk-squiggly { text-decoration: underline wavy; text-underline-offset: 2px; }
+.bk-hl-yellow:is(.bk-mk-underline, .bk-mk-strike, .bk-mk-squiggly) { text-decoration-color: #c9a227; }
+.bk-hl-green:is(.bk-mk-underline, .bk-mk-strike, .bk-mk-squiggly) { text-decoration-color: #2e9e5b; }
+.bk-hl-blue:is(.bk-mk-underline, .bk-mk-strike, .bk-mk-squiggly) { text-decoration-color: #3a6df0; }
+.bk-hl-pink:is(.bk-mk-underline, .bk-mk-strike, .bk-mk-squiggly) { text-decoration-color: #d94f8a; }
 .toolbar .book-toggle.active { background: var(--accent); }
 @media (max-width: 700px) {
   .bk-page { padding: 24px 16px 30vh; }
@@ -553,3 +579,80 @@ h4.bk-block { font-size: 1.15em; }
 
 .bk-auto-btn { flex: 1; }
 .bk-auto-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ── armed annotation tools (note pin / region capture) ── */
+.at-layer { position: fixed; inset: 0; z-index: 40; }
+.at-note { cursor: crosshair; }
+.at-region { cursor: crosshair; }
+.at-band {
+  position: fixed; border: 2px dashed var(--accent);
+  background: rgba(58, 109, 240, 0.12); pointer-events: none; border-radius: 3px;
+}
+.at-hint {
+  position: fixed; z-index: 41; left: 50%; transform: translateX(-50%);
+  top: 84px; display: flex; align-items: center; gap: 12px;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 999px; box-shadow: var(--shadow); padding: 6px 8px 6px 16px;
+  font-size: 13px; white-space: nowrap;
+}
+.at-editor textarea { width: 100%; min-height: 88px; resize: vertical; }
+.at-preview {
+  display: block; max-width: 100%; max-height: 40vh; margin: 0 auto 10px;
+  border: 1px solid var(--border); border-radius: 6px; background: #fff;
+}
+.at-colors { display: flex; gap: 8px; margin: 10px 0 4px; }
+.at-colors .swatch.on { border-color: var(--fg); }
+
+@media (max-width: 700px) {
+  /* the hint bar goes to the bottom with the rest of the phone chrome */
+  .at-hint {
+    top: auto; bottom: calc(12px + env(safe-area-inset-bottom));
+    padding: 10px 10px 10px 18px; font-size: 14px;
+  }
+  .at-hint button { min-height: 36px; }
+}
+
+/* ── bookmarks list ── */
+.bm-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border-bottom: 1px solid var(--border); cursor: pointer; font-size: 13px;
+}
+.bm-item:hover { background: var(--bg-hover); }
+.bm-star { color: #f0a500; flex: none; }
+.bm-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bm-page { color: var(--fg-dim); font-size: 11px; flex: none; }
+.bm-btn { padding: 2px 6px; font-size: 11px; flex: none; }
+.bm-input { flex: 1; min-width: 0; }
+
+/* ── annotation filters ── */
+.annots-body { display: flex; flex-direction: column; }
+.annot-filters {
+  position: sticky; top: 0; z-index: 2; background: var(--bg-panel);
+  border-bottom: 1px solid var(--border); padding: 8px 10px; display: grid; gap: 6px;
+}
+.af-search { width: 100%; font-size: 12px; }
+.af-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.af-chip {
+  padding: 2px 7px; font-size: 12px; line-height: 18px; border-radius: 999px;
+  min-width: 26px;
+}
+.af-chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.af-chip.af-color { width: 22px; height: 22px; padding: 0; border-radius: 50%; }
+.af-chip.af-color.on { outline: 2px solid var(--fg); outline-offset: 1px; }
+.af-sort { display: flex; gap: 4px; }
+.af-sort button { flex: 1; font-size: 12px; padding: 2px 6px; }
+.af-sort button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.ai-thumb {
+  display: block; width: 100%; border: 1px solid var(--border);
+  border-radius: 4px; margin-bottom: 6px; background: #fff;
+}
+.ai-kind {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 4px; font-size: 11px; flex: none;
+}
+
+@media (max-width: 700px) {
+  .bm-item { min-height: 44px; font-size: 14px; }
+  .bm-btn { min-width: 32px; min-height: 32px; }
+  .af-chip { min-height: 30px; font-size: 13px; }
+}

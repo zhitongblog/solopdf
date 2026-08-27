@@ -42,4 +42,9 @@ export interface PlatformBackend {
   savePdf(suggestedName: string, bytes: Uint8Array): Promise<string | null>
   /** save a text file (Markdown export); returns path or null if cancelled */
   saveText(suggestedName: string, text: string): Promise<string | null>
+  /** write a binary asset (region screenshot) next to the sidecar, inside
+   *  `<stem>.annotations.assets/`; returns the written path */
+  writeSidecarAsset(pdfPath: string, name: string, bytes: Uint8Array): Promise<string>
+  /** read one back; null when missing */
+  readSidecarAsset(pdfPath: string, name: string): Promise<Uint8Array | null>
 }

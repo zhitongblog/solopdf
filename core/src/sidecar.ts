@@ -18,7 +18,7 @@
  * file; updates go through upsertAnnotation()/removeAnnotation() which
  * splice the existing text.
  */
-import type { Annotation, AnchorData, Sidecar, SidecarMeta } from './types.js'
+import type { Annotation, AnchorData, AnnotationKind, Sidecar, SidecarMeta } from './types.js'
 
 export interface SidecarLabels {
   /** H1 suffix + section word, e.g. 批注 / Annotations */
@@ -27,12 +27,31 @@ export interface SidecarLabels {
   highlight: string
   /** jump-back link text, e.g. 跳回原文 / Jump to source */
   jumpBack: string
+  /** per-kind section words; missing entries fall back to `highlight` */
+  kinds?: Partial<Record<AnnotationKind, string>>
 }
 export const DEFAULT_LABELS: SidecarLabels = {
   annotations: '批注',
   highlight: '高亮',
   jumpBack: '跳回原文',
+  kinds: {
+    highlight: '高亮',
+    underline: '下划线',
+    strike: '删除线',
+    squiggly: '波浪线',
+    note: '便签',
+    region: '截图',
+  },
 }
+
+/** Folder holding region screenshots, beside the sidecar. */
+export function assetsDirName(pdfName: string): string {
+  const stem = pdfName.replace(/\.[^.]+$/, '')
+  return `${stem}.annotations.assets`
+}
+
+/** An image line we wrote ourselves (never a user's own inline image). */
+const OWN_IMAGE_RE = /^!\[[^\]]*\]\([^)]*\.annotations\.assets\/[^)]*\)\s*$/
 
 const META_RE = /<!--\s*solopdf:meta\s+v1([^>]*?)-->/
 const ANCHOR_RE = /<!--\s*solopdf:anchor\s+([A-Za-z0-9_-]+)\s+({.*?})\s*-->/g
@@ -55,16 +74,29 @@ function metaLine(meta: SidecarMeta): string {
 }
 
 function anchorLine(a: Annotation): string {
-  // 颜色随锚点持久化(黄色为缺省,不写,保持旧文件字节稳定)
-  const payload =
-    a.color && a.color !== 'yellow' ? { ...a.anchor, color: a.color } : a.anchor
+  // 颜色/类型随锚点持久化。缺省值(黄色高亮)不写,旧文件字节保持稳定,
+  // 也让 v1 写出的伴生文件在新版本里 diff 干净。
+  const payload: Record<string, unknown> = { ...a.anchor }
+  if (a.color && a.color !== 'yellow') payload.color = a.color
+  if (a.kind && a.kind !== 'highlight') payload.kind = a.kind
+  if (a.image) payload.image = a.image
   return `<!-- solopdf:anchor ${a.id} ${JSON.stringify(payload)} -->`
+}
+
+function kindLabel(kind: AnnotationKind | undefined, labels: SidecarLabels): string {
+  return labels.kinds?.[kind ?? 'highlight'] ?? labels.highlight
 }
 
 /** Render one annotation section (## block). */
 export function renderAnnotation(a: Annotation, pdfPath: string, labels: SidecarLabels = DEFAULT_LABELS): string {
   const lines: string[] = []
-  lines.push(`## p.${a.anchor.page} — ${labels.highlight} <!-- solopdf:id ${a.id} -->`)
+  lines.push(`## p.${a.anchor.page} — ${kindLabel(a.kind, labels)} <!-- solopdf:id ${a.id} -->`)
+  // region screenshots render as a plain Markdown image so SoloMD (and any
+  // other Markdown viewer, and GitHub) shows the figure inline
+  if (a.kind === 'region' && a.image) {
+    const dir = assetsDirName(pdfPath.split('/').pop() ?? '')
+    lines.push(`![${kindLabel(a.kind, labels)} p.${a.anchor.page}](${dir}/${a.image})`)
+  }
   if (a.excerpt) {
     for (const l of a.excerpt.split('\n')) lines.push(`> ${l}`)
   }
@@ -107,12 +139,20 @@ export function parse(text: string): Sidecar {
   // anchors by id
   const anchors = new Map<string, AnchorData>()
   const colors = new Map<string, string>()
+  const kinds = new Map<string, AnnotationKind>()
+  const images = new Map<string, string>()
   for (const m of text.matchAll(ANCHOR_RE)) {
     try {
-      const parsed = JSON.parse(m[2]) as AnchorData & { color?: string }
-      const { color, ...anchor } = parsed
+      const parsed = JSON.parse(m[2]) as AnchorData & {
+        color?: string
+        kind?: AnnotationKind
+        image?: string
+      }
+      const { color, kind, image, ...anchor } = parsed
       anchors.set(m[1], anchor as AnchorData)
       if (color) colors.set(m[1], color)
+      if (kind) kinds.set(m[1], kind)
+      if (image) images.set(m[1], image)
     } catch {
       /* corrupt anchor JSON -> treated as orphan below */
     }
@@ -138,6 +178,8 @@ export function parse(text: string): Sidecar {
       excerpt,
       note,
       color: colors.get(id) ?? 'yellow',
+      kind: kinds.get(id) ?? 'highlight',
+      image: images.get(id),
       createdAt: '',
       orphan: !anchor,
     })
@@ -181,6 +223,7 @@ function parseBody(body: string): { excerpt: string; note: string } {
     else if (l.startsWith('>')) excerptLines.push(l.slice(1))
     else if (l.match(/^\[[^\]]*\]\(solopdf:\/\//)) continue
     else if (l.match(/<!--\s*solopdf:anchor/)) continue
+    else if (OWN_IMAGE_RE.test(l)) continue // our own region screenshot line
     else noteLines.push(l)
   }
   return {

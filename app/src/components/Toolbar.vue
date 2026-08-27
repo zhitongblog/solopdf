@@ -4,7 +4,11 @@ import { store, controllers } from '../store'
 import { isMobile, isTauri } from '../platform'
 import { t } from '../i18n'
 
-defineEmits<{ search: []; settings: []; print: []; saveFilled: []; exportMd: []; ocr: []; book: []; view: [] }>()
+defineProps<{ bookmarked?: boolean; tool?: 'none' | 'note' | 'region' }>()
+defineEmits<{
+  search: []; settings: []; print: []; saveFilled: []; exportMd: []; ocr: []
+  book: []; view: []; bookmark: []; tool: [kind: 'note' | 'region']
+}>()
 
 const tab = computed(() => store.activeTab)
 const ctrl = computed(() => { void store.docTick; return tab.value ? controllers.get(tab.value.id) : undefined })
@@ -41,6 +45,12 @@ function zoom(dir: 1 | -1): void {
       :title="t('tb.viewTip')"
       @click="$emit('view')"
     >{{ t('tb.view') }}</button>
+    <div class="sep" />
+    <button :class="{ active: bookmarked }" :title="t('tb.bookmark')" @click="$emit('bookmark')">
+      {{ bookmarked ? '★' : '☆' }}
+    </button>
+    <button :class="{ active: tool === 'note' }" :title="t('tb.noteTool')" @click="$emit('tool', 'note')">✎</button>
+    <button :class="{ active: tool === 'region' }" :title="t('tb.regionTool')" @click="$emit('tool', 'region')">⬚</button>
     <button
       class="book-toggle"
       :class="{ active: tab.bookMode }"

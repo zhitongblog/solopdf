@@ -9,10 +9,11 @@
  *     ├── new AnnotationManager ... sidecar load + anchor resolve
  *     └── restorePosition() ....... path key, hash fallback (bg)
  */
-import { onMounted, onBeforeUnmount, ref, watch, nextTick } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch, nextTick } from 'vue'
 import {
   store, controllers, documents, annotManagers, epubBooks, txtBooks, initStore, newTab, closeTab,
-  addRecent, savePosition, restorePosition, effectiveTheme, docPrefsFor, saveDocPrefs, type TabState,
+  addRecent, savePosition, restorePosition, effectiveTheme, docPrefsFor, saveDocPrefs,
+  addBookmark, removeBookmark, bookmarkAt, type TabState,
 } from './store'
 import { platform, isTauri, isMobile } from './platform'
 import { t } from './i18n'
@@ -34,12 +35,16 @@ import OcrDialog from './components/OcrDialog.vue'
 import ImageOcrDialog from './components/ImageOcrDialog.vue'
 import BookView from './components/BookView.vue'
 import ViewMenu from './components/ViewMenu.vue'
+import AnnotToolLayer from './components/AnnotToolLayer.vue'
+import type { AnnotationKind } from '@solopdf/core'
 
 const scrollHost = ref<HTMLDivElement>()
 const selection = ref<SelectionInfo | null>(null)
 const searchOpen = ref(false)
 const settingsOpen = ref(false)
 const viewMenuOpen = ref(false)
+/** armed annotation tool; 'none' means normal reading/selection */
+const tool = ref<'none' | 'note' | 'region'>('none')
 const ocrOpen = ref(false)
 const imageOcrPath = ref('')
 const imageOcrBytes = ref<{ bytes: Uint8Array; name: string } | null>(null)
@@ -241,7 +246,7 @@ function onCloseTab(id: number): void {
 }
 
 // ── highlight ──
-async function highlightSelection(color: string): Promise<void> {
+async function highlightSelection(color: string, kind: AnnotationKind = 'highlight', note = ''): Promise<void> {
   const sel = selection.value
   const tab = store.activeTab
   if (!sel || !tab) return
@@ -257,13 +262,75 @@ async function highlightSelection(color: string): Promise<void> {
     mgr.stripExcerpts = strip
   }
   try {
-    await mgr.addFromSelection(sel, color)
+    await mgr.addFromSelection(sel, color, note, kind)
     if (ctrl) ctrl.clearSelection()
     else { window.getSelection()?.removeAllRanges(); selection.value = null }
     showToast(t('app.highlighted', { file: mgr.sidecarLocation.split('/').pop()! }))
   } catch (err) {
     showToast(t('app.annotSaveFail', { msg: (err as Error).message }))
   }
+}
+
+/** popover ✎: mark the selection AND open the note editor for it */
+const pendingNote = ref<{ color: string; kind: AnnotationKind; text: string } | null>(null)
+function askNoteForSelection(color: string, kind: AnnotationKind): void {
+  pendingNote.value = { color, kind, text: '' }
+}
+async function saveSelectionNote(): Promise<void> {
+  const p = pendingNote.value
+  if (!p) return
+  pendingNote.value = null
+  await highlightSelection(p.color, p.kind, p.text.trim())
+}
+
+async function copySelection(): Promise<void> {
+  const text = selection.value?.text
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    showToast(t('app.copied'))
+  } catch {
+    showToast(t('app.copyFail'))
+  }
+}
+
+// ── bookmarks ──
+const currentBookmark = computed(() => {
+  void store.bookmarks
+  const tab = store.activeTab
+  return tab ? bookmarkAt(tab.path, tab.currentPage) : undefined
+})
+
+function toggleBookmark(): void {
+  const tab = store.activeTab
+  if (!tab) return
+  const existing = bookmarkAt(tab.path, tab.currentPage)
+  if (existing) {
+    removeBookmark(tab.path, existing.at)
+    showToast(t('app.bookmarkRemoved'))
+    return
+  }
+  const ctrl = controllers.get(tab.id)
+  addBookmark(tab.path, {
+    page: tab.currentPage,
+    block: tab.kind === 'pdf' && !tab.bookMode ? undefined : tab.bookBlock,
+    ratio: ctrl?.getPosition().ratio,
+    // a bookmark with no name is a page number you have to remember; default
+    // to the page so the list is at least scannable
+    label: t('app.bookmarkLabel', { page: tab.currentPage }),
+  })
+  showToast(t('app.bookmarkAdded'))
+}
+
+function gotoBookmark(page: number, block?: number): void {
+  const tab = store.activeTab
+  if (!tab) return
+  if (tab.bookMode || tab.kind !== 'pdf') {
+    tab.currentPage = page
+    if (block != null) tab.bookBlock = block
+    return
+  }
+  controllers.get(tab.id)?.scrollToPage(page)
 }
 
 // ── focus refresh (external SoloMD edits) ──
@@ -287,6 +354,7 @@ function onKey(e: KeyboardEvent): void {
   else if (mod && e.key === '0') { e.preventDefault(); ctrl?.setZoom('width') }
   else if (mod && e.key === ',') { e.preventDefault(); settingsOpen.value = !settingsOpen.value }
   else if (mod && e.key === 'b') { e.preventDefault(); store.settings.sidebarOpen = !store.settings.sidebarOpen }
+  else if (mod && e.key === 'd') { e.preventDefault(); toggleBookmark() }
   else if (!mod && e.key === 'Escape') { searchOpen.value = false; settingsOpen.value = false }
   else if (!mod && tab && ctrl && !tab.bookMode && !isTyping(e)) {
     if (e.key === 'j' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); ctrl.turnPage(1) }
@@ -476,6 +544,9 @@ onMounted(async () => {
     toggleBookMode,
     rotateDoc,
     toggleAutoScroll,
+    toggleBookmark,
+    highlightSelection,
+    setTool: (k: 'none' | 'note' | 'region') => { tool.value = k },
     epubBooks,
     closeTab,
   }
@@ -555,6 +626,10 @@ watch(() => store.settings.theme, () => {
           @ocr="ocrOpen = true"
           @book="toggleBookMode"
           @view="viewMenuOpen = !viewMenuOpen"
+          @bookmark="toggleBookmark"
+          @tool="(k) => (tool = tool === k ? 'none' : k)"
+          :bookmarked="!!currentBookmark"
+          :tool="tool"
         />
         <WelcomeScreen
           v-if="!store.tabs.length"
@@ -592,7 +667,38 @@ watch(() => store.settings.theme, () => {
       </div>
     </div>
 
-    <HighlightPopover v-if="selection" :selection="selection" @pick="highlightSelection" />
+    <HighlightPopover
+      v-if="selection && tool === 'none'"
+      :selection="selection"
+      @pick="highlightSelection"
+      @note="askNoteForSelection"
+      @copy="copySelection"
+    />
+
+    <AnnotToolLayer
+      v-if="tool !== 'none' && store.activeTab && store.activeTab.kind === 'pdf' && !store.activeTab.bookMode"
+      :tab-id="store.activeTab.id"
+      :tool="tool"
+      @cancel="tool = 'none'"
+      @done="(m) => { tool = 'none'; showToast(m) }"
+    />
+
+    <div v-if="pendingNote" class="modal-mask" @click.self="pendingNote = null">
+      <div class="modal at-editor">
+        <h3>{{ t('at.noteTitle') }}</h3>
+        <textarea
+          v-model="pendingNote.text"
+          :placeholder="t('at.placeholder')"
+          rows="4"
+          autofocus
+          @keydown.enter.meta="saveSelectionNote()"
+        ></textarea>
+        <div class="modal-actions">
+          <button @click="pendingNote = null">{{ t('at.cancel') }}</button>
+          <button class="primary" @click="saveSelectionNote()">{{ t('at.save') }}</button>
+        </div>
+      </div>
+    </div>
 
     <PasswordDialog
       v-if="pwRequest"

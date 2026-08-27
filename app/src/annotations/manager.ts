@@ -10,7 +10,7 @@
 import {
   parse, upsertAnnotation, removeAnnotation, stripPrivate, genId, makeFingerprint,
 } from '@solopdf/core'
-import type { Annotation, SidecarMeta, SidecarLabels } from '@solopdf/core'
+import type { Annotation, AnnotationKind, Quad, SidecarMeta, SidecarLabels } from '@solopdf/core'
 import { platform } from '../platform'
 import { t } from '../i18n'
 import type { SelectionInfo } from '../viewer/controller'
@@ -21,6 +21,14 @@ function labels(): SidecarLabels {
     annotations: t('sc.annotations'),
     highlight: t('sc.highlight'),
     jumpBack: t('sc.jumpBack'),
+    kinds: {
+      highlight: t('sc.highlight'),
+      underline: t('sc.underline'),
+      strike: t('sc.strike'),
+      squiggly: t('sc.squiggly'),
+      note: t('sc.note'),
+      region: t('sc.region'),
+    },
   }
 }
 
@@ -28,6 +36,7 @@ export class AnnotationManager {
   annotations: Annotation[] = []
   sidecarLocation = ''
   private text = ''
+  private assetUrls = new Map<string, string>()
   private meta: SidecarMeta
   onChange: (annots: Annotation[]) => void = () => {}
 
@@ -57,7 +66,12 @@ export class AnnotationManager {
     this.onChange(this.annotations)
   }
 
-  async addFromSelection(sel: SelectionInfo, color: string, note = ''): Promise<Annotation> {
+  async addFromSelection(
+    sel: SelectionInfo,
+    color: string,
+    note = '',
+    kind: AnnotationKind = 'highlight',
+  ): Promise<Annotation> {
     const fp = makeFingerprint(sel.pre, sel.text, sel.post)
     let a: Annotation = {
       id: genId(),
@@ -65,6 +79,7 @@ export class AnnotationManager {
       excerpt: sel.text.length > 500 ? sel.text.slice(0, 500) + '…' : sel.text,
       note,
       color,
+      kind,
       createdAt: new Date().toISOString(),
     }
     if (this.stripExcerpts) a = stripPrivate(a)
@@ -72,6 +87,71 @@ export class AnnotationManager {
     this.annotations = parse(this.text).annotations
     this.onChange(this.annotations)
     return a
+  }
+
+  /**
+   * Pin a sticky note at one point (PDF user space). There is no text to
+   * fingerprint, so the anchor is page+point — same two-factor fallback the
+   * privacy mode uses. A zero-size quad would be rejected by the resolver,
+   * so the point is stored as a 1pt box.
+   */
+  async addNote(page: number, x: number, y: number, note: string): Promise<Annotation> {
+    const a: Annotation = {
+      id: genId(),
+      anchor: { page, quads: [{ x1: x, y1: y, x2: x + 1, y2: y + 1 }], pre: '', post: '' },
+      excerpt: '',
+      note,
+      color: 'yellow',
+      kind: 'note',
+      createdAt: new Date().toISOString(),
+    }
+    await this.write(upsertAnnotation(this.text, a, this.pdfPath, this.meta, labels()))
+    this.annotations = parse(this.text).annotations
+    this.onChange(this.annotations)
+    return a
+  }
+
+  /**
+   * Capture a rectangular region as a PNG beside the sidecar and reference it
+   * from the note body — the figure ends up rendered inline in SoloMD, which
+   * is the whole point of "highlights are notes" for charts and equations.
+   */
+  async addRegion(
+    page: number,
+    rect: Quad,
+    png: Uint8Array,
+    note = '',
+    color = 'blue',
+  ): Promise<Annotation> {
+    const id = genId()
+    const name = `${id}.png`
+    await platform().writeSidecarAsset(this.pdfPath, name, png)
+    const a: Annotation = {
+      id,
+      anchor: { page, quads: [rect], pre: '', post: '' },
+      excerpt: '',
+      note,
+      color,
+      kind: 'region',
+      image: name,
+      createdAt: new Date().toISOString(),
+    }
+    await this.write(upsertAnnotation(this.text, a, this.pdfPath, this.meta, labels()))
+    this.annotations = parse(this.text).annotations
+    this.onChange(this.annotations)
+    return a
+  }
+
+  /** Blob URL for a region screenshot, cached per annotation id. */
+  async assetUrl(a: Annotation): Promise<string | null> {
+    if (!a.image) return null
+    const hit = this.assetUrls.get(a.id)
+    if (hit) return hit
+    const bytes = await platform().readSidecarAsset(this.pdfPath, a.image).catch(() => null)
+    if (!bytes) return null
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/png' }))
+    this.assetUrls.set(a.id, url)
+    return url
   }
 
   async updateNote(id: string, note: string): Promise<void> {
@@ -86,6 +166,12 @@ export class AnnotationManager {
     await this.write(removeAnnotation(this.text, id))
     this.annotations = parse(this.text).annotations
     this.onChange(this.annotations)
+  }
+
+  /** release blob URLs (called when the tab closes) */
+  dispose(): void {
+    for (const u of this.assetUrls.values()) URL.revokeObjectURL(u)
+    this.assetUrls.clear()
   }
 
   private async write(newText: string): Promise<void> {

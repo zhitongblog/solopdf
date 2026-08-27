@@ -88,6 +88,24 @@ export class WebBackend implements PlatformBackend {
     return `/Volumes/Dev/code/pdf/test-fixtures/${suggestedName}`
   }
 
+  private assetPath(pdfPath: string, name: string): string {
+    const stem = pdfPath.replace(/\.[^./]+$/, '')
+    return `${stem}.annotations.assets/${name}`
+  }
+
+  async writeSidecarAsset(pdfPath: string, name: string, bytes: Uint8Array): Promise<string> {
+    const loc = this.assetPath(pdfPath, name)
+    const res = await fetch(`/__asset?p=${encodeURIComponent(loc)}`, { method: 'PUT', body: bytes as BodyInit })
+    if (!res.ok) throw new Error(`资源写入失败: ${res.status}`)
+    return loc
+  }
+
+  async readSidecarAsset(pdfPath: string, name: string): Promise<Uint8Array | null> {
+    const res = await fetch(`/__asset?p=${encodeURIComponent(this.assetPath(pdfPath, name))}`)
+    if (!res.ok) return null
+    return new Uint8Array(await res.arrayBuffer())
+  }
+
   async saveText(suggestedName: string, text: string): Promise<string | null> {
     const res = await fetch(`/__fixtures/${encodeURIComponent(suggestedName)}`, {
       method: 'PUT',

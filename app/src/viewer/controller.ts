@@ -774,6 +774,28 @@ export class PdfViewerController {
     return canvas
   }
 
+  /**
+   * Render one PDF-space rectangle to a PNG — the region screenshot.
+   * `dpi` is relative to PDF points (72 = 1:1); 200 keeps a figure crisp on
+   * a retina screen without turning a full-page grab into a 20MB file.
+   */
+  async captureRegion(pageNum: number, quad: Quad, dpi = 200): Promise<Uint8Array> {
+    const i = pageNum - 1
+    const scale = dpi / 72
+    const v = pdfRectToView(quad, this.boxes[i], this.rotationOf(i), scale)
+    const canvas = await this.renderToCanvas(pageNum, scale, {
+      x: v.left, y: v.top, w: v.width, h: v.height,
+    })
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/png'))
+    if (!blob) throw new Error('region capture failed')
+    return new Uint8Array(await blob.arrayBuffer())
+  }
+
+  /** page box + total rotation, for callers doing their own coordinate math */
+  pageGeometry(pageNum: number): { box: PageBox; rotation: number; scale: number } {
+    return { box: this.boxes[pageNum - 1], rotation: this.rotationOf(pageNum - 1), scale: this.scale }
+  }
+
   // ── text access (search + anchors) ──────────────────────────────────────
 
   async getPageIndex(pageNum: number): Promise<PageTextIndex> {
@@ -995,10 +1017,15 @@ export class PdfViewerController {
     return viewToPdf(clientX - rect.left, clientY - rect.top, this.boxes[pageNum - 1], this.rotationOf(pageNum - 1), this.scale)
   }
 
-  /** the page element under a client point, if any */
+  /** the page element under a client point, if any.
+   *  elementsFromPoint (plural) on purpose: the armed-tool overlay sits on
+   *  top of everything, so the singular version only ever finds the overlay. */
   pageAt(clientX: number, clientY: number): number | null {
-    const el = document.elementFromPoint(clientX, clientY)?.closest('.pv-page') as HTMLElement | null
-    return el?.dataset.page ? parseInt(el.dataset.page, 10) : null
+    for (const el of document.elementsFromPoint(clientX, clientY)) {
+      const page = (el as HTMLElement).closest?.('.pv-page') as HTMLElement | null
+      if (page?.dataset.page) return parseInt(page.dataset.page, 10)
+    }
+    return null
   }
 
   destroy(): void {

@@ -70,6 +70,19 @@ export class TauriBackend implements PlatformBackend {
     return dest
   }
 
+  async writeSidecarAsset(pdfPath: string, name: string, bytes: Uint8Array): Promise<string> {
+    // raw body upload again — screenshots are hundreds of KB and a base64
+    // JSON round-trip would double that for no reason
+    return await invoke<string>('write_sidecar_asset', bytes, {
+      headers: { 'x-pdf': encodeURIComponent(pdfPath), 'x-name': encodeURIComponent(name) },
+    })
+  }
+
+  async readSidecarAsset(pdfPath: string, name: string): Promise<Uint8Array | null> {
+    const buf = await invoke<ArrayBuffer>('read_sidecar_asset', { pdfPath, name })
+    return buf.byteLength ? new Uint8Array(buf) : null
+  }
+
   async saveText(suggestedName: string, text: string): Promise<string | null> {
     if (/iPhone|iPad|Android/i.test(navigator.userAgent)) {
       // no save dialogs on mobile — write to the app Documents folder,

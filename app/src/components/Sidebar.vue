@@ -1,14 +1,21 @@
 <script setup lang="ts">
 /**
- * Sidebar: outline / thumbnails / annotations.
+ * Sidebar: outline / thumbnails / bookmarks / annotations.
  * Outline: full tree from doc.getOutline(), lazy dest->page resolution.
  * Thumbnails: IntersectionObserver-driven lazy render at 0.18 scale.
+ * Bookmarks: user-placed, from the store (never the sidecar — see store.ts).
+ * Annotations: filterable by kind, colour, #tag and free text; sortable.
  */
 import { computed, ref, watch, onBeforeUnmount, nextTick } from 'vue'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
-import { store, controllers, documents, annotManagers } from '../store'
+import {
+  store, controllers, documents, annotManagers,
+  bookmarksFor, removeBookmark, renameBookmark, type Bookmark,
+} from '../store'
 import { t } from '../i18n'
-import type { Annotation } from '@solopdf/core'
+import type { Annotation, AnnotationKind } from '@solopdf/core'
+
+const emit = defineEmits<{ goto: [page: number, block?: number] }>()
 
 const tab = computed(() => store.activeTab)
 // registries are plain Maps — touch store.docTick so these recompute on open
@@ -107,21 +114,96 @@ async function renderThumb(d: PDFDocumentProxy, pageNum: number, el: HTMLElement
   } catch { /* thumb render failure is cosmetic */ }
 }
 
+// ── bookmarks ──
+const bookmarks = computed<Bookmark[]>(() => {
+  void store.bookmarks
+  return tab.value ? bookmarksFor(tab.value.path) : []
+})
+const bmEditing = ref<number | null>(null)
+const bmLabel = ref('')
+
+function gotoBookmark(b: Bookmark): void {
+  emit('goto', b.page, b.block)
+  closeIfNarrow()
+}
+function startBmEdit(b: Bookmark): void {
+  bmEditing.value = b.at
+  bmLabel.value = b.label
+}
+function saveBmEdit(b: Bookmark): void {
+  if (tab.value) renameBookmark(tab.value.path, b.at, bmLabel.value.trim() || b.label)
+  bmEditing.value = null
+}
+
 // ── annotations tab ──
 const editingId = ref<string | null>(null)
 const editText = ref('')
 const annots = ref<Annotation[]>([])
+const filterKind = ref<'all' | AnnotationKind>('all')
+const filterColor = ref<'all' | string>('all')
+const filterTag = ref<string>('')
+const query = ref('')
+const sortBy = ref<'page' | 'recent'>('page')
+const previews = ref<Record<string, string>>({})
+
+const TAG_RE = /(?:^|\s)#([\p{L}\p{N}_/-]+)/gu
+
+function tagsOf(a: Annotation): string[] {
+  return [...a.note.matchAll(TAG_RE)].map((m) => m[1])
+}
 
 function syncAnnots(): void {
   annots.value = mgr.value ? [...mgr.value.annotations] : []
+  void loadPreviews()
 }
+
+/** region screenshots get a thumbnail in the list — that's the whole point */
+async function loadPreviews(): Promise<void> {
+  const m = mgr.value
+  if (!m) return
+  for (const a of annots.value) {
+    if (a.kind !== 'region' || previews.value[a.id]) continue
+    const url = await m.assetUrl(a)
+    if (url) previews.value = { ...previews.value, [a.id]: url }
+  }
+}
+
 watch(mgr, (m) => {
+  previews.value = {}
   syncAnnots()
   if (m) {
     const prev = m.onChange
     m.onChange = (a) => { prev(a); syncAnnots() }
   }
 }, { immediate: true })
+
+const allTags = computed(() => {
+  const set = new Set<string>()
+  for (const a of annots.value) for (const g of tagsOf(a)) set.add(g)
+  return [...set].sort()
+})
+
+const usedColors = computed(() => [...new Set(annots.value.map((a) => a.color))])
+
+const shownAnnots = computed(() => {
+  const q = query.value.trim().toLowerCase()
+  let list = annots.value.filter((a) => {
+    if (filterKind.value !== 'all' && (a.kind ?? 'highlight') !== filterKind.value) return false
+    if (filterColor.value !== 'all' && a.color !== filterColor.value) return false
+    if (filterTag.value && !tagsOf(a).includes(filterTag.value)) return false
+    if (q && !(a.excerpt + '\n' + a.note).toLowerCase().includes(q)) return false
+    return true
+  })
+  list = [...list]
+  if (sortBy.value === 'page') list.sort((a, b) => a.anchor.page - b.anchor.page)
+  else list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+  return list
+})
+
+const KIND_GLYPH: Record<string, string> = {
+  highlight: '▮', underline: 'U̲', strike: 'S̶', squiggly: '∿', note: '✎', region: '⬚',
+}
+const KINDS: (AnnotationKind | 'all')[] = ['all', 'highlight', 'underline', 'strike', 'squiggly', 'note', 'region']
 
 function closeIfNarrow(): void {
   if (window.innerWidth < 700) store.settings.sidebarOpen = false
@@ -158,6 +240,7 @@ onBeforeUnmount(() => observer?.disconnect())
     <div class="sidebar-tabs">
       <button :class="{ active: store.settings.sidebarTab === 'outline' }" @click="store.settings.sidebarTab = 'outline'">{{ t('sb.outline') }}</button>
       <button :class="{ active: store.settings.sidebarTab === 'thumbs' }" @click="store.settings.sidebarTab = 'thumbs'">{{ t('sb.thumbs') }}</button>
+      <button :class="{ active: store.settings.sidebarTab === 'marks' }" @click="store.settings.sidebarTab = 'marks'">{{ t('sb.marks') }}</button>
       <button :class="{ active: store.settings.sidebarTab === 'annots' }" @click="store.settings.sidebarTab = 'annots'">{{ t('sb.annots') }}</button>
     </div>
 
@@ -192,17 +275,71 @@ onBeforeUnmount(() => observer?.disconnect())
       </div>
     </div>
 
-    <div class="sidebar-body" v-else>
+    <div class="sidebar-body" v-else-if="store.settings.sidebarTab === 'marks'">
+      <div v-if="!bookmarks.length" class="annot-empty">{{ t('sb.noMarks') }}</div>
+      <div v-for="b in bookmarks" :key="b.at" class="bm-item" @click="gotoBookmark(b)">
+        <template v-if="bmEditing === b.at">
+          <input
+            v-model="bmLabel" class="bm-input" @click.stop
+            @keydown.enter="saveBmEdit(b)" @keydown.esc="bmEditing = null"
+          />
+          <button @click.stop="saveBmEdit(b)">{{ t('sb.save') }}</button>
+        </template>
+        <template v-else>
+          <span class="bm-star">★</span>
+          <span class="bm-label" :title="b.label">{{ b.label }}</span>
+          <span class="bm-page">p.{{ b.page }}</span>
+          <button class="bm-btn" :title="t('sb.rename')" @click.stop="startBmEdit(b)">✎</button>
+          <button class="bm-btn" :title="t('sb.delete')" @click.stop="removeBookmark(tab.path, b.at)">✕</button>
+        </template>
+      </div>
+    </div>
+
+    <div class="sidebar-body annots-body" v-else>
+      <div class="annot-filters">
+        <input class="af-search" v-model="query" :placeholder="t('sb.search')" />
+        <div class="af-chips">
+          <button
+            v-for="k in KINDS" :key="k"
+            class="af-chip" :class="{ on: filterKind === k }"
+            :title="k === 'all' ? t('sb.allKinds') : t('hl.kind.' + k)"
+            @click="filterKind = k"
+          >{{ k === 'all' ? t('sb.all') : KIND_GLYPH[k] }}</button>
+        </div>
+        <div class="af-chips" v-if="usedColors.length > 1">
+          <button class="af-chip" :class="{ on: filterColor === 'all' }" @click="filterColor = 'all'">{{ t('sb.all') }}</button>
+          <button
+            v-for="c in usedColors" :key="c"
+            class="af-chip af-color" :class="[`sw-${c}`, { on: filterColor === c }]"
+            @click="filterColor = c"
+          />
+        </div>
+        <div class="af-chips" v-if="allTags.length">
+          <button class="af-chip" :class="{ on: !filterTag }" @click="filterTag = ''">{{ t('sb.all') }}</button>
+          <button
+            v-for="g in allTags" :key="g"
+            class="af-chip" :class="{ on: filterTag === g }"
+            @click="filterTag = filterTag === g ? '' : g"
+          >#{{ g }}</button>
+        </div>
+        <div class="af-sort">
+          <button :class="{ on: sortBy === 'page' }" @click="sortBy = 'page'">{{ t('sb.byPage') }}</button>
+          <button :class="{ on: sortBy === 'recent' }" @click="sortBy = 'recent'">{{ t('sb.byRecent') }}</button>
+        </div>
+      </div>
+
       <div v-if="!annots.length" class="annot-empty">
         <span v-html="t('sb.annotEmpty')"></span>
       </div>
+      <div v-else-if="!shownAnnots.length" class="annot-empty">{{ t('sb.noMatch') }}</div>
       <div
-        v-for="a in annots"
+        v-for="a in shownAnnots"
         :key="a.id"
         class="annot-item"
         :class="{ orphan: a.orphan }"
         @click="jumpTo(a)"
       >
+        <img v-if="previews[a.id]" class="ai-thumb" :src="previews[a.id]" alt="" />
         <div class="ai-excerpt" v-if="a.excerpt">{{ a.excerpt }}</div>
         <template v-if="editingId === a.id">
           <textarea v-model="editText" @click.stop @keydown.enter.meta="saveEdit(a)" />
@@ -214,6 +351,7 @@ onBeforeUnmount(() => observer?.disconnect())
         <template v-else>
           <div class="ai-note" v-if="a.note">{{ a.note }}</div>
           <div class="ai-meta">
+            <span class="ai-kind" :class="`sw-${a.color}`">{{ KIND_GLYPH[a.kind ?? 'highlight'] }}</span>
             <span>p.{{ a.anchor.page }}</span>
             <span v-if="a.orphan" :title="t('sb.orphanTip')">{{ t('sb.orphan') }}</span>
             <span style="flex: 1"></span>

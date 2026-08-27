@@ -116,6 +116,84 @@ fn write_sidecar(app: tauri::AppHandle, pdf_path: String, text: String) -> Resul
     }
 }
 
+/// `<stem>.annotations.assets/` beside the sidecar — region screenshots.
+/// Mirrors the sidecar's sibling-first / appData-fallback rule so a
+/// read-only volume degrades the same way the notes file does.
+fn assets_dir(app: &tauri::AppHandle, pdf_path: &str, create: bool) -> Result<PathBuf, String> {
+    let p = Path::new(pdf_path);
+    let stem = p
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let sibling = p.with_file_name(format!("{stem}.annotations.assets"));
+    if !create {
+        // reads must never create anything: a reader that litters empty
+        // folders beside every PDF it opens is a bug report waiting to happen
+        if sibling.is_dir() {
+            return Ok(sibling);
+        }
+        return Ok(sidecar_fallback(app, pdf_path)?.with_extension("assets"));
+    }
+    if fs::create_dir_all(&sibling).is_ok() {
+        return Ok(sibling);
+    }
+    let fb = sidecar_fallback(app, pdf_path)?;
+    let dir = fb.with_extension("assets");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// Reject anything that could escape the assets folder: this name reaches
+/// the filesystem and originates in a Markdown file the user can edit.
+fn safe_asset_name(name: &str) -> Result<String, String> {
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+        || name.starts_with('.')
+    {
+        return Err("非法的资源名".into());
+    }
+    Ok(name.to_string())
+}
+
+#[tauri::command]
+fn write_sidecar_asset(app: tauri::AppHandle, request: tauri::ipc::Request) -> Result<String, String> {
+    let header = |k: &str| -> Result<String, String> {
+        request
+            .headers()
+            .get(k)
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| format!("缺少 {k}"))
+            .and_then(urlencoding_decode)
+    };
+    let pdf_path = header("x-pdf")?;
+    let name = safe_asset_name(&header("x-name")?)?;
+    let dir = assets_dir(&app, &pdf_path, true)?;
+    let dest = dir.join(&name);
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => {
+            fs::write(&dest, bytes).map_err(|e| format!("资源写入失败: {e}"))?;
+            Ok(dest.to_string_lossy().into_owned())
+        }
+        _ => Err("expected raw body".into()),
+    }
+}
+
+#[tauri::command]
+fn read_sidecar_asset(
+    app: tauri::AppHandle,
+    pdf_path: String,
+    name: String,
+) -> Result<tauri::ipc::Response, String> {
+    let name = safe_asset_name(&name)?;
+    let dir = assets_dir(&app, &pdf_path, false)?;
+    // empty response = "not there"; the frontend treats it as a missing image
+    Ok(tauri::ipc::Response::new(
+        fs::read(dir.join(name)).unwrap_or_default(),
+    ))
+}
+
 fn state_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -431,6 +509,8 @@ pub fn run() {
             read_chunk,
             read_sidecar,
             write_sidecar,
+            write_sidecar_asset,
+            read_sidecar_asset,
             load_state,
             save_state,
             file_hash,

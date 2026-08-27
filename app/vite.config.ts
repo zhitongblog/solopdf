@@ -59,6 +59,39 @@ function fixturesApi(): Plugin {
         res.setHeader('content-type', 'application/pdf')
         fs.createReadStream(file).pipe(res)
       })
+      // region screenshots live in <stem>.annotations.assets/ beside the PDF
+      server.middlewares.use('/__asset', (req, res, next) => {
+        const url = new URL(req.url ?? '/', 'http://x')
+        const p = url.searchParams.get('p')
+        if (!p) return next()
+        const file = path.resolve(p)
+        if (!file.startsWith(FIXTURES)) {
+          res.statusCode = 403
+          res.end('forbidden')
+          return
+        }
+        if (req.method === 'PUT') {
+          fs.mkdirSync(path.dirname(file), { recursive: true })
+          const chunks: Buffer[] = []
+          req.on('data', (c) => chunks.push(c))
+          req.on('end', () => {
+            fs.writeFileSync(file, Buffer.concat(chunks))
+            res.end('ok')
+          })
+          return
+        }
+        if (req.method === 'GET') {
+          if (!fs.existsSync(file)) {
+            res.statusCode = 404
+            res.end('missing')
+            return
+          }
+          res.setHeader('content-type', 'image/png')
+          fs.createReadStream(file).pipe(res)
+          return
+        }
+        next()
+      })
       server.middlewares.use('/__sidecar', (req, res, next) => {
         const url = new URL(req.url ?? '/', 'http://x')
         const p = url.searchParams.get('p')

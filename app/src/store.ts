@@ -63,6 +63,22 @@ export interface DocPrefs {
 
 export const MAX_DOC_PREFS = 300
 
+/**
+ * A place the reader wants to come back to. Deliberately NOT in the sidecar:
+ * bookmarks are navigation, not notes, and the whole point of the sidecar is
+ * that everything in it is something you wrote.
+ */
+export interface Bookmark {
+  page: number
+  /** book-mode block index (TXT/EPUB reflow), when applicable */
+  block?: number
+  /** scroll offset within the page, 0–1 */
+  ratio?: number
+  label: string
+  /** creation time, doubles as the identity key */
+  at: number
+}
+
 export interface Settings {
   theme: 'system' | 'light' | 'dark'
   darkPdf: 'off' | 'smart'
@@ -92,6 +108,7 @@ interface PersistedState {
   positions: Record<string, { page: number; ratio: number }>
   hashes: Record<string, string>
   docPrefs: Record<string, DocPrefs>
+  bookmarks: Record<string, Bookmark[]>
 }
 
 /** phones and tablets get different reading defaults from desktops — see the
@@ -134,6 +151,7 @@ export const store = reactive({
   positions: {} as Record<string, { page: number; ratio: number }>,
   hashes: {} as Record<string, string>,
   docPrefs: {} as Record<string, DocPrefs>,
+  bookmarks: {} as Record<string, Bookmark[]>,
   loaded: false,
 
   get activeTab(): TabState | undefined {
@@ -165,13 +183,14 @@ export async function initStore(): Promise<void> {
   if (s.positions) store.positions = s.positions
   if (s.hashes) store.hashes = s.hashes
   if (s.docPrefs) store.docPrefs = s.docPrefs
+  if (s.bookmarks) store.bookmarks = s.bookmarks
   applyLanguage()
   watch(() => store.settings.language, applyLanguage)
   store.loaded = true
   // persist on change, debounced
   let t = 0
   watch(
-    () => [store.settings, store.recents, store.positions, store.hashes, store.docPrefs],
+    () => [store.settings, store.recents, store.positions, store.hashes, store.docPrefs, store.bookmarks],
     () => {
       clearTimeout(t)
       t = window.setTimeout(persist, 400)
@@ -187,6 +206,7 @@ async function persist(): Promise<void> {
     positions: { ...store.positions },
     hashes: { ...store.hashes },
     docPrefs: { ...store.docPrefs },
+    bookmarks: { ...store.bookmarks },
   })
 }
 
@@ -221,6 +241,7 @@ export function closeTab(id: number): void {
   controllers.get(id)?.destroy()
   controllers.delete(id)
   documents.delete(id)
+  annotManagers.get(id)?.dispose()
   annotManagers.delete(id)
   epubBooks.get(id)?.destroy()
   epubBooks.delete(id)
@@ -256,6 +277,46 @@ export function saveDocPrefs(path: string, patch: DocPrefs): void {
       .slice(0, keys.length - MAX_DOC_PREFS)
       .forEach((k) => delete store.docPrefs[k])
   }
+}
+
+// ── bookmarks ────────────────────────────────────────────────────────────
+// Keyed by path with a content-hash mirror, exactly like reading positions:
+// files get moved and re-downloaded, and losing every bookmark to a rename
+// is the kind of thing that makes people stop trusting an app.
+
+export function bookmarksFor(path: string): Bookmark[] {
+  const h = store.hashes[path]
+  return store.bookmarks[path] ?? (h ? store.bookmarks[`hash:${h}`] : undefined) ?? []
+}
+
+function writeBookmarks(path: string, list: Bookmark[]): void {
+  const sorted = [...list].sort((a, b) => a.page - b.page || (a.block ?? 0) - (b.block ?? 0))
+  if (sorted.length) store.bookmarks[path] = sorted
+  else delete store.bookmarks[path]
+  const h = store.hashes[path]
+  if (h) {
+    if (sorted.length) store.bookmarks[`hash:${h}`] = sorted
+    else delete store.bookmarks[`hash:${h}`]
+  }
+}
+
+export function addBookmark(path: string, bm: Omit<Bookmark, 'at'>): Bookmark {
+  const entry: Bookmark = { ...bm, at: Date.now() }
+  writeBookmarks(path, [...bookmarksFor(path), entry])
+  return entry
+}
+
+export function removeBookmark(path: string, at: number): void {
+  writeBookmarks(path, bookmarksFor(path).filter((b) => b.at !== at))
+}
+
+export function renameBookmark(path: string, at: number, label: string): void {
+  writeBookmarks(path, bookmarksFor(path).map((b) => (b.at === at ? { ...b, label } : b)))
+}
+
+/** the bookmark on the tab's current page, if any (drives the ★ toggle) */
+export function bookmarkAt(path: string, page: number): Bookmark | undefined {
+  return bookmarksFor(path).find((b) => b.page === page)
 }
 
 export function addRecent(path: string): void {

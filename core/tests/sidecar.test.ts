@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  serialize, parse, upsertAnnotation, removeAnnotation, stripPrivate, genId,
+  serialize, parse, upsertAnnotation, removeAnnotation, stripPrivate, genId, assetsDirName,
 } from '../src/sidecar.js'
 import type { Annotation, SidecarMeta } from '../src/types.js'
 
@@ -142,5 +142,53 @@ describe('highlight color persistence', () => {
     const text2 = upsertAnnotation(text, b as any, '/tmp/x.pdf', { version: 1, pdfName: 'x' })
     expect(text2).not.toContain('"color":"yellow"')
     expect(parse(text2).annotations.find((x) => x.id === b.id)?.color).toBe('yellow')
+  })
+})
+
+describe('mark kinds, notes and region screenshots', () => {
+  const base = {
+    anchor: { page: 4, quads: [{ x1: 1, y1: 2, x2: 3, y2: 4 }], pre: 'aa', post: 'bb', text: 'needle' },
+    excerpt: 'needle', note: '', color: 'yellow', createdAt: '',
+  }
+
+  it('round-trips every non-default kind', () => {
+    for (const kind of ['underline', 'strike', 'squiggly', 'note', 'region'] as const) {
+      const a = { ...base, id: genId(), kind }
+      const text = upsertAnnotation('', a as any, pdfPath, meta)
+      expect(parse(text).annotations[0].kind).toBe(kind)
+    }
+  })
+
+  it('omits the default kind so v1 files stay byte-stable', () => {
+    const a = { ...base, id: genId(), kind: 'highlight' as const }
+    const text = upsertAnnotation('', a as any, pdfPath, meta)
+    expect(text).not.toContain('"kind"')
+    expect(parse(text).annotations[0].kind).toBe('highlight')
+  })
+
+  it('reads a v1 sidecar (no kind field) as a highlight', () => {
+    const text = serialize({ meta, annotations: [ann('aaaaaa')] }, pdfPath)
+    expect(text).not.toContain('"kind"')
+    expect(parse(text).annotations[0].kind).toBe('highlight')
+  })
+
+  it('region marks emit a Markdown image and keep it out of the note body', () => {
+    const a = { ...base, id: 'rg0001', kind: 'region' as const, image: 'rg0001.png', excerpt: '', note: 'figure 3 #stats' }
+    const text = upsertAnnotation('', a as any, '/docs/paper.pdf', { version: 1, pdfName: 'paper.pdf' })
+    expect(text).toContain('](paper.annotations.assets/rg0001.png)')
+    const got = parse(text).annotations[0]
+    expect(got.image).toBe('rg0001.png')
+    // the image line is ours — it must not leak into the user's note text
+    expect(got.note).toBe('figure 3 #stats')
+  })
+
+  it("leaves a user's own inline image in the note body alone", () => {
+    const a = { ...base, id: 'nt0001', note: 'see ![chart](./mine/chart.png) here' }
+    const text = upsertAnnotation('', a as any, pdfPath, meta)
+    expect(parse(text).annotations[0].note).toContain('![chart](./mine/chart.png)')
+  })
+
+  it('assetsDirName drops the extension, not the rest of the name', () => {
+    expect(assetsDirName('paper.v2.final.pdf')).toBe('paper.v2.final.annotations.assets')
   })
 })
