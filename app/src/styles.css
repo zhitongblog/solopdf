@@ -834,3 +834,37 @@ h4.bk-block { font-size: 1.15em; }
   font-size: 11px; color: var(--fg-dim); text-transform: uppercase;
   letter-spacing: 0.04em; padding: 10px 0 4px;
 }
+
+/* ── dictionary popup ── */
+.dc-mask { position: fixed; inset: 0; z-index: 52; }
+.dc-pop {
+  position: absolute; width: 330px; max-height: 300px; display: flex; flex-direction: column;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: var(--shadow); overflow: hidden;
+}
+.dc-head {
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; flex: none;
+}
+.dc-word { font-size: 17px; }
+.dc-close { margin-left: auto; padding: 2px 8px; }
+.dc-body { flex: 1; overflow: auto; padding: 0 12px 8px; }
+.dc-entry { padding: 6px 0; border-top: 1px solid var(--border); }
+.dc-entry:first-child { border-top: none; }
+.dc-line { display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: var(--fg-dim); }
+.dc-trad { color: var(--fg); }
+.dc-pron { font-style: italic; }
+.dc-src { margin-left: auto; font-size: 10px; opacity: 0.7; }
+.dc-def { font-size: 13px; line-height: 1.6; margin-top: 2px; }
+.dc-empty { color: var(--fg-dim); font-size: 13px; padding: 14px 0; text-align: center; }
+.dc-actions {
+  display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--border); flex: none;
+}
+.dc-actions button { flex: 1; }
+
+.dc-pop.phone {
+  left: 0; right: 0; bottom: 0; top: auto; width: auto; max-height: 60vh;
+  border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom);
+}
+.dc-pop.phone .dc-word { font-size: 20px; }
+.dc-pop.phone .dc-def { font-size: 15px; }
+.dc-pop.phone .dc-actions button { min-height: 44px; }

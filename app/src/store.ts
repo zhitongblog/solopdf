@@ -101,6 +101,9 @@ export interface Settings {
   bookAutoSpeed: number
   /** read-aloud voice settings */
   tts: TtsSettings
+  /** where the dictionary's explicit "search the web" button goes; %s = word.
+   *  Never used automatically — SoloPDF makes no network request on its own. */
+  webLookupUrl: string
 }
 
 export interface TtsSettings {
@@ -143,6 +146,7 @@ export const DEFAULT_SETTINGS: Settings = {
   keepAwake: MOBILE,
   bookAutoSpeed: MOBILE ? 30 : 40,
   tts: { rate: 1, pitch: 1, voiceURI: '', lang: '' },
+  webLookupUrl: 'https://www.google.com/search?q=define+%s',
 }
 
 export function applyLanguage(): void {

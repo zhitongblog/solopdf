@@ -18,6 +18,7 @@ const emit = defineEmits<{
   pick: [color: string, kind: AnnotationKind]
   note: [color: string, kind: AnnotationKind]
   copy: []
+  define: []
 }>()
 
 const COLORS = ['yellow', 'green', 'blue', 'pink'] as const
@@ -60,6 +61,7 @@ const style = computed(() => {
       <span class="hl-sep" />
       <button class="hl-act" :title="t('hl.note')" @click="$emit('note', color, kind)">✎</button>
       <button class="hl-act" :title="t('hl.copy')" @click="$emit('copy')">⧉</button>
+      <button class="hl-act" :title="t('hl.define')" @click="$emit('define')">📖</button>
     </div>
   </div>
 </template>

@@ -38,6 +38,7 @@ import ViewMenu from './components/ViewMenu.vue'
 import AnnotToolLayer from './components/AnnotToolLayer.vue'
 import DocTools from './components/doctools/DocTools.vue'
 import ReadAloudBar from './components/ReadAloudBar.vue'
+import DictPopup from './components/DictPopup.vue'
 import { speaker, startReading, stopReading } from './readaloud'
 import type { AnnotationKind } from '@solopdf/core'
 
@@ -50,6 +51,7 @@ const viewMenuOpen = ref(false)
 const tool = ref<'none' | 'note' | 'region'>('none')
 const docToolsOpen = ref(false)
 const readAloud = ref(false)
+const dictWord = ref<{ word: string; anchor: DOMRect | null } | null>(null)
 const ocrOpen = ref(false)
 const imageOcrPath = ref('')
 const imageOcrBytes = ref<{ bytes: Uint8Array; name: string } | null>(null)
@@ -286,6 +288,12 @@ async function saveSelectionNote(): Promise<void> {
   if (!p) return
   pendingNote.value = null
   await highlightSelection(p.color, p.kind, p.text.trim())
+}
+
+function defineSelection(): void {
+  const sel = selection.value
+  if (!sel?.text.trim()) return
+  dictWord.value = { word: sel.text.trim().slice(0, 40), anchor: sel.clientRect ?? null }
 }
 
 async function copySelection(): Promise<void> {
@@ -554,6 +562,7 @@ onMounted(async () => {
     setTool: (k: 'none' | 'note' | 'region') => { tool.value = k },
     openDocTools: () => { docToolsOpen.value = true },
     setReadAloud: (on: boolean) => { readAloud.value = on },
+    lookupWord: (w: string) => { dictWord.value = { word: w, anchor: null } },
     readAloudRef: readAloud,
     tts: { speaker, startReading, stopReading },
     epubBooks,
@@ -687,6 +696,15 @@ watch(() => store.settings.theme, () => {
       @pick="highlightSelection"
       @note="askNoteForSelection"
       @copy="copySelection"
+      @define="defineSelection"
+    />
+
+    <DictPopup
+      v-if="dictWord"
+      :word="dictWord.word"
+      :anchor="dictWord.anchor"
+      @close="dictWord = null"
+      @toast="showToast"
     />
 
     <AnnotToolLayer

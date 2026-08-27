@@ -635,6 +635,65 @@ async fn pdf_remove_password(
     .map_err(|e| e.to_string())?
 }
 
+#[derive(Serialize)]
+struct UserDict {
+    name: String,
+    text: String,
+}
+
+/// Plain-text dictionaries the user dropped into <appData>/dictionaries.
+/// One `word<TAB>definition` per line; capped so a stray 100MB file can't
+/// wedge the lookup popover.
+#[tauri::command]
+fn read_user_dicts(app: tauri::AppHandle) -> Result<Vec<UserDict>, String> {
+    const MAX: u64 = 8 * 1024 * 1024;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("dictionaries");
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        let p = entry.path();
+        if p.extension().map(|x| x != "txt" && x != "tsv").unwrap_or(true) {
+            continue;
+        }
+        if fs::metadata(&p).map(|m| m.len() > MAX).unwrap_or(true) {
+            continue;
+        }
+        if let Ok(text) = fs::read_to_string(&p) {
+            out.push(UserDict {
+                name: p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+                text,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Show the system dictionary for a word (Dictionary.app on macOS, the
+/// system look-up panel on iOS). Returns "shown" | "none" | "unsupported";
+/// the frontend falls back to the bundled CC-CEDICT shards on anything but
+/// "shown".
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[tauri::command]
+fn define_word(word: String) -> &'static str {
+    extern "C" {
+        fn solopdf_define_word(word: *const std::os::raw::c_char) -> std::os::raw::c_int;
+    }
+    let Ok(c) = std::ffi::CString::new(word) else { return "unsupported" };
+    match unsafe { solopdf_define_word(c.as_ptr()) } {
+        0 => "shown",
+        1 => "none",
+        _ => "unsupported",
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[tauri::command]
+fn define_word(_word: String) -> &'static str {
+    "unsupported"
+}
+
 // ── signature library ────────────────────────────────────────────────────
 // Signatures live in appData, not beside any document: they are a property
 // of the person, and they must never leak into a folder that gets shared.
@@ -841,6 +900,8 @@ pub fn run() {
             pdf_stamp,
             pdf_set_password,
             pdf_remove_password,
+            define_word,
+            read_user_dicts,
             save_signature,
             list_signatures,
             delete_signature,
