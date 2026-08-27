@@ -9,22 +9,47 @@
 //! The copy goes through the ContentResolver over JNI rather than through a
 //! Kotlin plugin, because the generated Android project is gitignored — code
 //! that lives there would have to be re-patched after every `android init`.
+//!
+//! Getting hold of the VM and Activity is the fiddly part; see
+//! `android_context()` for the two approaches that do NOT work and why.
 
 use jni::objects::{JObject, JString, JValue};
 use jni::JNIEnv;
 
 type R<T> = Result<T, String>;
 
+/// The live JavaVM + Activity, borrowed from tao.
+///
+/// Two dead ends came first, both worth remembering:
+///
+///   - `ndk_context`: nothing in the dependency tree initialises it
+///     (`cargo tree -i ndk-context` showed us as the only user), so it
+///     panics with "android context was not initialized".
+///   - `dlsym("JNI_GetCreatedJavaVMs")`: the symbol lives in libart, which an
+///     app's dlsym scope cannot see; declaring it as a link-time `extern "C"`
+///     is worse still — dlopen of our own .so then fails before any Rust runs.
+///
+/// tao is the window layer under Tauri and it already holds both handles.
+/// Depending on the same semver makes cargo unify the crate, so these are the
+/// statics Tauri itself populated at startup.
+fn android_context() -> R<(jni::JavaVM, *mut std::ffi::c_void)> {
+    use tao::platform::android::prelude::main_android_context;
+    let ctx = main_android_context().ok_or("Android 上下文尚未就绪")?;
+    let vm = unsafe { jni::JavaVM::from_raw(ctx.java_vm.cast()) }.map_err(|e| e.to_string())?;
+    Ok((vm, ctx.context_jobject))
+}
+
 /// Read a `content://` (or `file://`) URI into memory, with its display name.
 pub fn read_content_uri(uri: &str) -> R<(String, Vec<u8>)> {
-    let ctx = ndk_context::android_context();
-    let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }.map_err(|e| e.to_string())?;
-    let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
+    let (vm, activity) = android_context()?;
     let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+    // the Activity is a Context, and an activity-scoped one keeps the URI
+    // read grant the intent handed us
+    let context = unsafe { JObject::from_raw(activity.cast()) };
 
     let parsed = parse_uri(&mut env, uri)?;
     let resolver = env
-        .call_method(&activity, "getContentResolver", "()Landroid/content/ContentResolver;", &[])
+        .call_method(&context, "getContentResolver", "()Landroid/content/ContentResolver;", &[])
         .and_then(|v| v.l())
         .map_err(|e| format!("getContentResolver: {e}"))?;
 

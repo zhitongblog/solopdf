@@ -1,24 +1,11 @@
-// WebKit (WKWebView/Safari) still lacks ReadableStream async iteration,
-// which pdf.js 5.x uses inside getTextContent() — without this polyfill the
-// text layer and form layer silently die IN THE NATIVE APP ONLY (Chromium
-// has the API, so browser E2E passes). Must run before any pdf.js import.
-if (!(Symbol.asyncIterator in ReadableStream.prototype)) {
-  ;(ReadableStream.prototype as any)[Symbol.asyncIterator] = function (this: ReadableStream) {
-    const reader = this.getReader()
-    return {
-      next: () => reader.read(),
-      return: (value?: unknown) => {
-        reader.releaseLock()
-        return Promise.resolve({ done: true as const, value })
-      },
-      [Symbol.asyncIterator]() {
-        return this
-      },
-    }
-  }
-}
+// Shims first: pdf.js and everything downstream assume a recent browser.
+// See src/shims.js — vite.config.ts injects the same file into the pdf.js
+// worker bundle, which is a separate realm these would not otherwise reach.
+import './shims.js'
 
-// last-resort visible error banner — mobile has no devtools console
+// Last-resort visible error banner. A phone has no devtools console, so
+// without this a fatal error is indistinguishable from a slow load — which is
+// exactly how the Android WebView shim hunt started.
 window.addEventListener('error', (e) => showFatal(String(e.message)))
 window.addEventListener('unhandledrejection', (e) => showFatal(String(e.reason)))
 function showFatal(msg: string): void {

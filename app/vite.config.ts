@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /**
  * Dev-only fixtures API so the full UI can run and be E2E-tested in a plain
@@ -120,8 +121,24 @@ function fixturesApi(): Plugin {
   }
 }
 
+/**
+ * A Web Worker is its own JS realm, so the polyfills main.ts installs never
+ * reach the pdf.js worker. On an old Android WebView that shows up as a
+ * document which opens forever with no on-screen error, while logcat says
+ * "Promise.try is not a function" from pdf.worker.js. Injecting the very
+ * same shim file as the worker bundle's banner keeps one source of truth.
+ */
+const SHIMS = fs.readFileSync(
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'src/shims.js'),
+  'utf8',
+)
+
 export default defineConfig({
   plugins: [vue(), fixturesApi()],
+  worker: {
+    format: 'es',
+    rollupOptions: { output: { banner: SHIMS } },
+  },
   resolve: {
     alias: {
       // app consumes core TS sources directly (HMR); CLI/MCP use core/dist

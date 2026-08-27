@@ -60,7 +60,10 @@ ort = { version = "2.0.0-rc.10", features = ["download-binaries"] }
 # project on purpose — gen/ is gitignored and would need re-patching.
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
-ndk-context = "0.1"
+# tao is already in the tree under tauri-runtime-wry and it is what stores the
+# live JavaVM + Activity for the running app. Declaring the same semver makes
+# cargo unify it, so we read the very statics Tauri populated.
+tao = "0.35"
 
 # desktop-only: single-instance forwarding
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
