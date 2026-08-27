@@ -29,7 +29,7 @@ export class TauriBackend implements PlatformBackend {
   async pickFiles(): Promise<string[] | null> {
     const sel = await open({
       multiple: true,
-      filters: [{ name: 'Documents', extensions: ['pdf', 'epub', 'txt'] }],
+      filters: [{ name: 'Documents', extensions: ['pdf', 'epub', 'txt', 'cbz', 'cbr', 'mobi', 'azw3'] }],
     })
     if (!sel) return null
     // 平台差异(App Review 2.1a "error when open a PDF" 的根因):

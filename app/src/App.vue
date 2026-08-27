@@ -11,7 +11,7 @@
  */
 import { computed, onMounted, onBeforeUnmount, ref, watch, nextTick } from 'vue'
 import {
-  store, controllers, documents, annotManagers, epubBooks, txtBooks, initStore, newTab, closeTab,
+  store, controllers, documents, annotManagers, epubBooks, txtBooks, comicBooks, initStore, newTab, closeTab,
   addRecent, savePosition, restorePosition, effectiveTheme, docPrefsFor, saveDocPrefs,
   addBookmark, removeBookmark, bookmarkAt, type TabState,
 } from './store'
@@ -41,6 +41,7 @@ import DictPopup from './components/DictPopup.vue'
 import StatsPanel from './components/StatsPanel.vue'
 import LibraryView from './components/LibraryView.vue'
 import LibrarySearch from './components/LibrarySearch.vue'
+import ComicView from './components/ComicView.vue'
 import { noteOpened, captureCover, addToLibrary } from './library'
 import { startStats, stopStats, noteTurn } from './stats'
 import { speaker, startReading, stopReading } from './readaloud'
@@ -119,6 +120,32 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
   }
   const tab = newTab(path)
   await nextTick() // let the scroll host for this tab mount
+
+  // ── 漫画(CBZ/CBR):整包读进来 → 排序图片条目 → 专用视图 ──
+  if (tab.kind === 'comic') {
+    try {
+      const meta = await platform().fileMeta(path)
+      const bytes = await platform().readChunk(path, 0, meta.size)
+      const { ComicBook } = await import('./book/comic')
+      const cb = new ComicBook()
+      await cb.load(bytes, path)
+      comicBooks.set(tab.id, cb)
+      tab.numPages = cb.pages.length
+      const pos = store.positions[path]
+      tab.currentPage = jumpTo?.page ?? pos?.page ?? 1
+      restoreBookByHash(tab, !!(jumpTo || pos))
+      store.docTick++
+      addRecent(path)
+      noteOpened(tab)
+    } catch (err) {
+      const msg = (err as Error)?.message === 'archiveEmpty'
+        ? t('cm.noImages')
+        : String((err as Error)?.message ?? err)
+      tab.loadError = msg
+      showToast(t('app.openFail', { msg }))
+    }
+    return
+  }
 
   // ── TXT:解码(UTF-8 → GBK 回退)→ 章节/段落 → 图书视图 ──
   if (tab.kind === 'txt') {
@@ -597,6 +624,7 @@ onMounted(async () => {
     readAloudRef: readAloud,
     tts: { speaker, startReading, stopReading },
     epubBooks,
+    comicBooks,
     closeTab,
   }
 
@@ -706,8 +734,14 @@ watch(() => store.settings.theme, () => {
               <button class="open-btn" @click="onCloseTab(tab.id)">{{ t('app.closeTab') }}</button>
             </div>
           </div>
+          <ComicView
+            v-if="tab.kind === 'comic'"
+            v-show="tab.id === store.activeTabId"
+            :tab-id="tab.id"
+            @chrome="chromeReveal = !chromeReveal"
+          />
           <BookView
-            v-if="tab.bookMode"
+            v-else-if="tab.bookMode"
             v-show="tab.id === store.activeTabId"
             :tab-id="tab.id"
             :source="tab.kind"

@@ -1134,7 +1134,13 @@ fn print_webview() -> Result<(), String> {
 
 fn collect_open_args(args: impl Iterator<Item = String>) -> Vec<String> {
     args.skip(1)
-        .filter(|a| a.ends_with(".pdf") || a.ends_with(".epub") || a.ends_with(".txt") || a.starts_with("solopdf://"))
+        .filter(|a| {
+            let low = a.to_lowercase();
+            [".pdf", ".epub", ".txt", ".cbz", ".cbr", ".mobi", ".azw3"]
+                .iter()
+                .any(|e| low.ends_with(e))
+                || a.starts_with("solopdf://")
+        })
         .collect()
 }
 

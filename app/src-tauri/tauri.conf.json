@@ -70,6 +70,16 @@
         "description": "Plain text document",
         "role": "Viewer",
         "mimeType": "text/plain"
+      },
+      {
+        "ext": [
+          "cbz",
+          "cbr"
+        ],
+        "name": "Comic Archive",
+        "description": "Comic book archive",
+        "role": "Viewer",
+        "mimeType": "application/vnd.comicbook+zip"
       }
     ],
     "iOS": {

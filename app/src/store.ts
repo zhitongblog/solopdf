@@ -26,8 +26,8 @@ export interface TabState {
   formsDirty: boolean
   /** 图书阅读模式(重排视图) */
   bookMode: boolean
-  /** 文档类型:EPUB/TXT 只有图书视图 */
-  kind: 'pdf' | 'epub' | 'txt'
+  /** 文档类型:EPUB/TXT 走图书视图,漫画走 ComicView */
+  kind: 'pdf' | 'epub' | 'txt' | 'comic'
   /** 图书模式的精确位置(块序):TXT 的 page 粒度是"章",长章恢复
    *  到章首体验差——存/恢复都以块为准,page 仅作章级回退 */
   bookBlock: number
@@ -101,9 +101,19 @@ export interface Settings {
   bookAutoSpeed: number
   /** read-aloud voice settings */
   tts: TtsSettings
+  /** comic reader */
+  comic: ComicSettings
   /** where the dictionary's explicit "search the web" button goes; %s = word.
    *  Never used automatically — SoloPDF makes no network request on its own. */
   webLookupUrl: string
+}
+
+export interface ComicSettings {
+  /** 1 = one page, 2 = two-up where the window is wide enough */
+  spread: 1 | 2
+  /** right-to-left page order (manga) */
+  rtl: boolean
+  fit: 'height' | 'width' | 'contain'
 }
 
 export interface TtsSettings {
@@ -149,6 +159,7 @@ export const DEFAULT_SETTINGS: Settings = {
   keepAwake: MOBILE,
   bookAutoSpeed: MOBILE ? 30 : 40,
   tts: { rate: 1, pitch: 1, voiceURI: '', lang: '' },
+  comic: { spread: MOBILE ? 1 : 2, rtl: false, fit: 'height' },
   webLookupUrl: 'https://www.google.com/search?q=define+%s',
 }
 
@@ -187,6 +198,7 @@ export const documents = new Map<number, PDFDocumentProxy>()
 export const annotManagers = new Map<number, AnnotationManager>()
 export const epubBooks = new Map<number, import('./book/epub').EpubBook>()
 export const txtBooks = new Map<number, import('@solopdf/core').TxtBook>()
+export const comicBooks = new Map<number, import('./book/comic').ComicBook>()
 
 /** Book-mode hooks the reader needs from outside the component: which blocks
  *  are on screen, and how to turn to the next lot. Registered by BookView. */
@@ -210,6 +222,7 @@ export async function initStore(): Promise<void> {
     // 时,整体覆盖会让新字段变 undefined
     store.settings.book = { ...DEFAULT_SETTINGS.book, ...(s.settings.book ?? {}) }
     store.settings.tts = { ...DEFAULT_SETTINGS.tts, ...(s.settings.tts ?? {}) }
+    store.settings.comic = { ...DEFAULT_SETTINGS.comic, ...(s.settings.comic ?? {}) }
   }
   if (s.recents) store.recents = s.recents
   if (s.positions) store.positions = s.positions
@@ -265,8 +278,9 @@ export function newTab(path: string): TabState {
     formsDirty: false,
     bookMode: false,
     bookBlock: 0,
-    kind: path.toLowerCase().endsWith('.epub') ? 'epub'
-      : path.toLowerCase().endsWith('.txt') ? 'txt'
+    kind: /\.epub$/i.test(path) ? 'epub'
+      : /\.txt$/i.test(path) ? 'txt'
+      : /\.(cbz|cbr)$/i.test(path) ? 'comic'
       : 'pdf',
   }
   store.tabs.push(t)
@@ -287,6 +301,8 @@ export function closeTab(id: number): void {
   epubBooks.get(id)?.destroy()
   epubBooks.delete(id)
   txtBooks.delete(id)
+  comicBooks.get(id)?.destroy()
+  comicBooks.delete(id)
   bookApis.delete(id)
   store.tabs.splice(i, 1)
   if (store.activeTabId === id) {
