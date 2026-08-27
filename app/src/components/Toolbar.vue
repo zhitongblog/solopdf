@@ -4,7 +4,7 @@ import { store, controllers } from '../store'
 import { isMobile, isTauri } from '../platform'
 import { t } from '../i18n'
 
-defineEmits<{ search: []; settings: []; print: []; saveFilled: []; exportMd: []; ocr: []; book: [] }>()
+defineEmits<{ search: []; settings: []; print: []; saveFilled: []; exportMd: []; ocr: []; book: []; view: [] }>()
 
 const tab = computed(() => store.activeTab)
 const ctrl = computed(() => { void store.docTick; return tab.value ? controllers.get(tab.value.id) : undefined })
@@ -35,6 +35,12 @@ function zoom(dir: 1 | -1): void {
     <button :title="t('tb.zoomIn')" @click="zoom(1)">+</button>
     <button :title="t('tb.fitWidthTip')" @click="ctrl?.setZoom('width')">{{ t('tb.fitWidth') }}</button>
     <button :title="t('tb.fitPageTip')" @click="ctrl?.setZoom('page')">{{ t('tb.fitPage') }}</button>
+    <button
+      class="view-btn"
+      :class="{ active: ctrl?.autoScrolling }"
+      :title="t('tb.viewTip')"
+      @click="$emit('view')"
+    >{{ t('tb.view') }}</button>
     <button
       class="book-toggle"
       :class="{ active: tab.bookMode }"

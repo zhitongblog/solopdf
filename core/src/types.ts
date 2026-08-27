@@ -33,6 +33,23 @@ export interface AnchorData {
   text?: string
 }
 
+/**
+ * Mark kind. Absent in v1 sidecars → 'highlight', so old files keep working
+ * byte-for-byte (the kind is only written when it is not the default).
+ *
+ *   highlight/underline/strike/squiggly — text marks, quads per visual line
+ *   note   — a pin at a point; anchor.quads holds one degenerate quad
+ *   region — a rectangular screenshot; anchor.quads holds the rect, and
+ *            `image` names a file inside the sidecar's assets folder
+ */
+export type AnnotationKind =
+  | 'highlight'
+  | 'underline'
+  | 'strike'
+  | 'squiggly'
+  | 'note'
+  | 'region'
+
 export interface Annotation {
   /** stable short id, e.g. "a1b2c3" */
   id: string
@@ -43,6 +60,10 @@ export interface Annotation {
   note: string
   /** highlight color name */
   color: string
+  /** mark kind; undefined means 'highlight' (v1 compatibility) */
+  kind?: AnnotationKind
+  /** region marks only: image file name relative to the assets folder */
+  image?: string
   /** ISO timestamp */
   createdAt: string
   /** true when the anchor comment was lost/corrupt — plain note, no jump link */

@@ -154,6 +154,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   cancelled = true
+  stopAuto()
   io?.disconnect()
   ro?.disconnect()
   document.removeEventListener('selectionchange', onSelChange)
@@ -203,6 +204,53 @@ function setupIO(): void {
 
 const placeholderH = (n: { blocks: ReflowBlock[] }): string =>
   `${n.blocks.reduce((s, b) => s + Math.max(1, Math.ceil(b.text.length / 35)), 0) * book.value.size * book.value.lineHeight + n.blocks.length * book.value.size}px`
+
+// ── 自动翻页 / 自动滚动 ──
+// 滚动版式:按 px/s 平移;翻页版式:攒够"一页的高度"就翻一页,这样同一个
+// 速度旋钮在两种版式下读起来快慢一致。
+const autoOn = ref(false)
+let autoRaf = 0
+let autoLast = 0
+let autoAcc = 0
+
+function stopAuto(): void {
+  autoOn.value = false
+  if (autoRaf) { cancelAnimationFrame(autoRaf); autoRaf = 0 }
+}
+
+function startAuto(): void {
+  if (autoOn.value) { stopAuto(); return }
+  autoOn.value = true
+  autoLast = performance.now()
+  autoAcc = 0
+  const step = (now: number): void => {
+    if (!autoOn.value) { autoRaf = 0; return }
+    const dt = Math.min(0.25, (now - autoLast) / 1000)
+    autoLast = now
+    autoAcc += store.settings.bookAutoSpeed * dt
+    if (layout.value === 'paged') {
+      const h = host.value?.clientHeight ?? 800
+      if (autoAcc >= h) {
+        autoAcc = 0
+        const atEnd = pageIdx.value >= pageCount.value - 1 && secIdx.value >= totalSections.value - 1
+        if (atEnd) { stopAuto(); return }
+        void turn(1)
+      }
+    } else {
+      const h = host.value
+      if (!h) { stopAuto(); return }
+      const whole = Math.floor(autoAcc)
+      if (whole > 0) {
+        autoAcc -= whole
+        const before = h.scrollTop
+        h.scrollTop = before + whole
+        if (h.scrollTop === before) { stopAuto(); return } // hit the end
+      }
+    }
+    autoRaf = requestAnimationFrame(step)
+  }
+  autoRaf = requestAnimationFrame(step)
+}
 
 let scrollRaf = 0
 function onScroll(): void {
@@ -341,6 +389,7 @@ function closePanels(): boolean {
 }
 
 function onHostClick(e: MouseEvent): void {
+  if (autoOn.value) { stopAuto(); return } // a tap during auto-advance means "stop"
   if (closePanels()) return
   if (layout.value !== 'paged') return
   if (window.getSelection()?.toString()) return
@@ -580,6 +629,17 @@ function tocJump(chapter: number): void {
         <label>{{ t('bk.lhLabel') }}</label>
         <input type="range" min="1.4" max="2.4" step="0.1" v-model.number="book.lineHeight" />
         <span class="bk-val">{{ book.lineHeight.toFixed(1) }}</span>
+      </div>
+      <div class="bk-row">
+        <label>{{ t('bk.autoScroll') }}</label>
+        <button class="bk-auto-btn" :class="{ active: autoOn }" @click="startAuto()">
+          {{ autoOn ? t('bk.autoStop') : t('bk.autoStart') }}
+        </button>
+      </div>
+      <div class="bk-row">
+        <label>{{ t('bk.autoSpeed') }}</label>
+        <input type="range" min="10" max="200" step="5" v-model.number="store.settings.bookAutoSpeed" />
+        <span class="bk-val">{{ store.settings.bookAutoSpeed }}</span>
       </div>
       <div class="bk-row" v-if="layout === 'scroll'">
         <label>{{ t('bk.widthLabel') }}</label>

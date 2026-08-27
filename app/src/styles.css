@@ -168,10 +168,13 @@ input:focus { border-color: var(--accent); }
 /* ── viewer ── */
 .pv-scroll { flex: 1; overflow: auto; position: relative; }
 .pv-canvas-area { position: relative; margin: 12px auto; }
+/* .pv-page is the CROP WINDOW: it clips, and .pv-page-inner (the full
+   rotated page, where every layer lives) is offset negatively inside it. */
 .pv-page {
-  position: absolute; left: 0; right: 0; margin: 0 auto;
-  background: #fff; box-shadow: var(--shadow); width: 100%;
+  position: absolute; margin: 0; overflow: hidden;
+  background: #fff; box-shadow: var(--shadow);
 }
+.pv-page-inner { position: absolute; }
 html.dark .pv-page { background: #2f2f31; }
 .pv-page canvas { display: block; }
 .pv-page canvas.pv-inverted { filter: invert(0.93) hue-rotate(180deg); }
@@ -210,6 +213,49 @@ html.dark .pv-page .annotationLayer :is(input, textarea, select) {
 .pv-hl-green { background: var(--hl-green); }
 .pv-hl-blue { background: var(--hl-blue); }
 .pv-hl-pink { background: var(--hl-pink); }
+
+/* Mark kinds. The fill colour comes from .pv-hl-<color>; the kind decides
+   whether that colour paints the whole box or just a rule, so underline and
+   strike reuse the same swatch palette via currentColor-style masking. */
+.pv-mk-underline, .pv-mk-strike, .pv-mk-squiggly { background: none !important; }
+.pv-mk-underline::after, .pv-mk-strike::after {
+  content: ''; position: absolute; left: 0; right: 0; height: 2px;
+  background: var(--mk-ink, currentColor);
+}
+.pv-mk-underline::after { bottom: 0; }
+.pv-mk-strike::after { top: 50%; transform: translateY(-50%); }
+.pv-mk-squiggly::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 4px;
+  background-image: repeating-linear-gradient(
+    135deg, var(--mk-ink, currentColor) 0 1.5px, transparent 1.5px 3px);
+}
+.pv-hl-yellow.pv-mk-underline, .pv-hl-yellow.pv-mk-strike, .pv-hl-yellow.pv-mk-squiggly { --mk-ink: #c9a227; }
+.pv-hl-green.pv-mk-underline, .pv-hl-green.pv-mk-strike, .pv-hl-green.pv-mk-squiggly { --mk-ink: #2e9e5b; }
+.pv-hl-blue.pv-mk-underline, .pv-hl-blue.pv-mk-strike, .pv-hl-blue.pv-mk-squiggly { --mk-ink: #3a6df0; }
+.pv-hl-pink.pv-mk-underline, .pv-hl-pink.pv-mk-strike, .pv-hl-pink.pv-mk-squiggly { --mk-ink: #d94f8a; }
+
+/* region screenshot mark: an outlined rectangle, never a fill (it would
+   hide the very figure it points at) */
+.pv-region {
+  position: absolute; background: none; border: 2px solid var(--mk-ink, #3a6df0);
+  border-radius: 3px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5) inset;
+}
+.pv-region.pv-hl-yellow { --mk-ink: #c9a227; }
+.pv-region.pv-hl-green { --mk-ink: #2e9e5b; }
+.pv-region.pv-hl-blue { --mk-ink: #3a6df0; }
+.pv-region.pv-hl-pink { --mk-ink: #d94f8a; }
+
+/* sticky-note pin */
+.pv-note-pin {
+  position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px;
+  border-radius: 50% 50% 50% 2px; background: #f3c623;
+  border: 1.5px solid #b8901a; pointer-events: auto; cursor: pointer;
+  box-shadow: var(--shadow);
+}
+.pv-note-pin::after {
+  content: ''; position: absolute; inset: 4px; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.28);
+}
 .pv-hl-flash { animation: hlflash 1.5s ease; }
 @keyframes hlflash {
   0%, 40% { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -454,3 +500,56 @@ h4.bk-block { font-size: 1.15em; }
 }
 .bk-fs-btn:hover { opacity: 0.9; }
 .bk-paged-bar { padding-bottom: env(safe-area-inset-bottom, 0px); height: calc(40px + env(safe-area-inset-bottom, 0px)); }
+
+/* ── view menu (rotation / layout / crop / auto-scroll) ── */
+.menu-mask { position: fixed; inset: 0; z-index: 60; }
+.view-menu {
+  position: absolute; top: 84px; right: 12px; width: 264px;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: var(--shadow); padding: 12px 14px;
+  max-height: calc(100vh - 110px); overflow: auto;
+}
+.view-menu h4 {
+  margin: 12px 0 6px; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-dim);
+}
+.view-menu h4:first-child { margin-top: 0; }
+.vm-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.vm-row button { flex: 1; white-space: nowrap; }
+.vm-row button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.vm-seg { display: flex; gap: 0; margin-bottom: 6px; }
+.vm-seg button {
+  flex: 1; border-radius: 0; margin-left: -1px; white-space: nowrap;
+}
+.vm-seg button:first-child { border-radius: 7px 0 0 7px; margin-left: 0; }
+.vm-seg button:last-child { border-radius: 0 7px 7px 0; }
+.vm-seg button.active { background: var(--accent); color: #fff; border-color: var(--accent); z-index: 1; }
+.vm-check {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--fg-dim); margin: 6px 0;
+}
+.vm-slider { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.vm-slider label { font-size: 12px; color: var(--fg-dim); width: 32px; flex: none; }
+.vm-slider input[type='range'] { flex: 1; min-width: 0; }
+.vm-val { font-size: 11px; color: var(--fg-dim); width: 34px; text-align: right; flex: none; }
+
+/* auto-scroll indicator on the toolbar button */
+.toolbar button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* Phones: the view menu is a bottom sheet, not a dropdown — thumbs reach the
+   bottom of a phone, not the top-right corner. Controls grow to 44pt targets. */
+@media (max-width: 700px) {
+  .menu-mask { background: rgba(0, 0, 0, 0.28); }
+  .view-menu {
+    top: auto; bottom: 0; left: 0; right: 0; width: auto;
+    border-radius: 16px 16px 0 0; padding: 14px 18px 26px;
+    max-height: 78vh;
+  }
+  .view-menu button { min-height: 44px; }
+  .vm-check { min-height: 40px; font-size: 14px; }
+  .vm-slider { min-height: 40px; }
+  .vm-slider input[type='range'] { height: 28px; }
+}
+
+.bk-auto-btn { flex: 1; }
+.bk-auto-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }

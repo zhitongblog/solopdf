@@ -12,7 +12,7 @@
 import { onMounted, onBeforeUnmount, ref, watch, nextTick } from 'vue'
 import {
   store, controllers, documents, annotManagers, epubBooks, txtBooks, initStore, newTab, closeTab,
-  addRecent, savePosition, restorePosition, effectiveTheme, type TabState,
+  addRecent, savePosition, restorePosition, effectiveTheme, docPrefsFor, saveDocPrefs, type TabState,
 } from './store'
 import { platform, isTauri, isMobile } from './platform'
 import { t } from './i18n'
@@ -21,6 +21,7 @@ import { openDocument } from './viewer/loader'
 import { PdfViewerController, type SelectionInfo } from './viewer/controller'
 import { AnnotationManager } from './annotations/manager'
 import { printDocument } from './print'
+import { initWakeLock, setKeepAwake } from './wakelock'
 import TabBar from './components/TabBar.vue'
 import Toolbar from './components/Toolbar.vue'
 import Sidebar from './components/Sidebar.vue'
@@ -32,11 +33,13 @@ import WelcomeScreen from './components/WelcomeScreen.vue'
 import OcrDialog from './components/OcrDialog.vue'
 import ImageOcrDialog from './components/ImageOcrDialog.vue'
 import BookView from './components/BookView.vue'
+import ViewMenu from './components/ViewMenu.vue'
 
 const scrollHost = ref<HTMLDivElement>()
 const selection = ref<SelectionInfo | null>(null)
 const searchOpen = ref(false)
 const settingsOpen = ref(false)
+const viewMenuOpen = ref(false)
 const ocrOpen = ref(false)
 const imageOcrPath = ref('')
 const imageOcrBytes = ref<{ bytes: Uint8Array; name: string } | null>(null)
@@ -170,6 +173,15 @@ async function openPath(path: string, jumpTo?: { page: number; annot?: string })
     if (!host) throw new Error('internal: render host missing')
     const ctrl = new PdfViewerController(doc, host, effectiveTheme)
     ctrl.darkPdf = store.settings.darkPdf
+    // per-document view state (rotation/crop) + global layout preference,
+    // applied BEFORE init() so the first layout pass is already correct
+    ctrl.scrollMode = store.settings.scrollMode
+    ctrl.spread = store.settings.spread
+    ctrl.coverAlone = store.settings.coverAlone
+    const prefs = docPrefsFor(path)
+    if (prefs.rotation) ctrl.rotation = prefs.rotation
+    if (prefs.pageRotations) ctrl.setPageRotations(prefs.pageRotations)
+    if (prefs.crop) ctrl.crop = prefs.crop
     controllers.set(tab.id, ctrl)
     ctrl.onVisiblePage = (p) => { tab.currentPage = p }
     ctrl.onSelection = (sel) => { selection.value = sel && store.activeTabId === tab.id ? sel : null }
@@ -277,15 +289,40 @@ function onKey(e: KeyboardEvent): void {
   else if (mod && e.key === 'b') { e.preventDefault(); store.settings.sidebarOpen = !store.settings.sidebarOpen }
   else if (!mod && e.key === 'Escape') { searchOpen.value = false; settingsOpen.value = false }
   else if (!mod && tab && ctrl && !tab.bookMode && !isTyping(e)) {
-    if (e.key === 'j' || e.key === 'PageDown') ctrl.scrollToPage(Math.min(tab.currentPage + 1, tab.numPages))
-    else if (e.key === 'k' || e.key === 'PageUp') ctrl.scrollToPage(Math.max(tab.currentPage - 1, 1))
+    if (e.key === 'j' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); ctrl.turnPage(1) }
+    else if (e.key === 'k' || e.key === 'PageUp') { e.preventDefault(); ctrl.turnPage(-1) }
+    else if (e.key === 'ArrowRight' && ctrl.scrollMode === 'paged') { e.preventDefault(); ctrl.turnPage(1) }
+    else if (e.key === 'ArrowLeft' && ctrl.scrollMode === 'paged') { e.preventDefault(); ctrl.turnPage(-1) }
     else if (e.key === 'Home') ctrl.scrollToPage(1)
     else if (e.key === 'End') ctrl.scrollToPage(tab.numPages)
+    else if (e.key === 'r' || e.key === 'R') { rotateDoc(e.key === 'R' ? -90 : 90) }
+    else if (e.key === 'a') { toggleAutoScroll() }
   }
 }
 function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement
   return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable
+}
+
+function rotateDoc(delta: number): void {
+  const tab = store.activeTab
+  const ctrl = tab && controllers.get(tab.id)
+  if (!tab || !ctrl) return
+  ctrl.rotateBy(delta)
+  saveDocPrefs(tab.path, {
+    rotation: ctrl.rotation || undefined,
+    pageRotations: Object.keys(ctrl.pageRotations()).length ? ctrl.pageRotations() : undefined,
+  })
+  store.docTick++
+}
+
+function toggleAutoScroll(): void {
+  const tab = store.activeTab
+  const ctrl = tab && controllers.get(tab.id)
+  if (!ctrl) return
+  if (ctrl.autoScrolling) ctrl.stopAutoScroll()
+  else ctrl.setAutoScroll(store.settings.autoScrollSpeed)
+  store.docTick++
 }
 
 async function saveFilledForm(): Promise<void> {
@@ -401,6 +438,14 @@ watch(
   },
 )
 
+let resizeTimer = 0
+function onResize(): void {
+  clearTimeout(resizeTimer)
+  resizeTimer = window.setTimeout(() => {
+    for (const c of controllers.values()) c.onResize()
+  }, 150)
+}
+
 // position autosave every 5s + on unload
 let posTimer = 0
 onMounted(async () => {
@@ -408,8 +453,11 @@ onMounted(async () => {
   // phones: sidebar starts closed regardless of persisted desktop preference
   if (window.innerWidth < 700) store.settings.sidebarOpen = false
   applyTheme()
+  initWakeLock()
+  setKeepAwake(store.settings.keepAwake)
   window.addEventListener('keydown', onKey)
   window.addEventListener('focus', onFocus)
+  window.addEventListener('resize', onResize)
   posTimer = window.setInterval(() => { const t = store.activeTab; if (t) savePosition(t) }, 5000)
 
   // E2E harness — used by browser tests and by the native debug bridge
@@ -426,6 +474,8 @@ onMounted(async () => {
     ocr: await import('./ocr'),
     openImageOcr: (p: string) => { imageOcrPath.value = p },
     toggleBookMode,
+    rotateDoc,
+    toggleAutoScroll,
     epubBooks,
     closeTab,
   }
@@ -468,8 +518,12 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('focus', onFocus)
+  window.removeEventListener('resize', onResize)
+  clearTimeout(resizeTimer)
   clearInterval(posTimer)
 })
+
+watch(() => store.settings.keepAwake, (on) => setKeepAwake(on))
 
 // zoom / dark-pdf propagation
 watch(() => store.settings.darkPdf, (m) => {
@@ -500,6 +554,7 @@ watch(() => store.settings.theme, () => {
           @export-md="exportMd"
           @ocr="ocrOpen = true"
           @book="toggleBookMode"
+          @view="viewMenuOpen = !viewMenuOpen"
         />
         <WelcomeScreen
           v-if="!store.tabs.length"
@@ -557,6 +612,11 @@ watch(() => store.settings.theme, () => {
       </div>
     </div>
 
+    <ViewMenu
+      v-if="viewMenuOpen && store.activeTab && store.activeTab.kind === 'pdf'"
+      @close="viewMenuOpen = false"
+      @toast="showToast"
+    />
     <SettingsPanel v-if="settingsOpen" @close="settingsOpen = false" />
     <OcrDialog v-if="ocrOpen && store.activeTab" @close="ocrOpen = false" @done="onOcrDone" />
     <ImageOcrDialog

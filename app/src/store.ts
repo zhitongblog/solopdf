@@ -9,6 +9,7 @@ import { platform } from './platform'
 import type { PdfViewerController } from './viewer/controller'
 import type { AnnotationManager } from './annotations/manager'
 import { detectSystemLocale, setLocale, type Locale } from './i18n'
+import type { CropRect } from './viewer/geometry'
 
 export interface TabState {
   id: number
@@ -46,14 +47,42 @@ export interface BookSettings {
   maxWidth: number
 }
 
+/** Per-document view state — rotation and crop belong to the FILE, not to
+ *  the app: a sideways scan is sideways every time you open it. Capped so
+ *  state.json can't grow without bound. */
+export interface DocPrefs {
+  /** whole-document rotation in degrees */
+  rotation?: number
+  /** per-page extra rotation, keyed by 1-based page number */
+  pageRotations?: Record<string, number>
+  /** display-only margin trim */
+  crop?: CropRect
+  /** last time this entry was touched (for LRU eviction) */
+  at?: number
+}
+
+export const MAX_DOC_PREFS = 300
+
 export interface Settings {
   theme: 'system' | 'light' | 'dark'
   darkPdf: 'off' | 'smart'
   updateCheck: boolean
-  sidebarTab: 'outline' | 'thumbs' | 'annots'
+  sidebarTab: 'outline' | 'thumbs' | 'annots' | 'marks'
   sidebarOpen: boolean
   language: 'system' | Locale
   book: BookSettings
+  /** PDF view: vertical scroll through the doc vs one spread at a time */
+  scrollMode: 'continuous' | 'paged'
+  /** 1 = single page, 2 = facing pages */
+  spread: 1 | 2
+  /** in facing mode, page 1 stands alone like a book cover */
+  coverAlone: boolean
+  /** auto-scroll speed in px/second (0 = off; the toggle keeps the speed) */
+  autoScrollSpeed: number
+  /** hold the screen backlight while a document is open */
+  keepAwake: boolean
+  /** book-mode auto-scroll speed in px/second */
+  bookAutoSpeed: number
 }
 
 interface PersistedState {
@@ -62,16 +91,29 @@ interface PersistedState {
   /** reading positions: key = path, fallback key = "hash:<hex>" */
   positions: Record<string, { page: number; ratio: number }>
   hashes: Record<string, string>
+  docPrefs: Record<string, DocPrefs>
 }
+
+/** phones and tablets get different reading defaults from desktops — see the
+ *  mobile/desktop split rule: gesture-first small screens want one screenful
+ *  per flick, big screens want a continuous scroll under a mouse wheel. */
+const MOBILE = /iPhone|iPad|Android/i.test(navigator.userAgent)
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   darkPdf: 'smart',
   updateCheck: false,
   sidebarTab: 'outline',
-  sidebarOpen: true,
+  sidebarOpen: !MOBILE,
   language: 'system',
   book: { layout: 'auto', bg: 'paper', font: 'sans', size: 18, lineHeight: 1.9, maxWidth: 38 },
+  scrollMode: MOBILE ? 'paged' : 'continuous',
+  spread: 1,
+  coverAlone: true,
+  autoScrollSpeed: MOBILE ? 40 : 60,
+  // phones are where a sleeping screen actually interrupts reading
+  keepAwake: MOBILE,
+  bookAutoSpeed: MOBILE ? 30 : 40,
 }
 
 export function applyLanguage(): void {
@@ -91,6 +133,7 @@ export const store = reactive({
   recents: [] as string[],
   positions: {} as Record<string, { page: number; ratio: number }>,
   hashes: {} as Record<string, string>,
+  docPrefs: {} as Record<string, DocPrefs>,
   loaded: false,
 
   get activeTab(): TabState | undefined {
@@ -121,13 +164,14 @@ export async function initStore(): Promise<void> {
   if (s.recents) store.recents = s.recents
   if (s.positions) store.positions = s.positions
   if (s.hashes) store.hashes = s.hashes
+  if (s.docPrefs) store.docPrefs = s.docPrefs
   applyLanguage()
   watch(() => store.settings.language, applyLanguage)
   store.loaded = true
   // persist on change, debounced
   let t = 0
   watch(
-    () => [store.settings, store.recents, store.positions, store.hashes],
+    () => [store.settings, store.recents, store.positions, store.hashes, store.docPrefs],
     () => {
       clearTimeout(t)
       t = window.setTimeout(persist, 400)
@@ -142,6 +186,7 @@ async function persist(): Promise<void> {
     recents: [...store.recents],
     positions: { ...store.positions },
     hashes: { ...store.hashes },
+    docPrefs: { ...store.docPrefs },
   })
 }
 
@@ -183,6 +228,33 @@ export function closeTab(id: number): void {
   store.tabs.splice(i, 1)
   if (store.activeTabId === id) {
     store.activeTabId = store.tabs[Math.min(i, store.tabs.length - 1)]?.id ?? 0
+  }
+}
+
+/** per-document view prefs, keyed by path with a content-hash fallback */
+export function docPrefsFor(path: string): DocPrefs {
+  const h = store.hashes[path]
+  return store.docPrefs[path] ?? (h ? store.docPrefs[`hash:${h}`] : undefined) ?? {}
+}
+
+export function saveDocPrefs(path: string, patch: DocPrefs): void {
+  const next = { ...docPrefsFor(path), ...patch, at: Date.now() }
+  const empty = !next.rotation && !next.crop &&
+    !Object.keys(next.pageRotations ?? {}).length
+  if (empty) {
+    delete store.docPrefs[path]
+  } else {
+    store.docPrefs[path] = next
+    const h = store.hashes[path]
+    if (h) store.docPrefs[`hash:${h}`] = next
+  }
+  // LRU eviction — oldest entries go first
+  const keys = Object.keys(store.docPrefs)
+  if (keys.length > MAX_DOC_PREFS) {
+    keys
+      .sort((a, b) => (store.docPrefs[a].at ?? 0) - (store.docPrefs[b].at ?? 0))
+      .slice(0, keys.length - MAX_DOC_PREFS)
+      .forEach((k) => delete store.docPrefs[k])
   }
 }
 
