@@ -10,6 +10,7 @@ use tauri::{Emitter, Manager};
 
 pub mod ocr;
 pub mod pdfops;
+pub mod djvu;
 
 #[derive(Serialize)]
 struct FileMeta {
@@ -694,6 +695,30 @@ fn define_word(_word: String) -> &'static str {
     "unsupported"
 }
 
+// ── DjVu ─────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn djvu_info(path: String) -> Result<djvu::DjvuInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || djvu::info(&path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn djvu_page(path: String, page: usize, width: u32) -> Result<tauri::ipc::Response, String> {
+    let png = tauri::async_runtime::spawn_blocking(move || djvu::render_page(&path, page, width))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(png))
+}
+
+#[tauri::command]
+async fn djvu_text(path: String, page: usize) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || djvu::page_text(&path, page))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 // ── mobile document import ───────────────────────────────────────────────
 //
 // iOS hands us a file in one of two ways, and NEITHER gives a path that
@@ -796,7 +821,7 @@ fn list_imported(app: tauri::AppHandle) -> Result<Vec<String>, String> {
                 && p.extension()
                     .map(|e| {
                         let e = e.to_string_lossy().to_lowercase();
-                        ["pdf", "epub", "txt", "cbz", "cbr", "mobi", "azw3"].contains(&e.as_str())
+                        ["pdf", "epub", "txt", "cbz", "cbr", "mobi", "azw3", "djvu", "djv"].contains(&e.as_str())
                     })
                     .unwrap_or(false)
         })
@@ -827,7 +852,7 @@ struct ScannedFile {
 /// for a minute is worse than one that says "too many files".
 #[tauri::command]
 async fn scan_folder(path: String, max_depth: u32) -> Result<Vec<ScannedFile>, String> {
-    const EXTS: [&str; 7] = ["pdf", "epub", "txt", "cbz", "cbr", "mobi", "azw3"];
+    const EXTS: [&str; 9] = ["pdf", "epub", "txt", "cbz", "cbr", "mobi", "azw3", "djvu", "djv"];
     const MAX_FILES: usize = 5000;
     tauri::async_runtime::spawn_blocking(move || {
         let mut out = Vec::new();
@@ -1136,7 +1161,7 @@ fn collect_open_args(args: impl Iterator<Item = String>) -> Vec<String> {
     args.skip(1)
         .filter(|a| {
             let low = a.to_lowercase();
-            [".pdf", ".epub", ".txt", ".cbz", ".cbr", ".mobi", ".azw3"]
+            [".pdf", ".epub", ".txt", ".cbz", ".cbr", ".mobi", ".azw3", ".djvu", ".djv"]
                 .iter()
                 .any(|e| low.ends_with(e))
                 || a.starts_with("solopdf://")
@@ -1187,6 +1212,9 @@ pub fn run() {
             pdf_remove_password,
             define_word,
             read_user_dicts,
+            djvu_info,
+            djvu_page,
+            djvu_text,
             import_document,
             list_imported,
             library_path,

@@ -280,6 +280,9 @@ const zhCN: Dict = {
   'cm.fitBoth': '完整显示',
   'cm.empty': '这个压缩包里没有图片',
   'cm.noImages': '压缩包里没有找到图片（CBZ/CBR 应当是图片的打包）',
+  'cm.rendering': '正在渲染…',
+  'dj.djvuDesktopOnly': 'DjVu 需要桌面版（渲染在本地进行）',
+  'dj.djvuEmpty': '这个 DjVu 文件没有页面',
   // mobi / azw3
   'mb.mobiBad': '这不是一个可读的 MOBI/AZW3 文件',
   'mb.mobiDrm': '这本书有 DRM 保护，SoloPDF 无法打开（也不会尝试破解）',
@@ -683,6 +686,9 @@ const zhTW: Dict = {
   'cm.fitBoth': '完整顯示',
   'cm.empty': '這個壓縮檔裡沒有圖片',
   'cm.noImages': '壓縮檔裡找不到圖片（CBZ/CBR 應該是圖片的打包）',
+  'cm.rendering': '正在算繪…',
+  'dj.djvuDesktopOnly': 'DjVu 需要桌面版（算繪在本機進行）',
+  'dj.djvuEmpty': '這個 DjVu 檔案沒有頁面',
   // mobi / azw3
   'mb.mobiBad': '這不是一個可讀的 MOBI/AZW3 檔案',
   'mb.mobiDrm': '這本書有 DRM 保護，SoloPDF 無法開啟（也不會嘗試破解）',
@@ -1074,6 +1080,9 @@ const en: Dict = {
   'cm.fitBoth': 'Fit whole page',
   'cm.empty': 'No images in this archive',
   'cm.noImages': 'No images found — a CBZ/CBR should be a bundle of page images',
+  'cm.rendering': 'Rendering…',
+  'dj.djvuDesktopOnly': 'DjVu needs the desktop app (pages are rendered locally)',
+  'dj.djvuEmpty': 'This DjVu file has no pages',
   // mobi / azw3
   'mb.mobiBad': "That isn't a readable MOBI/AZW3 file",
   'mb.mobiDrm': 'This book is DRM-protected. SoloPDF cannot open it, and does not try to break it',
@@ -1465,6 +1474,9 @@ const ja: Dict = {
   'cm.fitBoth': '全体を表示',
   'cm.empty': 'このアーカイブに画像がありません',
   'cm.noImages': '画像が見つかりません（CBZ/CBR はページ画像の束です）',
+  'cm.rendering': 'レンダリング中…',
+  'dj.djvuDesktopOnly': 'DjVu はデスクトップ版が必要です（ページはローカルで描画します）',
+  'dj.djvuEmpty': 'この DjVu にはページがありません',
   // mobi / azw3
   'mb.mobiBad': '読み取れる MOBI/AZW3 ファイルではありません',
   'mb.mobiDrm': 'この本には DRM があり、SoloPDF では開けません（解除も行いません）',

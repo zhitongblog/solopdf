@@ -16,6 +16,11 @@ distributed and used to *read* RAR archives; they may not be used to develop
 a RAR (WinRAR) compatible archiver. SoloPDF only ever reads.
 https://github.com/YuJianrong/node-unrar.js
 
+## djvu-rs — MIT
+Pure-Rust DjVu decoding. Chosen over the reference DjVuLibre, which is GPL
+and cannot ship in the Mac App Store build.
+https://github.com/matyushkin/djvu-rs
+
 ## GlyphLessFont — Apache-2.0
 The invisible font used for the OCR text layer, from Tesseract.
 https://github.com/tesseract-ocr/tesseract

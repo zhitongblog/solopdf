@@ -90,6 +90,16 @@
         "description": "Kindle e-book",
         "role": "Viewer",
         "mimeType": "application/x-mobipocket-ebook"
+      },
+      {
+        "ext": [
+          "djvu",
+          "djv"
+        ],
+        "name": "DjVu Document",
+        "description": "DjVu scanned document",
+        "role": "Viewer",
+        "mimeType": "image/vnd.djvu"
       }
     ],
     "iOS": {

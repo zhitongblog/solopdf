@@ -43,6 +43,9 @@ const shown = computed<number[]>(() => {
 })
 
 const urls = computed(() => {
+  // docTick is the signal an async source (DjVu renders in Rust) uses to say
+  // "a page landed" — without it the view would show a permanent blank
+  void store.docTick
   const b = book.value
   if (!b) return []
   return shown.value.map((i) => ({ i, url: b.urlFor(i) }))
@@ -116,7 +119,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, { capture: tr
   >
     <div v-if="!total" class="cm-empty">{{ t('cm.empty') }}</div>
     <div v-else class="cm-stage">
-      <img v-for="p in urls" :key="p.i" :src="p.url ?? ''" :alt="`${p.i + 1}`" />
+      <template v-for="p in urls" :key="p.i">
+        <img v-if="p.url" :src="p.url" :alt="`${p.i + 1}`" />
+        <div v-else class="cm-loading">{{ t('cm.rendering') }}</div>
+      </template>
     </div>
 
     <div class="cm-bar" @click.stop>

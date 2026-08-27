@@ -1035,3 +1035,7 @@ h4.bk-block { font-size: 1.15em; }
   .cm-bar button { min-width: 40px; min-height: 40px; }
   .cm-slider { flex: 1; min-width: 0; width: auto; }
 }
+.cm-loading {
+  display: flex; align-items: center; justify-content: center;
+  min-width: 200px; height: 60%; color: #8a8f98; font-size: 13px;
+}

@@ -901,6 +901,88 @@ dependencies = [
 ]
 
 [[package]]
+name = "djvu-bitmap"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a5aca72e0b4c3cf1d455cddfda7aab3dcc88990b4fc7c9b843ecb845fa70e0c"
+
+[[package]]
+name = "djvu-bzz"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f830c8f87af042851fdc3cc12553718a13450c75561e0b27366ac425bf291e2c"
+dependencies = [
+ "djvu-zp",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "djvu-iff"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1f8f6379d293cd915c5e7c6c8a48e2ec35e2ce3cae9b559bc94895bc54cc8ea"
+dependencies = [
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "djvu-iw44"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea27d09b192ad8ef283eeac5e5c2c2ba1b2dbaa0c51cb639656787c5815b5f64"
+dependencies = [
+ "djvu-pixmap",
+ "djvu-zp",
+ "thiserror 2.0.18",
+ "wide",
+]
+
+[[package]]
+name = "djvu-jb2"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6eddfa6961ccc7c9e9d00a60798b040bff7d8fb4331af34526db8fd5aeca688"
+dependencies = [
+ "djvu-bitmap",
+ "djvu-zp",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "djvu-pixmap"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "381658100eed7b713d2810cd39a3a1db422877abd02b0c9976599490d0e4dc33"
+
+[[package]]
+name = "djvu-rs"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edf5f8cb3e46b332c21c41fb726f9605196bb0a5108b994b688e9076b9d57e44"
+dependencies = [
+ "djvu-bitmap",
+ "djvu-bzz",
+ "djvu-iff",
+ "djvu-iw44",
+ "djvu-jb2",
+ "djvu-pixmap",
+ "djvu-zp",
+ "png 0.17.16",
+ "thiserror 2.0.18",
+ "wide",
+ "zune-jpeg",
+]
+
+[[package]]
+name = "djvu-zp"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67cd202faf80f1aef66e2c801447b74fb92ef40e610b5bb59f7200ee549a518a"
+dependencies = [
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "dlopen2"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3383,6 +3465,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
+name = "safe_arch"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96b02de82ddbe1b636e6170c21be622223aea188ef2e139be0a5b219ec215323"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3766,6 +3857,7 @@ name = "solopdf"
 version = "0.5.0"
 dependencies = [
  "cc",
+ "djvu-rs",
  "image",
  "lopdf",
  "ort",
@@ -5143,6 +5235,16 @@ name = "weezl"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
+
+[[package]]
+name = "wide"
+version = "0.7.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce5da8ecb62bcd8ec8b7ea19f69a51275e91299be594ea5cc6ef7819e16cd03"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
+]
 
 [[package]]
 name = "winapi"

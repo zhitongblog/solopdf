@@ -121,6 +121,29 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
   const tab = newTab(path)
   await nextTick() // let the scroll host for this tab mount
 
+  // ── DjVu:页面在 Rust 侧解码成 PNG,前端当"图片页"读 ──
+  if (tab.kind === 'djvu') {
+    try {
+      const { DjvuBook } = await import('./book/djvu')
+      const bk = new DjvuBook()
+      await bk.load(path)
+      comicBooks.set(tab.id, bk)
+      tab.numPages = bk.pages.length
+      const pos = store.positions[path]
+      tab.currentPage = jumpTo?.page ?? pos?.page ?? 1
+      restoreBookByHash(tab, !!(jumpTo || pos))
+      store.docTick++
+      addRecent(path)
+      noteOpened(tab)
+    } catch (err) {
+      const raw = String((err as Error)?.message ?? err)
+      const msg = raw.startsWith('djvu') ? t('dj.' + raw) : raw
+      tab.loadError = msg
+      showToast(t('app.openFail', { msg }))
+    }
+    return
+  }
+
   // ── 漫画(CBZ/CBR):整包读进来 → 排序图片条目 → 专用视图 ──
   if (tab.kind === 'comic') {
     try {
@@ -747,7 +770,7 @@ watch(() => store.settings.theme, () => {
             </div>
           </div>
           <ComicView
-            v-if="tab.kind === 'comic'"
+            v-if="tab.kind === 'comic' || tab.kind === 'djvu'"
             v-show="tab.id === store.activeTabId"
             :tab-id="tab.id"
             @chrome="chromeReveal = !chromeReveal"
