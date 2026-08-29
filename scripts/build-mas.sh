@@ -27,6 +27,26 @@ echo "==> SoloPDF MAS build  v$MAS_VERSION ($MAS_BUILD_NUMBER)"
 cd app
 pnpm install --frozen-lockfile
 unset APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+
+# Tauri's universal build lipos ONLY the main binary; the extra [[bin]]
+# targets are left per-arch, and bundling then dies with
+# "solopdf-doc does not exist". (This went unnoticed until v0.6 added a
+# second helper — a stale universal solopdf-ocr from an earlier build had
+# been sitting in the target dir keeping the bundler happy.) Build the
+# helpers for both arches and lipo them into place first.
+HELPERS=(solopdf-ocr solopdf-doc)
+for arch in aarch64-apple-darwin x86_64-apple-darwin; do
+  cargo build --release --manifest-path src-tauri/Cargo.toml --target "$arch" \
+    "${HELPERS[@]/#/--bin=}"
+done
+mkdir -p src-tauri/target/universal-apple-darwin/release
+for b in "${HELPERS[@]}"; do
+  lipo -create -output "src-tauri/target/universal-apple-darwin/release/$b" \
+    "src-tauri/target/aarch64-apple-darwin/release/$b" \
+    "src-tauri/target/x86_64-apple-darwin/release/$b"
+  lipo -archs "src-tauri/target/universal-apple-darwin/release/$b"
+done
+
 pnpm tauri build --target universal-apple-darwin --bundles app
 APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/SoloPDF.app"
 [ -d "$APP" ] || { echo "ERROR: .app not found" >&2; exit 1; }
