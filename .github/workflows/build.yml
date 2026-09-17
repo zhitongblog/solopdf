@@ -201,6 +201,13 @@ jobs:
           # long as it takes the notarized one to be uploaded. Drop it; the
           # release gets its dmg from the local notarized build.
           rm -f out/*.dmg
+          # Without the ANDROID_* signing secrets the android job falls back to
+          # a debug build: ~1 GB, unoptimised, four ABIs, full debuginfo. That
+          # is fine as a CI artifact and wrong as a download, so it never
+          # becomes a release asset. A signed release APK/AAB needs a keystore
+          # the maintainer owns; once the secrets exist this stops matching.
+          rm -f out/*debug*.apk out/*debug*.aab
+          rm -f out/*unsigned*.apk out/*unsigned*.aab
           ls -la out/
 
       # A release whose "x64" Windows installer is secretly an ARM build is
@@ -262,7 +269,9 @@ jobs:
               *) note MISMATCH "$(basename "$a"): want '$exp', got '$got'"; fail=1 ;; esac
           done
 
-          [ -n "$(ls out/*.apk 2>/dev/null)" ] && note ok "apk present" || { note MISSING "*.apk"; fail=1; }
+          # Not fatal: an Android asset only exists when the signing secrets do.
+          [ -n "$(ls out/*.apk 2>/dev/null)" ] && note ok "signed apk present" \
+            || note "-" "no apk asset (unsigned/debug builds are not published)"
           echo "---"
           [ $fail -eq 0 ] && echo "all architecture assertions passed" || echo "ARCHITECTURE ASSERTIONS FAILED — not publishing"
           exit $fail

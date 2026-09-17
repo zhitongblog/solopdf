@@ -9,7 +9,7 @@
 | Windows ARM64 | `SoloPDF_0.6.0_arm64-setup.exe`（或 `_arm64_en-US.msi`） |
 | Linux x64 | `SoloPDF_0.6.0_amd64.deb` / `SoloPDF_0.6.0_amd64.AppImage` |
 | Linux ARM64 | `SoloPDF_0.6.0_arm64.deb` / `SoloPDF_0.6.0_aarch64.AppImage` |
-| Android | `SoloPDF.apk`（未签名 release，需允许安装未知来源） |
+| Android | 本次未随 Release 提供，见下方说明 |
 
 **x64 和 Intel Mac 是这一版新增的**。此前发布矩阵只有三条 ARM 腿，x64 Windows、x64 Linux 和 Intel Mac 用户没有可下载的包；现在 macOS 出一个 universal dmg，Windows 和 Linux 各出 x64 与 ARM64 两套。
 
@@ -60,6 +60,6 @@ MOBI / AZW3（KF8，自研解析器）、CBZ / CBR 漫画（日漫右起翻页�
 - CBR 只在真实 RAR 归档上做了 API 级验证
 - MOBI 的 HUFF/CDIC 压缩与 DRM 文件不支持，会明确提示而不是显示乱码
 - Windows / Linux 的 x64 产物由 CI 构建，未在物理 x64 机器上做过手动回归（ARM64 有 UTM 虚拟机覆盖）
-- Android release 包未签名，需自备 keystore
+- **Android 包本次未发布**：签名需要维护者自己的 keystore，CI 上没有，回退产物是一个 998 MB 的 debug 构建，不适合当作下载。配好 keystore 后会补上签名的 APK / AAB。
 
 完整清单见 [CHANGELOG.md](https://github.com/zhitongblog/solopdf/blob/v0.6.0/CHANGELOG.md)。
