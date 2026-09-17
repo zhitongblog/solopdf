@@ -12,6 +12,8 @@
 # Usage: MAS_VERSION=1.0.0 MAS_BUILD_NUMBER=1.0.0 ./scripts/build-mas.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# shellcheck source=lib/mac-universal-helpers.sh
+source scripts/lib/mac-universal-helpers.sh
 
 MAS_SIGNING_IDENTITY="${MAS_SIGNING_IDENTITY:-Apple Distribution: xiangdong li (6NQM3XP5RF)}"
 MAS_INSTALLER_IDENTITY="${MAS_INSTALLER_IDENTITY:-3rd Party Mac Developer Installer: xiangdong li (6NQM3XP5RF)}"
@@ -28,24 +30,7 @@ cd app
 pnpm install --frozen-lockfile
 unset APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
 
-# Tauri's universal build lipos ONLY the main binary; the extra [[bin]]
-# targets are left per-arch, and bundling then dies with
-# "solopdf-doc does not exist". (This went unnoticed until v0.6 added a
-# second helper — a stale universal solopdf-ocr from an earlier build had
-# been sitting in the target dir keeping the bundler happy.) Build the
-# helpers for both arches and lipo them into place first.
-HELPERS=(solopdf-ocr solopdf-doc)
-for arch in aarch64-apple-darwin x86_64-apple-darwin; do
-  cargo build --release --manifest-path src-tauri/Cargo.toml --target "$arch" \
-    "${HELPERS[@]/#/--bin=}"
-done
-mkdir -p src-tauri/target/universal-apple-darwin/release
-for b in "${HELPERS[@]}"; do
-  lipo -create -output "src-tauri/target/universal-apple-darwin/release/$b" \
-    "src-tauri/target/aarch64-apple-darwin/release/$b" \
-    "src-tauri/target/x86_64-apple-darwin/release/$b"
-  lipo -archs "src-tauri/target/universal-apple-darwin/release/$b"
-done
+mac_lipo_helpers
 
 pnpm tauri build --target universal-apple-darwin --bundles app
 APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/SoloPDF.app"

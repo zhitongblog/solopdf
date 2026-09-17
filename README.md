@@ -114,10 +114,15 @@ node scripts/check-i18n.mjs         # 四语言文案完整性
 pnpm dev                            # 浏览器模式（vite + fixtures API，供 E2E）
 pnpm tauri dev                      # 桌面应用
 pnpm tauri build                    # 打包
+scripts/build-dmg.sh                # macOS universal dmg（有签名凭据时顺带公证）
 scripts/build-android.sh            # Android debug APK（release 需自备 keystore）
 scripts/build-ios.sh                # iOS ipa
 scripts/build-mas.sh                # Mac App Store pkg
 ```
+
+发布产物覆盖的架构：macOS 单个 universal dmg（Apple Silicon + Intel）、
+Windows ARM64 与 x64（NSIS + MSI）、Linux ARM64 与 x64（deb + AppImage）、
+Android 四 ABI。CI（`.github/workflows/build.yml`）在推 `v*` tag 时全部构建。
 
 内置词典由 CC-CEDICT 生成，需要重建时：
 

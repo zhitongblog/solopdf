@@ -11,12 +11,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14            # Apple Silicon
-            target: mac-aarch64
+          # The ARM legs match the UTM VMs on the maintainer's Apple Silicon
+          # machine, which is where hands-on testing happens. The x64 legs are
+          # CI-only — they cover the architecture most users actually run.
+          - os: macos-14            # one universal dmg: arm64 + x86_64
+            target: mac-universal
           - os: windows-11-arm      # matches UTM Win11-ARM VM
             target: win-aarch64
+          - os: windows-latest
+            target: win-x64
           - os: ubuntu-24.04-arm    # matches UTM Ubuntu-ARM VM
             target: linux-aarch64
+          - os: ubuntu-24.04
+            target: linux-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -35,9 +42,14 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: app/src-tauri
+          key: ${{ matrix.target }}
+
+      - name: Extra Rust targets (macOS universal)
+        if: matrix.target == 'mac-universal'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - name: Linux system deps (webkit2gtk)
-        if: matrix.target == 'linux-aarch64'
+        if: startsWith(matrix.target, 'linux-')
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
@@ -51,7 +63,18 @@ jobs:
         run: cargo test --lib --manifest-path app/src-tauri/Cargo.toml
 
       - name: Build Tauri app
+        if: matrix.target != 'mac-universal'
         run: pnpm --filter solopdf-app tauri build
+        env:
+          CI: true
+
+      # macOS goes through the release script so CI exercises the exact path
+      # that produces the shipped dmg (helper lipo included). Unsigned here —
+      # no Developer ID cert on the runner; the released dmg is built and
+      # notarized locally.
+      - name: Build universal dmg
+        if: matrix.target == 'mac-universal'
+        run: ./scripts/build-dmg.sh
         env:
           CI: true
 
@@ -60,12 +83,12 @@ jobs:
         run: |
           mkdir -p out
           case "${{ matrix.target }}" in
-            mac-aarch64)
-              cp app/src-tauri/target/release/bundle/dmg/*.dmg out/ ;;
-            win-aarch64)
+            mac-universal)
+              cp app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg out/ ;;
+            win-*)
               cp app/src-tauri/target/release/bundle/nsis/*.exe out/ 2>/dev/null || true
               cp app/src-tauri/target/release/bundle/msi/*.msi out/ 2>/dev/null || true ;;
-            linux-aarch64)
+            linux-*)
               cp app/src-tauri/target/release/bundle/deb/*.deb out/ 2>/dev/null || true
               cp app/src-tauri/target/release/bundle/appimage/*.AppImage out/ 2>/dev/null || true ;;
           esac
