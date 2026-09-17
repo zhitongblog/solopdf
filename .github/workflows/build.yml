@@ -173,3 +173,83 @@ jobs:
           name: solopdf-android
           path: out/*
           if-no-files-found: error
+
+  # Publishing from inside Actions instead of from a laptop: the artifacts are
+  # already on the runner, and pulling ~1 GB down to re-upload it is both slow
+  # and a great way to ship a truncated asset. The notarized macOS dmg is the
+  # one exception — it needs a Developer ID cert, so it is built locally and
+  # uploaded to this same release afterwards.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, android]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten + list
+        run: |
+          mkdir -p out
+          find artifacts -type f -exec cp {} out/ \;
+          # The dmg CI builds is UNSIGNED — no Developer ID cert on a runner.
+          # Publishing it would hand macOS users a Gatekeeper warning for as
+          # long as it takes the notarized one to be uploaded. Drop it; the
+          # release gets its dmg from the local notarized build.
+          rm -f out/*.dmg
+          ls -la out/
+
+      # A release whose "x64" Windows installer is secretly an ARM build is
+      # worse than no release, so assert every architecture before publishing.
+      - name: Verify architectures
+        run: |
+          fail=0
+          want() {  # glob, expected substring of file(1) output
+            f=$(ls out/$1 2>/dev/null | head -1)
+            if [ -z "$f" ]; then echo "MISSING  $1"; fail=1; return; fi
+            got=$(file -b "$f")
+            case "$got" in
+              *"$2"*) echo "ok       $(basename "$f")  [$2]" ;;
+              *)      echo "MISMATCH $(basename "$f"): want '$2', got '$got'"; fail=1 ;;
+            esac
+          }
+          # file(1) says "PE32+ executable (GUI) x86-64" vs "... Aarch64",
+          # so match the arch word, not the PE32+ prefix both share.
+          want '*_x64-setup.exe'    'x86-64'
+          want '*_arm64-setup.exe'  'Aarch64'
+          # deb/AppImage: the ELF inside is what matters, but the deb control
+          # field is the authoritative label users' package managers read.
+          for d in out/*.deb; do
+            [ -f "$d" ] || continue
+            arch=$(dpkg-deb -f "$d" Architecture)
+            case "$d" in
+              *_amd64.deb) exp=amd64 ;;
+              *_arm64.deb) exp=arm64 ;;
+              *) echo "UNEXPECTED deb name: $d"; fail=1; continue ;;
+            esac
+            if [ "$arch" = "$exp" ]; then echo "ok       $(basename "$d")  [$arch]"
+            else echo "MISMATCH $(basename "$d"): control says '$arch', want '$exp'"; fail=1; fi
+          done
+          for a in out/*.AppImage; do
+            [ -f "$a" ] || continue
+            echo "present  $(basename "$a")  $(file -b "$a" | cut -c1-40)"
+          done
+          [ -f "$(ls out/*.apk 2>/dev/null | head -1)" ] || { echo "MISSING  *.apk"; fail=1; }
+          exit $fail
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/* --clobber
+          else
+            gh release create "$TAG" out/* \
+              --title "SoloPDF 0.6.0 — 读完并且用起来" \
+              --notes-file .github/release-notes-v0.6.0.md
+          fi
