@@ -34,7 +34,7 @@ pnpm tauri build --target universal-apple-darwin --bundles dmg
 cd ..
 
 UNIVERSAL=app/src-tauri/target/universal-apple-darwin/release
-DMG=$(ls "$UNIVERSAL"/dmg/*.dmg 2>/dev/null | head -1)
+DMG=$(ls "$UNIVERSAL"/bundle/dmg/*.dmg 2>/dev/null | head -1)
 [ -n "$DMG" ] || { echo "ERROR: no dmg produced" >&2; exit 1; }
 
 # Check the lipo'd main binary, NOT bundle/macos/SoloPDF.app — `--bundles dmg`
