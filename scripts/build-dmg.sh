@@ -30,6 +30,26 @@ pnpm --filter @solopdf/core build
 
 cd app
 mac_lipo_helpers
+
+# macOS signs inside-out: a nested Mach-O in Contents/MacOS must carry its own
+# signature before the enclosing .app can be signed. `lipo -create` output has
+# no signature, so without this tauri's app signing dies with
+#   "code object is not signed at all. In subcomponent: .../solopdf-ocr"
+# The MAS path never hit this because it deletes the helpers before signing
+# (bare nested executables fail MAS validation 90049/90885); the dmg keeps them
+# — they are the shipped CLI drivers the README documents.
+# --options runtime (hardened runtime) is required for notarization to pass.
+if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+  echo "==> Signing helper binaries"
+  for b in solopdf-ocr solopdf-doc; do
+    codesign --force --timestamp --options runtime \
+      --sign "$APPLE_SIGNING_IDENTITY" \
+      "src-tauri/target/universal-apple-darwin/release/$b"
+    codesign --verify --strict --verbose=1 \
+      "src-tauri/target/universal-apple-darwin/release/$b"
+  done
+fi
+
 pnpm tauri build --target universal-apple-darwin --bundles dmg
 cd ..
 

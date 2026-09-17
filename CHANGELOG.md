@@ -75,3 +75,6 @@
 - CBR 只在真实 RAR 归档上做了 API 级验证（本机没有 RAR 打包器可造样本）
 - MOBI 的 HUFF/CDIC 压缩与 DRM 文件不支持，会明确提示而不是显示乱码
 - Android release 包需要你自己的 keystore；Play Console 账号也需你注册
+- **iOS 最低系统版本提到 15.0**：Xcode 27 已经拒绝构建 14.0 目标（"the range of
+  supported deployment target versions is 15.0 to 27.0.x"），不是警告而是硬失败，
+  所以这是被工具链推着走的，不是主动取舍
