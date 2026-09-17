@@ -205,40 +205,66 @@ jobs:
 
       # A release whose "x64" Windows installer is secretly an ARM build is
       # worse than no release, so assert every architecture before publishing.
+      - name: Tools for inspecting installers
+        run: sudo apt-get update && sudo apt-get install -y msitools p7zip-full
+
       - name: Verify architectures
         run: |
           fail=0
-          want() {  # glob, expected substring of file(1) output
-            f=$(ls out/$1 2>/dev/null | head -1)
-            if [ -z "$f" ]; then echo "MISSING  $1"; fail=1; return; fi
-            got=$(file -b "$f")
-            case "$got" in
-              *"$2"*) echo "ok       $(basename "$f")  [$2]" ;;
-              *)      echo "MISMATCH $(basename "$f"): want '$2', got '$got'"; fail=1 ;;
-            esac
-          }
-          # file(1) says "PE32+ executable (GUI) x86-64" vs "... Aarch64",
-          # so match the arch word, not the PE32+ prefix both share.
-          want '*_x64-setup.exe'    'x86-64'
-          want '*_arm64-setup.exe'  'Aarch64'
-          # deb/AppImage: the ELF inside is what matters, but the deb control
-          # field is the authoritative label users' package managers read.
+          note() { printf '%-9s %s\n' "$1" "$2"; }
+
+          # NSIS: the setup.exe STUB is always 32-bit x86 — it is the installer
+          # program, not the app. file(1) on it reports "Intel 80386" for the
+          # arm64 build too, so it says nothing about what gets installed.
+          # Unpack it and look at the payload.
+          for f in out/*-setup.exe; do
+            [ -f "$f" ] || continue
+            case "$f" in *_x64-*) exp='x86-64' ;; *_arm64-*) exp='Aarch64' ;;
+              *) note MISMATCH "unexpected nsis name: $f"; fail=1; continue ;; esac
+            d=$(mktemp -d)
+            7z e -y -o"$d" "$f" SoloPDF.exe >/dev/null 2>&1 || true
+            inner="$d/SoloPDF.exe"
+            if [ ! -f "$inner" ]; then note SKIP "$(basename "$f"): payload not extractable, relying on its .msi"; rm -rf "$d"; continue; fi
+            got=$(file -b "$inner")
+            case "$got" in *"$exp"*) note ok "$(basename "$f") payload [$exp]" ;;
+              *) note MISMATCH "$(basename "$f") payload: want '$exp', got '$got'"; fail=1 ;; esac
+            rm -rf "$d"
+          done
+
+          # MSI: the Template summary property carries the target platform
+          # ("x64;1033" / "Arm64;1033"). Authoritative and cheap.
+          for m in out/*.msi; do
+            [ -f "$m" ] || continue
+            case "$m" in *_x64_*) exp='x64' ;; *_arm64_*) exp='Arm64' ;;
+              *) note MISMATCH "unexpected msi name: $m"; fail=1; continue ;; esac
+            tmpl=$(msiinfo suminfo "$m" 2>/dev/null | sed -n 's/^Template: *//p')
+            case "$tmpl" in "$exp"*) note ok "$(basename "$m") [$tmpl]" ;;
+              *) note MISMATCH "$(basename "$m"): Template '$tmpl', want '$exp'"; fail=1 ;; esac
+          done
+
+          # deb: the control Architecture field is what apt actually reads.
           for d in out/*.deb; do
             [ -f "$d" ] || continue
+            case "$d" in *_amd64.deb) exp=amd64 ;; *_arm64.deb) exp=arm64 ;;
+              *) note MISMATCH "unexpected deb name: $d"; fail=1; continue ;; esac
             arch=$(dpkg-deb -f "$d" Architecture)
-            case "$d" in
-              *_amd64.deb) exp=amd64 ;;
-              *_arm64.deb) exp=arm64 ;;
-              *) echo "UNEXPECTED deb name: $d"; fail=1; continue ;;
-            esac
-            if [ "$arch" = "$exp" ]; then echo "ok       $(basename "$d")  [$arch]"
-            else echo "MISMATCH $(basename "$d"): control says '$arch', want '$exp'"; fail=1; fi
+            [ "$arch" = "$exp" ] && note ok "$(basename "$d") [$arch]" \
+              || { note MISMATCH "$(basename "$d"): control '$arch', want '$exp'"; fail=1; }
           done
+
+          # AppImage: a plain ELF, so file(1) is the real answer here.
           for a in out/*.AppImage; do
             [ -f "$a" ] || continue
-            echo "present  $(basename "$a")  $(file -b "$a" | cut -c1-40)"
+            case "$a" in *amd64*) exp='x86-64' ;; *aarch64*) exp='aarch64' ;;
+              *) note MISMATCH "unexpected AppImage name: $a"; fail=1; continue ;; esac
+            got=$(file -b "$a")
+            case "$got" in *"$exp"*) note ok "$(basename "$a") [$exp]" ;;
+              *) note MISMATCH "$(basename "$a"): want '$exp', got '$got'"; fail=1 ;; esac
           done
-          [ -f "$(ls out/*.apk 2>/dev/null | head -1)" ] || { echo "MISSING  *.apk"; fail=1; }
+
+          [ -n "$(ls out/*.apk 2>/dev/null)" ] && note ok "apk present" || { note MISSING "*.apk"; fail=1; }
+          echo "---"
+          [ $fail -eq 0 ] && echo "all architecture assertions passed" || echo "ARCHITECTURE ASSERTIONS FAILED — not publishing"
           exit $fail
 
       - name: Publish release
