@@ -33,12 +33,16 @@ mac_lipo_helpers
 pnpm tauri build --target universal-apple-darwin --bundles dmg
 cd ..
 
-BUNDLE=app/src-tauri/target/universal-apple-darwin/release/bundle
-APP="$BUNDLE/macos/SoloPDF.app"
-DMG=$(ls "$BUNDLE"/dmg/*.dmg | head -1)
+UNIVERSAL=app/src-tauri/target/universal-apple-darwin/release
+DMG=$(ls "$UNIVERSAL"/dmg/*.dmg 2>/dev/null | head -1)
+[ -n "$DMG" ] || { echo "ERROR: no dmg produced" >&2; exit 1; }
 
+# Check the lipo'd main binary, NOT bundle/macos/SoloPDF.app — `--bundles dmg`
+# does not leave a .app behind, and on a machine where a previous `--bundles
+# app` run did, checking it would pass on a months-old binary. Same class of
+# trap as the stale universal helper in a628eb8.
 echo "==> main binary archs:"
-lipo -archs "$APP/Contents/MacOS/SoloPDF"
+lipo -archs "$UNIVERSAL/SoloPDF"
 
 if [ -n "${APPLE_API_KEY:-}" ]; then
   echo "==> Notarizing the dmg wrapper"
