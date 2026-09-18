@@ -305,10 +305,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG=${GITHUB_REF_NAME}
+          VER=${TAG#v}
+          NOTES=".github/release-notes-${TAG}.md"
+          # Title and notes are derived from the tag, not hardcoded — a release
+          # that ships last version's notes under this version's tag is the kind
+          # of mistake nobody notices until a user reads them.
+          [ -f "$NOTES" ] || { echo "missing $NOTES — write the release notes before tagging"; exit 1; }
+          TITLE=$(head -1 "$NOTES" | sed 's/^#* *//')   # portable: BSD sed has no \+
+          [ -n "$TITLE" ] || { echo "$NOTES must start with a '# <title>' line"; exit 1; }
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" out/* --clobber
           else
-            gh release create "$TAG" out/* \
-              --title "SoloPDF 0.6.0 — 读完并且用起来" \
-              --notes-file .github/release-notes-v0.6.0.md
+            # drop the title line from the body — it becomes the release title
+            tail -n +2 "$NOTES" > /tmp/body.md
+            gh release create "$TAG" out/* --title "$TITLE" --notes-file /tmp/body.md
           fi

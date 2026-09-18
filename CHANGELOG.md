@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## v0.6.1 — 补上标题栏那块空
+
+功能清单与 v0.6.0 相同，这一版只修问题。
+
+- **标题栏左侧 70px 留白（Windows / Linux）**：`.tabbar-macpad` 是给 macOS
+  红绿灯让位的占位块（窗口用 `titleBarStyle: Overlay`，不留位置会压住第一个
+  标签页），但一直无条件渲染，其他平台那里什么都没有，就成了一块白留的空。
+  现在按 `isMacDesktop()` 门控。
+- **Android 恢复发布且已签名**：没有签名密钥时 CI 会静默退回 debug 构建
+  （998 MB、四 ABI、带 debuginfo），v0.6.0 一度把它当下载发了出去。现在
+  签名链路接通，拿不到密钥就让构建失败，不再降级。
+- **iOS 最低系统版本 14.0 → 15.0**：Xcode 27 拒绝构建 14.0 目标，硬失败
+  而非警告，没有"继续支持 14.0"这个选项。
+- **发布前架构断言**：NSIS 解包验内部可执行文件、MSI 读 Template、deb 读
+  control 的 Architecture、AppImage 验 ELF，任一不符就不发布。
+- **Release 标题与正文由 tag 推导**：原先写死在 workflow 里，容易在下个版本
+  发出上个版本的说明。
+
 ## v0.6.0 — 从"能读 PDF"到"读完并且用起来"
 
 这一版把 SoloPDF 和主流阅读器逐项对比后缺的东西补齐了，同时没有动
