@@ -54,8 +54,13 @@ pnpm tauri build --target universal-apple-darwin --bundles dmg
 cd ..
 
 UNIVERSAL=app/src-tauri/target/universal-apple-darwin/release
-DMG=$(ls "$UNIVERSAL"/bundle/dmg/*.dmg 2>/dev/null | head -1)
-[ -n "$DMG" ] || { echo "ERROR: no dmg produced" >&2; exit 1; }
+# Pick the dmg for THIS version by name, not `ls | head -1`: the bundle dir
+# keeps previous releases, and alphabetical order hands you the oldest one —
+# which would get notarized and reported as success while the build you just
+# made sits unused. Same class of trap as the stale helper in a628eb8.
+VERSION=$(python3 -c "import json;print(json.load(open('app/src-tauri/tauri.conf.json'))['version'])")
+DMG="$UNIVERSAL/bundle/dmg/SoloPDF_${VERSION}_universal.dmg"
+[ -f "$DMG" ] || { echo "ERROR: expected $DMG, got: $(ls "$UNIVERSAL"/bundle/dmg/*.dmg 2>/dev/null || echo none)" >&2; exit 1; }
 
 # Check the lipo'd main binary, NOT bundle/macos/SoloPDF.app — `--bundles dmg`
 # does not leave a .app behind, and on a machine where a previous `--bundles
