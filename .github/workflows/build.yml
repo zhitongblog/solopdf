@@ -144,22 +144,46 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @solopdf/core build
 
+      # The keystore is a binary file, so it travels as base64 in a secret and
+      # is materialised here. ANDROID_KEY_PATH used to be a secret holding a
+      # path, which can only ever resolve on the maintainer's laptop — on a
+      # runner it was empty, build-android.sh bailed, and the `||` fallback
+      # quietly produced a 1 GB debug APK instead.
+      - name: Materialise signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "no ANDROID_KEYSTORE_BASE64 secret — release signing unavailable"
+            exit 0
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/solopdf-release.jks"
+          chmod 600 "$RUNNER_TEMP/solopdf-release.jks"
+          keytool -list -keystore "$RUNNER_TEMP/solopdf-release.jks" \
+            -storepass "${{ secrets.ANDROID_STORE_PASSWORD }}" -storetype PKCS12 >/dev/null
+          echo "ANDROID_KEY_PATH=$RUNNER_TEMP/solopdf-release.jks" >> "$GITHUB_ENV"
+          echo "keystore ready"
+
       - name: Build APK + AAB
         env:
           NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/26.1.10909125
           ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
-          # Release signing needs a keystore the maintainer owns; without one
-          # this produces an UNSIGNED release build, which is still useful for
-          # sideloading and for catching build breakage.
-          ANDROID_KEY_PATH: ${{ secrets.ANDROID_KEY_PATH }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
         run: |
           cd app && pnpm tauri android init
           cd ..
-          # the manifest patch (open-with + deep link) lives in the script
-          bash scripts/build-android.sh release || bash scripts/build-android.sh
+          # the manifest patch (open-with + deep link) lives in the script.
+          # No silent fallback any more: with the secrets present a failed
+          # release build must fail the job, not degrade to a debug APK that
+          # looks like a successful Android build.
+          if [ -n "${ANDROID_KEY_PATH:-}" ]; then
+            bash scripts/build-android.sh release
+          else
+            echo "::warning::no signing keystore — building an unpublishable debug APK"
+            bash scripts/build-android.sh
+          fi
 
       - name: Collect artifacts
         run: |
