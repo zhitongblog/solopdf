@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { store } from '../store'
 import { t } from '../i18n'
+import { isMacDesktop } from '../platform'
 defineEmits<{ new: []; close: [id: number] }>()
 </script>
 
 <template>
   <div class="tabbar">
-    <div class="tabbar-macpad" />
+    <div v-if="isMacDesktop()" class="tabbar-macpad" />
     <div
       v-for="tb in store.tabs"
       :key="tb.id"
