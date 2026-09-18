@@ -232,6 +232,10 @@ jobs:
           # the maintainer owns; once the secrets exist this stops matching.
           rm -f out/*debug*.apk out/*debug*.aab
           rm -f out/*unsigned*.apk out/*unsigned*.aab
+          # The aab produced alongside an unsigned apk has no "unsigned" in its
+          # name, so a name filter alone would publish it. If no apk survived,
+          # the Android build was not signed and the aab must go too.
+          if [ -z "$(ls out/*.apk 2>/dev/null)" ]; then rm -f out/*.aab; fi
           ls -la out/
 
       # A release whose "x64" Windows installer is secretly an ARM build is
