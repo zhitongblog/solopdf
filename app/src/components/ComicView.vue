@@ -11,8 +11,8 @@
  * Phones flick; desktops arrow-key and click the page edges. Both get the
  * same double-page option, defaulting on only where there is width for it.
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { store, comicBooks } from '../store'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { store, comicBooks, docPrefsFor, saveDocPrefs } from '../store'
 import { isMobile } from '../platform'
 import { t } from '../i18n'
 
@@ -50,6 +50,71 @@ const urls = computed(() => {
   if (!b) return []
   return shown.value.map((i) => ({ i, url: b.urlFor(i) }))
 })
+
+// ── rotation: per-document, stored with the PDF rotation prefs so a
+// sideways scan stays sideways-corrected every time it is opened ──
+const rotateThisPageOnly = ref(false)
+const prefs = computed(() => (tab.value ? docPrefsFor(tab.value.path) : {}))
+const norm = (d: number): number => ((d % 360) + 360) % 360
+function rotationOf(i: number): number {
+  return norm((prefs.value.rotation ?? 0) + (prefs.value.pageRotations?.[String(i + 1)] ?? 0))
+}
+function rotate(delta: number): void {
+  const path = tab.value?.path
+  if (!path) return
+  const p = docPrefsFor(path)
+  if (rotateThisPageOnly.value) {
+    const pages = { ...(p.pageRotations ?? {}) }
+    const key = String(index.value + 1)
+    const next = norm((pages[key] ?? 0) + delta)
+    if (next) pages[key] = next
+    else delete pages[key]
+    saveDocPrefs(path, { pageRotations: Object.keys(pages).length ? pages : undefined })
+  } else {
+    saveDocPrefs(path, { rotation: norm((p.rotation ?? 0) + delta) || undefined })
+  }
+}
+function resetRotation(): void {
+  if (tab.value) saveDocPrefs(tab.value.path, { rotation: undefined, pageRotations: undefined })
+}
+
+// A quarter-turned page swaps its width and height, which CSS fit rules can't
+// see through a transform — so rotated pages are laid out here instead.
+const natural = reactive(new Map<number, [number, number]>())
+const hostW = ref(0)
+const hostH = ref(0)
+let ro: ResizeObserver | null = null
+function onImgLoad(i: number, e: Event): void {
+  const img = e.target as HTMLImageElement
+  natural.set(i, [img.naturalWidth, img.naturalHeight])
+}
+watch(book, () => natural.clear())
+
+function rotatedStyle(i: number): { box: Record<string, string>; img: Record<string, string> } | null {
+  const deg = rotationOf(i)
+  if (!deg) return null
+  const nat = natural.get(i)
+  if (!nat || !hostW.value) {
+    return { box: { width: '0px', height: '0px' }, img: { visibility: 'hidden' } }
+  }
+  const [w, h] = nat
+  const quarter = deg % 180 !== 0
+  const ew = quarter ? h : w
+  const eh = quarter ? w : h
+  // two-up shares the width, minus the 2px .cm-stage gap
+  const slotW = urls.value.length > 1 ? (hostW.value - 2) / 2 : hostW.value
+  const fit = s.value.fit
+  const scale = fit === 'width'
+    ? slotW / ew
+    : Math.min(fit === 'contain' ? 1 : Infinity, hostH.value / eh, slotW / ew)
+  return {
+    box: { width: `${ew * scale}px`, height: `${eh * scale}px` },
+    img: {
+      width: `${w * scale}px`, height: `${h * scale}px`,
+      transform: `translate(-50%, -50%) rotate(${deg}deg)`,
+    },
+  }
+}
 
 function turn(dir: 1 | -1): void {
   const step = double.value ? 2 : 1
@@ -97,6 +162,7 @@ function onKey(e: KeyboardEvent): void {
   else if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'k') { eat(); turn(s.value.rtl ? 1 : -1) }
   else if (e.key === 'Home') { eat(); index.value = 0 }
   else if (e.key === 'End') { eat(); index.value = Math.max(0, total.value - 1) }
+  else if (e.key === 'r' || e.key === 'R') { eat(); rotate(e.key === 'R' ? -90 : 90) }
 }
 
 // memory budget: keep a small window of decoded pages around the reader
@@ -104,8 +170,18 @@ watch([index, () => s.value.spread], () => {
   book.value?.trim(index.value - 2, index.value + 3)
 })
 
-onMounted(() => window.addEventListener('keydown', onKey, { capture: true }))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey, { capture: true } as never))
+onMounted(() => {
+  window.addEventListener('keydown', onKey, { capture: true })
+  ro = new ResizeObserver(() => {
+    hostW.value = host.value?.clientWidth ?? 0
+    hostH.value = host.value?.clientHeight ?? 0
+  })
+  if (host.value) ro.observe(host.value)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKey, { capture: true } as never)
+  ro?.disconnect()
+})
 </script>
 
 <template>
@@ -120,7 +196,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, { capture: tr
     <div v-if="!total" class="cm-empty">{{ t('cm.empty') }}</div>
     <div v-else class="cm-stage">
       <template v-for="p in urls" :key="p.i">
-        <img v-if="p.url" :src="p.url" :alt="`${p.i + 1}`" />
+        <div v-if="p.url && rotatedStyle(p.i)" class="cm-rot" :style="rotatedStyle(p.i)!.box">
+          <img :src="p.url" :alt="`${p.i + 1}`" :style="rotatedStyle(p.i)!.img" @load="onImgLoad(p.i, $event)" />
+        </div>
+        <img v-else-if="p.url" :src="p.url" :alt="`${p.i + 1}`" @load="onImgLoad(p.i, $event)" />
         <div v-else class="cm-loading">{{ t('cm.rendering') }}</div>
       </template>
     </div>
@@ -161,6 +240,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, { capture: tr
           <option value="contain">{{ t('cm.fitBoth') }}</option>
         </select>
       </div>
+      <div class="bk-row">
+        <label>{{ t('vm.rotate') }}</label>
+        <div class="cm-rot-btns">
+          <button @click="rotate(-90)">⟲ {{ t('vm.ccw') }}</button>
+          <button @click="rotate(90)">⟳ {{ t('vm.cw') }}</button>
+          <button @click="resetRotation()">{{ t('vm.reset') }}</button>
+        </div>
+      </div>
+      <label class="vm-check cm-rot-check">
+        <input type="checkbox" v-model="rotateThisPageOnly" />
+        {{ t('vm.thisPageOnly') }}
+      </label>
     </div>
   </div>
 </template>

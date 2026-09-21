@@ -1019,6 +1019,14 @@ h4.bk-block { font-size: 1.15em; }
 .cm-fit-height .cm-stage img:only-child { max-width: 100%; }
 .cm-fit-width .cm-stage img { width: 100%; height: auto; object-fit: contain; }
 .cm-fit-contain .cm-stage img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.cm-stage .cm-rot { position: relative; flex: none; }
+.cm-stage .cm-rot img { position: absolute; left: 50%; top: 50%; max-width: none; max-height: none; }
+.cm-rot-btns { flex: 1; display: flex; gap: 6px; }
+.cm-rot-btns button {
+  flex: 1; background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 6px; font-size: 12px; white-space: nowrap;
+}
+.cm-rot-check { display: flex; align-items: center; gap: 6px; padding: 4px 0 0 54px; color: var(--fg-dim); }
 .cm-empty { color: #8a8f98; font-size: 14px; }
 .cm-bar {
   position: absolute; left: 50%; transform: translateX(-50%);

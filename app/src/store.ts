@@ -336,7 +336,11 @@ export function saveDocPrefs(path: string, patch: DocPrefs): void {
   const empty = !next.rotation && !next.crop &&
     !Object.keys(next.pageRotations ?? {}).length
   if (empty) {
+    // the hash twin too — docPrefsFor falls back to it, so leaving it would
+    // bring the old rotation/crop straight back
     delete store.docPrefs[path]
+    const h = store.hashes[path]
+    if (h) delete store.docPrefs[`hash:${h}`]
   } else {
     store.docPrefs[path] = next
     const h = store.hashes[path]
