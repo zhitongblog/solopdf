@@ -31,6 +31,10 @@ export interface TabState {
   /** 图书模式的精确位置(块序):TXT 的 page 粒度是"章",长章恢复
    *  到章首体验差——存/恢复都以块为准,page 仅作章级回退 */
   bookBlock: number
+  /** printed page labels from the PDF ("xii", "23"), one per physical page;
+   *  null when the document has none. Display only — everything persisted
+   *  (sidecar anchors, deep links, bookmarks) stays on physical numbers. */
+  pageLabels: string[] | null
 }
 
 export interface BookSettings {
@@ -108,7 +112,12 @@ export interface Settings {
   /** where the dictionary's explicit "search the web" button goes; %s = word.
    *  Never used automatically — SoloPDF makes no network request on its own. */
   webLookupUrl: string
+  /** tint laid under PDF pages (multiply blend); ignored while dark mode
+   *  inverts pages — see paperActive() */
+  paper: PaperColor
 }
+
+export type PaperColor = 'white' | 'sepia' | 'green' | 'grey'
 
 export interface ComicSettings {
   /** 1 = one page, 2 = two-up where the window is wide enough */
@@ -164,6 +173,7 @@ export const DEFAULT_SETTINGS: Settings = {
   comic: { spread: MOBILE ? 1 : 2, rtl: false, fit: 'height' },
   defaultColor: 'yellow',
   webLookupUrl: 'https://www.google.com/search?q=define+%s',
+  paper: 'white',
 }
 
 export function applyLanguage(): void {
@@ -225,6 +235,26 @@ export const bookApis = new Map<number, BookApi>()
 export function effectiveTheme(): 'light' | 'dark' {
   if (store.settings.theme !== 'system') return store.settings.theme
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+/**
+ * Paper colour is off while dark mode inverts pages: a sepia tint under an
+ * inverted canvas comes out as a muddy blue, and the reader who picked dark
+ * mode already chose how bright the page should be. With inversion off the
+ * page is shown as-is, so the tint still applies.
+ */
+export function paperSuppressed(): boolean {
+  return effectiveTheme() === 'dark' && store.settings.darkPdf === 'smart'
+}
+
+/** the paper colour actually painted right now ('white' = none) */
+export function paperActive(): PaperColor {
+  return paperSuppressed() ? 'white' : store.settings.paper
+}
+
+/** printed label for a physical page of a tab (the number when unlabelled) */
+export function labelOf(tab: Pick<TabState, 'pageLabels'> | undefined, page: number): string {
+  return tab?.pageLabels?.[page - 1] ?? String(page)
 }
 
 export async function initStore(): Promise<void> {
@@ -291,6 +321,7 @@ export function newTab(path: string): TabState {
     formsDirty: false,
     bookMode: false,
     bookBlock: 0,
+    pageLabels: null,
     kind: /\.epub$/i.test(path) ? 'epub'
       : /\.txt$/i.test(path) ? 'txt'
       : /\.(cbz|cbr)$/i.test(path) ? 'comic'

@@ -1,19 +1,23 @@
 <script setup lang="ts">
 /**
- * View menu: rotation, page layout, margin crop, auto-scroll.
+ * View menu: rotation, page layout, paper colour, margin crop, full screen /
+ * presentation, auto-scroll.
  *
  * Everything here is display-only — nothing touches the PDF file. Rotation
- * and crop persist per document (store.docPrefs); layout and auto-scroll
- * speed are global preferences.
+ * and crop persist per document (store.docPrefs); layout, paper colour and
+ * auto-scroll speed are global preferences.
  */
 import { computed, ref } from 'vue'
-import { store, controllers, documents, saveDocPrefs, docPrefsFor } from '../store'
+import {
+  store, controllers, documents, saveDocPrefs, docPrefsFor, paperSuppressed, type PaperColor,
+} from '../store'
 import { detectCrop } from '../viewer/crop'
 import { NO_CROP, type CropRect } from '../viewer/geometry'
 import { t } from '../i18n'
 import { isMobile } from '../platform'
 
-const emit = defineEmits<{ close: []; toast: [msg: string] }>()
+defineProps<{ readingFs?: boolean }>()
+const emit = defineEmits<{ close: []; toast: [msg: string]; fullscreen: []; present: [] }>()
 
 const tab = computed(() => store.activeTab)
 const ctrl = computed(() => { void store.docTick; return tab.value ? controllers.get(tab.value.id) : undefined })
@@ -119,6 +123,20 @@ const pct = (v: number): string => `${Math.round(v * 100)}%`
 /** Facing pages only make sense with the width for two of them: every
  *  desktop, tablets in landscape, never a phone. */
 const canFace = computed(() => !isMobile() || window.innerWidth >= 820)
+
+/** swatch colours match the tints in styles.css (html[data-paper]) */
+const PAPERS: { key: PaperColor; bg: string }[] = [
+  { key: 'white', bg: '#ffffff' },
+  { key: 'sepia', bg: '#f4ecd8' },
+  { key: 'green', bg: '#cfe8cf' },
+  { key: 'grey', bg: '#e2e2e0' },
+]
+// theme/darkPdf are reactive store fields, so this tracks them
+const paperOff = computed(() => { void store.settings.theme; void store.settings.darkPdf; return paperSuppressed() })
+
+/** keyboard hints differ by platform: ⌃⌘F is the macOS full-screen chord */
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+const fsKey = isMac ? '⌃⌘F' : 'F11'
 </script>
 
 <template>
@@ -159,6 +177,21 @@ const canFace = computed(() => !isMobile() || window.innerWidth >= 820)
         {{ t('vm.coverAlone') }}
       </label>
 
+      <h4>{{ t('vm.paper') }}</h4>
+      <div class="vm-paper" :class="{ off: paperOff }">
+        <button
+          v-for="p in PAPERS" :key="p.key"
+          class="vm-swatch"
+          :class="{ active: store.settings.paper === p.key }"
+          :style="{ background: p.bg }"
+          :disabled="paperOff"
+          :title="t('vm.paper.' + p.key)"
+          :data-paper="p.key"
+          @click="store.settings.paper = p.key"
+        ><span>{{ t('vm.paper.' + p.key) }}</span></button>
+      </div>
+      <p v-if="paperOff" class="vm-note">{{ t('vm.paperDark') }}</p>
+
       <h4>{{ t('vm.crop') }}</h4>
       <div class="vm-row">
         <button :disabled="detecting" @click="autoCrop()">
@@ -177,6 +210,16 @@ const canFace = computed(() => !isMobile() || window.innerWidth >= 820)
       </div>
 
       <h4>{{ t('vm.screen') }}</h4>
+      <div class="vm-row">
+        <button class="vm-fs" :class="{ active: readingFs }" @click="emit('fullscreen')">
+          ⛶ {{ readingFs ? t('vm.exitFullscreen') : t('vm.fullscreen') }}
+          <span class="vm-key" v-if="!isMobile()">{{ fsKey }}</span>
+        </button>
+        <button class="vm-present" @click="emit('present')">
+          ▶ {{ t('vm.present') }}
+          <span class="vm-key" v-if="!isMobile()">F5</span>
+        </button>
+      </div>
       <label class="vm-check">
         <input type="checkbox" v-model="store.settings.keepAwake" />
         {{ t('vm.keepAwake') }}

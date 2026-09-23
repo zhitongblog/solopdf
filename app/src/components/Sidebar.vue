@@ -9,7 +9,7 @@
 import { computed, ref, watch, onBeforeUnmount, nextTick } from 'vue'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import {
-  store, controllers, documents, annotManagers,
+  store, controllers, documents, annotManagers, labelOf,
   bookmarksFor, removeBookmark, renameBookmark, type Bookmark,
 } from '../store'
 import { t } from '../i18n'
@@ -257,7 +257,7 @@ onBeforeUnmount(() => observer?.disconnect())
           @click.stop="n.open = !n.open"
         >{{ n.children.length ? (n.open ? '▾' : '▸') : '' }}</span>
         <span class="ol-title" :title="n.title" @click="n.page && (ctrl?.scrollToPage(n.page), closeIfNarrow())">{{ n.title }}</span>
-        <span class="ol-page" v-if="n.page">{{ n.page }}</span>
+        <span class="ol-page" v-if="n.page">{{ labelOf(tab, n.page) }}</span>
       </div>
     </div>
 
@@ -271,7 +271,9 @@ onBeforeUnmount(() => observer?.disconnect())
         @click="ctrl?.scrollToPage(p); closeIfNarrow()"
       >
         <div class="thumb-ph" style="width: 110px; height: 150px"></div>
-        <div class="thumb-num">{{ p }}</div>
+        <div class="thumb-num">
+          {{ labelOf(tab, p) }}<span v-if="labelOf(tab, p) !== String(p)" class="thumb-phys"> · {{ p }}</span>
+        </div>
       </div>
     </div>
 
@@ -288,7 +290,7 @@ onBeforeUnmount(() => observer?.disconnect())
         <template v-else>
           <span class="bm-star">★</span>
           <span class="bm-label" :title="b.label">{{ b.label }}</span>
-          <span class="bm-page">p.{{ b.page }}</span>
+          <span class="bm-page" :title="`${b.page} / ${tab.numPages}`">p.{{ labelOf(tab, b.page) }}</span>
           <button class="bm-btn" :title="t('sb.rename')" @click.stop="startBmEdit(b)">✎</button>
           <button class="bm-btn" :title="t('sb.delete')" @click.stop="removeBookmark(tab.path, b.at)">✕</button>
         </template>
@@ -352,7 +354,7 @@ onBeforeUnmount(() => observer?.disconnect())
           <div class="ai-note" v-if="a.note">{{ a.note }}</div>
           <div class="ai-meta">
             <span class="ai-kind" :class="`sw-${a.color}`">{{ KIND_GLYPH[a.kind ?? 'highlight'] }}</span>
-            <span>p.{{ a.anchor.page }}</span>
+            <span :title="`${a.anchor.page} / ${tab.numPages}`">p.{{ labelOf(tab, a.anchor.page) }}</span>
             <span v-if="a.orphan" :title="t('sb.orphanTip')">{{ t('sb.orphan') }}</span>
             <span style="flex: 1"></span>
             <button @click.stop="startEdit(a)">{{ t('sb.edit') }}</button>

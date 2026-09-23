@@ -12,6 +12,7 @@
 | `form-irs-w9.pdf` | 表单（AcroForm，v1 只读渲染） | 6 页 | IRS W-9 官方可填写表单 |
 | `chinese-wikipedia-hanzi.pdf` | 中文排版（数字文字层，文字提取已验证） | 28 页 | 中文维基百科「汉字」条目官方 PDF 导出（CC BY-SA） |
 | `encrypted-password-solopdf.pdf` | 加密 PDF（密码输入框 + 明文批注提示） | 28 页 / AES-256 | 由中文样本加密生成，**密码：`solopdf`** |
+| `page-labels-roman.pdf` | 页码标签（/PageLabels：封面 Cover、罗马数字前言 i–iv、正文从 1 重新起、附录 A-1–A-3） | 24 页 / 4KB | `node scripts/gen-page-labels-fixture.mjs` 手写 PDF 对象生成，可复现；每页印着“Physical page N - printed label X”，另有灰/蓝色块用于纸张颜色/反色检查 |
 
 ## 验收要点对照（来自设计蓝图 Success Criteria）
 
@@ -21,6 +22,7 @@
 - `scanned-no-textlayer.pdf`：工具栏提示"该页无文字层"，文字高亮禁用
 - `form-irs-w9.pdf`：表单域只读渲染正常（v1 不支持填写）
 - `chinese-wikipedia-hanzi.pdf`：中文选择/搜索/高亮→伴生文件全链路；`汉字`「漢字」引号标点提取正确
+- `page-labels-roman.pdf`：工具栏页码框显示印刷页码（ii (3 / 24)），输入 `iii` / `3` / `#3` 分别跳物理第 4 / 8 / 3 页；伴生文件锚点仍写物理页；`solopdf info` 输出 `1: Cover; 2-5: i–iv; 6-21: 1–16; 22-24: A-1–A-3`
 - `encrypted-password-solopdf.pdf`：密码框（记住本次会话）；高亮时弹一次明文保存提示
 
 注：`*.pdf` 均来自公有领域/官方公开渠道，可安全入库；如嫌 157MB 太大可 git-lfs 或 .gitignore。

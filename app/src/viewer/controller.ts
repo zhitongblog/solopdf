@@ -390,11 +390,13 @@ export class PdfViewerController {
   /** called by the host when the scroll container resized */
   onResize(): void {
     if (this.fitMode === 'manual') { this.relayout(); return }
-    const anchor = this.currentPage()
+    // keep the offset within the page too, not just the page: entering or
+    // leaving full screen re-fits and should leave the same line on screen
+    const pos = this.getPosition()
     this.applyFit()
     this.relayout()
     this.invalidateRendered()
-    this.scrollToPage(anchor)
+    this.scrollToPage(pos.page, pos.ratio)
     clearTimeout(this.zoomDebounce)
     this.zoomDebounce = window.setTimeout(() => this.update(), 180)
   }
@@ -773,6 +775,33 @@ export class PdfViewerController {
     if (clip) ctx.translate(-clip.x, -clip.y)
     await page.render({ canvasContext: ctx, viewport: vp } as Parameters<typeof page.render>[0]).promise
     return canvas
+  }
+
+  /**
+   * Render a page scaled to fit a `maxW`×`maxH` CSS-pixel box — presentation
+   * mode. Honours the reader's rotation and crop (a trimmed scan presents
+   * trimmed), renders at device resolution, and reports the CSS size.
+   */
+  async renderFitted(
+    pageNum: number, maxW: number, maxH: number,
+  ): Promise<{ canvas: HTMLCanvasElement; w: number; h: number }> {
+    const page = await this.doc.getPage(pageNum)
+    const i = pageNum - 1
+    const box = boxOf(page)
+    const rot = normRotation(box.rotate + this.userRotationOf(i))
+    const d = displaySize(box, rot, this.crop)
+    const fit = Math.min(maxW / d.w, maxH / d.h)
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR)
+    const px = fit * dpr
+    const off = cropOffset(box, rot, this.crop, px)
+    const canvas = await this.renderToCanvas(pageNum, px, {
+      x: off.x, y: off.y, w: d.w * px, h: d.h * px,
+    })
+    const w = Math.round(d.w * fit)
+    const h = Math.round(d.h * fit)
+    canvas.style.width = `${w}px`
+    canvas.style.height = `${h}px`
+    return { canvas, w, h }
   }
 
   /**

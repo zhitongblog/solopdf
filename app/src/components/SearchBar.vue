@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { store, controllers } from '../store'
+import { store, controllers, labelOf } from '../store'
 import { SearchSession, type SearchHit } from '../viewer/search'
 import { t } from '../i18n'
 
@@ -69,7 +69,7 @@ onMounted(() => input.value?.focus())
         :class="{ current: i === currentIdx }"
         @click="jump(i)"
       >
-        <span class="sh-page">p.{{ h.page }}</span>{{ h.preview }}
+        <span class="sh-page">p.{{ labelOf(store.activeTab, h.page) }}</span>{{ h.preview }}
       </div>
     </div>
   </div>

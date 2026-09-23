@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { store, controllers } from '../store'
+import { store, controllers, labelOf } from '../store'
+import { resolvePageInput } from '@solopdf/core'
 import { isMobile, isTauri } from '../platform'
 import { t } from '../i18n'
 
@@ -12,12 +13,24 @@ defineEmits<{
 
 const tab = computed(() => store.activeTab)
 const ctrl = computed(() => { void store.docTick; return tab.value ? controllers.get(tab.value.id) : undefined })
+/** the page box shows the PRINTED label ("xii"); typing takes a label or a
+ *  physical number (resolvePageInput has the precedence rules) */
 const pageInput = ref('1')
-watch(() => tab.value?.currentPage, (p) => { if (p) pageInput.value = String(p) })
+const shownLabel = computed(() => (tab.value ? labelOf(tab.value, tab.value.currentPage) : '1'))
+watch(shownLabel, (l) => { pageInput.value = l }, { immediate: true })
+/** labelled docs show the physical position as a secondary "(35 / 400)" */
+const labelled = computed(() => !!tab.value?.pageLabels)
 
-function gotoPage(): void {
-  const n = parseInt(pageInput.value, 10)
-  if (tab.value && ctrl.value && n >= 1 && n <= tab.value.numPages) ctrl.value.scrollToPage(n)
+function gotoPage(e: FocusEvent): void {
+  const tb = tab.value
+  const el = e.target as HTMLInputElement
+  if (!tb || !ctrl.value) return
+  // read the element, not the model: IME commits can land without an input event
+  const n = resolvePageInput(el.value, tb.pageLabels, tb.numPages)
+  if (n) ctrl.value.scrollToPage(n)
+  // on a miss (or a jump that lands on the same page) put the label back —
+  // on the element too, since the model may already hold that same string
+  pageInput.value = el.value = labelOf(tb, n ?? tb.currentPage)
 }
 function zoom(dir: 1 | -1): void {
   ctrl.value?.setZoom((ctrl.value.scale) * (dir > 0 ? 1.15 : 1 / 1.15))
@@ -30,8 +43,17 @@ function zoom(dir: 1 | -1): void {
     <div class="sep" />
     <div class="page-nav">
       <button :title="t('tb.prev')" @click="ctrl?.scrollToPage(Math.max(1, tab.currentPage - 1))">‹</button>
-      <input v-model="pageInput" @keydown.enter="gotoPage" @blur="gotoPage" />
-      <span style="color: var(--fg-dim)">/ {{ tab.numPages }}</span>
+      <input
+        v-model="pageInput"
+        class="page-box"
+        :class="{ labelled }"
+        :title="labelled ? t('tb.pageLabelTip') : ''"
+        @focus="($event.target as HTMLInputElement).select()"
+        @keydown.enter="($event.target as HTMLInputElement).blur()"
+        @blur="gotoPage"
+      />
+      <span v-if="labelled" class="page-phys">({{ tab.currentPage }} / {{ tab.numPages }})</span>
+      <span v-else class="page-phys">/ {{ tab.numPages }}</span>
       <button :title="t('tb.next')" @click="ctrl?.scrollToPage(Math.min(tab.numPages, tab.currentPage + 1))">›</button>
     </div>
     <div class="sep" />

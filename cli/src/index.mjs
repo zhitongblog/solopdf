@@ -21,7 +21,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync, readFileSync as require$readFileSync } from 'node:fs'
 import path from 'node:path'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
-import { parse, orderLinesForReading } from '@solopdf/core'
+import { parse, orderLinesForReading, normalizePageLabels, formatPageLabelRanges } from '@solopdf/core'
 
 // piping into `head` etc. closes stdout early — exit quietly instead of crashing
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0) })
@@ -95,6 +95,9 @@ async function cmdInfo(file) {
   const outline = await doc.getOutline().catch(() => null)
   const countOutline = (items) =>
     !items ? 0 : items.reduce((n, it) => n + 1 + countOutline(it.items), 0)
+  // printed page numbers (roman front matter, restarts): compact ranges of
+  // "physical-range: first–last label"; null when the PDF has none
+  const labels = normalizePageLabels(await doc.getPageLabels().catch(() => null), doc.numPages)
   console.log(JSON.stringify({
     file: path.resolve(file),
     pages: doc.numPages,
@@ -103,6 +106,7 @@ async function cmdInfo(file) {
     producer: meta?.info?.Producer || null,
     encrypted: !!meta?.info?.IsEncrypted || !!flag('password'),
     outlineEntries: countOutline(outline),
+    pageLabels: labels ? formatPageLabelRanges(labels) : null,
   }, null, 2))
 }
 
@@ -521,7 +525,7 @@ switch (cmd) {
     console.log(`solopdf — SoloPDF 命令行工具（与应用同一渲染引擎）
 
 用法:
-  solopdf info <file.pdf> [--password pw]          文档信息（页数/书签/元数据）
+  solopdf info <file.pdf> [--password pw]          文档信息（页数/书签/页码标签/元数据）
   solopdf extract-text <file.pdf> [--pages A-B]    提取文字
   solopdf export-annotations <file.pdf>            批注伴生文件 → JSON
   solopdf form-fields <file.pdf>                   AcroForm 表单域与当前值 → JSON
