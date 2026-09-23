@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 未发布
+## v0.7.0 — 链接、手绘、撤销、分屏、翻译
 
 对照主流阅读器（Acrobat / PDF Expert / Zotero / Sioyek / Okular / 福昕）补上的一批：
 
