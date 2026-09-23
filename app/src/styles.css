@@ -1218,3 +1218,45 @@ html[data-paper='grey'] :is(.pv-page, .pres-page) { background: #e2e2e0; }
   .toolbar > * { flex-shrink: 0; }
   .toolbar button { white-space: nowrap; }
 }
+
+/* ── undo / redo ── */
+.toolbar .undo-group { display: inline-flex; gap: 2px; }
+.toolbar .undo-group button { font-size: 16px; line-height: 1; padding: 3px 7px; }
+@media (max-width: 700px) {
+  /* phones: the toolbar scrolls sideways — keep undo next to ☰ so it is on
+     screen without hunting for it */
+  .toolbar .sidebar-btn { order: -2; }
+  .toolbar .undo-group { order: -1; }
+  .toolbar .undo-group button { min-width: 36px; min-height: 36px; }
+}
+/* book mode has no toolbar: two small pills, bottom-left, only when useful.
+   Scroll layout: a zero-height sticky anchor at the end of the flow keeps
+   them pinned to the bottom of the scroller (plain absolute would scroll
+   away with the text); paged layout does not scroll, absolute is enough. */
+.bk-undo { position: sticky; bottom: 0; height: 0; z-index: 20; }
+.bk-paged .bk-undo { position: absolute; left: 0; bottom: 0; width: 0; }
+.bk-undo-btns {
+  position: absolute; left: 14px; bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  display: flex; gap: 8px;
+}
+.bk-paged .bk-undo-btns { bottom: calc(48px + env(safe-area-inset-bottom, 0px)); }
+.bk-undo button {
+  width: 40px; height: 40px; border-radius: 20px; font-size: 18px; line-height: 1;
+  background: var(--bk-fg); color: var(--bk-bg); opacity: 0.55;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.bk-undo button:hover:not(:disabled) { opacity: 0.9; background: var(--bk-fg); }
+.bk-undo button:disabled { opacity: 0.2; }
+/* sidebar note editor: colour + mark-kind row */
+.annot-item .ai-style { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.annot-item .ai-style .swatch {
+  width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent; padding: 0;
+}
+.annot-item .ai-style .swatch.on { border-color: var(--fg); }
+.annot-item .ai-style-sep { width: 1px; height: 14px; background: var(--border); margin: 0 2px; }
+.annot-item .ai-kind-btn { font-size: 12px; padding: 1px 6px; min-width: 24px; }
+.annot-item .ai-kind-btn.on { background: var(--accent); color: #fff; }
+@media (max-width: 700px) {
+  .annot-item .ai-style .swatch { width: 26px; height: 26px; }
+  .annot-item .ai-kind-btn { min-height: 30px; min-width: 32px; }
+}

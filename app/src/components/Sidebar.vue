@@ -144,6 +144,11 @@ function saveBmEdit(b: Bookmark): void {
 // ── annotations tab ──
 const editingId = ref<string | null>(null)
 const editText = ref('')
+const editColor = ref('yellow')
+const editKind = ref<AnnotationKind>('highlight')
+const EDIT_COLORS = ['yellow', 'green', 'blue', 'pink'] as const
+/** text marks can swap between each other; pins and captures keep their kind */
+const TEXT_KINDS: AnnotationKind[] = ['highlight', 'underline', 'strike', 'squiggly']
 const annots = ref<Annotation[]>([])
 const filterKind = ref<'all' | AnnotationKind>('all')
 const filterColor = ref<'all' | string>('all')
@@ -236,9 +241,16 @@ function jumpTo(a: Annotation): void {
 function startEdit(a: Annotation): void {
   editingId.value = a.id
   editText.value = a.note
+  editColor.value = a.color
+  editKind.value = a.kind ?? 'highlight'
 }
 async function saveEdit(a: Annotation): Promise<void> {
-  await mgr.value?.updateNote(a.id, editText.value)
+  // one save = one undo step, whatever combination of fields changed
+  const patch: { note?: string; color?: string; kind?: AnnotationKind } = {}
+  if (editText.value !== a.note) patch.note = editText.value
+  if (editColor.value !== a.color) patch.color = editColor.value
+  if (editKind.value !== (a.kind ?? 'highlight')) patch.kind = editKind.value
+  if (Object.keys(patch).length) await mgr.value?.update(a.id, patch)
   editingId.value = null
 }
 async function removeAnnot(a: Annotation): Promise<void> {
@@ -365,6 +377,23 @@ onBeforeUnmount(() => observer?.disconnect())
         <div class="ai-excerpt" v-if="a.excerpt">{{ a.excerpt }}</div>
         <template v-if="editingId === a.id">
           <textarea v-model="editText" @click.stop @keydown.enter.meta="saveEdit(a)" />
+          <div class="ai-style" @click.stop>
+            <button
+              v-for="c in EDIT_COLORS" :key="c"
+              class="swatch" :class="[`sw-${c}`, { on: editColor === c }]"
+              :title="t('hl.' + c)"
+              @click="editColor = c"
+            />
+            <template v-if="TEXT_KINDS.includes(a.kind ?? 'highlight')">
+              <span class="ai-style-sep" />
+              <button
+                v-for="k in TEXT_KINDS" :key="k"
+                class="ai-kind-btn" :class="{ on: editKind === k }"
+                :title="t('hl.kind.' + k)"
+                @click="editKind = k"
+              >{{ KIND_GLYPH[k] }}</button>
+            </template>
+          </div>
           <div class="ai-meta">
             <button @click.stop="saveEdit(a)">{{ t('sb.save') }}</button>
             <button @click.stop="editingId = null">{{ t('sb.cancel') }}</button>

@@ -86,9 +86,28 @@ export function clearSpeaking(root: HTMLElement): void {
   })
 }
 
+function unwrapMark(m: HTMLElement): void {
+  const parent = m.parentNode
+  if (!parent) return
+  while (m.firstChild) parent.insertBefore(m.firstChild, m)
+  parent.removeChild(m)
+  ;(parent as HTMLElement).normalize?.()
+}
+
+const markClass = (a: Annotation): string => `bk-hl bk-hl-${a.color} bk-mk-${a.kind ?? 'highlight'}`
+
 /** 对 root 内的内容套用批注标记(只处理给定页/章的批注) */
 export function applyMarks(root: HTMLElement, annots: Annotation[]): void {
   const candidates = annots.filter((a) => !a.orphan && a.excerpt && a.excerpt.length >= 2)
+  // 先对账已有标记:删掉(含撤销创建)的拆掉,改色/改类型的换 class
+  const want = new Map(candidates.map((a) => [a.id, markClass(a)]))
+  root.querySelectorAll<HTMLElement>('mark[data-annot]').forEach((m) => {
+    const id = m.dataset.annot!
+    if (id === '__speak') return
+    const cls = want.get(id)
+    if (cls === undefined) unwrapMark(m)
+    else if (m.className !== cls) m.className = cls
+  })
   if (!candidates.length) return
   const { flat, nodes } = flatten(root)
   if (!flat) return
@@ -99,6 +118,6 @@ export function applyMarks(root: HTMLElement, annots: Annotation[]): void {
     const at = flat.indexOf(needle)
     if (at < 0) continue
     // 类型决定画法(整片底色 / 一条线),颜色决定色相 —— 与 PDF 视图同款
-    wrapRange(nodes, at, at + needle.length, `bk-hl bk-hl-${a.color} bk-mk-${a.kind ?? 'highlight'}`, a.id)
+    wrapRange(nodes, at, at + needle.length, markClass(a), a.id)
   }
 }

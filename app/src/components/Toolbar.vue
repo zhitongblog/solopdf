@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { store, controllers, labelOf } from '../store'
+import { store, controllers, annotManagers, labelOf } from '../store'
 import { resolvePageInput } from '@solopdf/core'
+import { undoLabelText } from '../annotations/manager'
 import { isMobile, isTauri } from '../platform'
 import { t } from '../i18n'
 import { navState, jump, goBack, goForward } from '../nav'
@@ -10,6 +11,7 @@ defineProps<{ bookmarked?: boolean; tool?: 'none' | 'note' | 'region'; speaking?
 defineEmits<{
   search: []; settings: []; print: []; saveFilled: []; exportMd: []; ocr: []
   book: []; view: []; rotate: []; bookmark: []; tool: [kind: 'note' | 'region']; docTools: []; speak: []
+  undo: []; redo: []
 }>()
 
 const tab = computed(() => store.activeTab)
@@ -17,6 +19,21 @@ const ctrl = computed(() => { void store.docTick; return tab.value ? controllers
 const nav = computed(() => (tab.value ? navState[tab.value.id] : undefined))
 /** the page box shows the PRINTED label ("xii"); typing takes a label or a
  *  physical number (resolvePageInput has the precedence rules) */
+// the manager is a plain object: its history is not reactive, but every
+// write/undo bumps docTick, so these read it directly (a computed that only
+// returns the same manager again would never re-trigger)
+const undoState = computed(() => {
+  void store.docTick
+  const m = tab.value ? annotManagers.get(tab.value.id) : undefined
+  const u = m?.nextUndo
+  const r = m?.nextRedo
+  return {
+    canUndo: !!m?.canUndo,
+    canRedo: !!m?.canRedo,
+    undoTip: t('un.undo') + (u ? ' · ' + undoLabelText(u) : ''),
+    redoTip: t('un.redo') + (r ? ' · ' + undoLabelText(r) : ''),
+  }
+})
 const pageInput = ref('1')
 const shownLabel = computed(() => (tab.value ? labelOf(tab.value, tab.value.currentPage) : '1'))
 watch(shownLabel, (l) => { pageInput.value = l }, { immediate: true })
@@ -43,7 +60,7 @@ function zoom(dir: 1 | -1): void {
 
 <template>
   <div class="toolbar" v-if="tab">
-    <button :title="t('tb.sidebar')" @click="store.settings.sidebarOpen = !store.settings.sidebarOpen">☰</button>
+    <button class="sidebar-btn" :title="t('tb.sidebar')" @click="store.settings.sidebarOpen = !store.settings.sidebarOpen">☰</button>
     <div class="sep" />
     <button v-if="nav?.back" class="nav-back" :title="t('nav.backTip')" @click="goBack(tab.id)">↩</button>
     <button v-if="nav?.fwd" class="nav-fwd" :title="t('nav.forwardTip')" @click="goForward(tab.id)">↪</button>
@@ -80,6 +97,10 @@ function zoom(dir: 1 | -1): void {
     </button>
     <button :class="{ active: tool === 'note' }" :title="t('tb.noteTool')" @click="$emit('tool', 'note')">✎</button>
     <button :class="{ active: tool === 'region' }" :title="t('tb.regionTool')" @click="$emit('tool', 'region')">⬚</button>
+    <span class="undo-group">
+      <button class="undo-btn" :disabled="!undoState.canUndo" :title="undoState.undoTip" :aria-label="t('un.undo')" @click="$emit('undo')">↶</button>
+      <button class="redo-btn" :disabled="!undoState.canRedo" :title="undoState.redoTip" :aria-label="t('un.redo')" @click="$emit('redo')">↷</button>
+    </span>
     <button
       class="book-toggle"
       :class="{ active: tab.bookMode }"
