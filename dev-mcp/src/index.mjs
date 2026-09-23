@@ -18,7 +18,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { gunzipSync } from 'fflate'
-import { parse, upsertAnnotation, genId, normalize } from '@solopdf/core'
+import { parse, upsertAnnotation, genId, normalize, pageLinks } from '@solopdf/core'
 
 const ALLOW_WRITE = process.argv.includes('--allow-write')
 
@@ -105,6 +105,33 @@ server.tool(
     }
     await doc.destroy()
     return text(out)
+  },
+)
+
+server.tool(
+  'solopdf_links',
+  '列出 PDF 的超链接（只读）：所在页、区域（PDF 坐标）、内部目标页与落点坐标，或外部 URL',
+  {
+    path: z.string(),
+    from: z.number().int().min(1).default(1),
+    to: z.number().int().min(1).optional(),
+    password: z.string().optional(),
+  },
+  async ({ path, from, to, password }) => {
+    const doc = await open(path, password)
+    const hi = Math.min(to ?? doc.numPages, doc.numPages)
+    const links = []
+    for (let p = Math.min(from, hi); p <= hi; p++) {
+      for (const l of await pageLinks(doc, p)) {
+        const rect = l.rect.map((n) => Math.round(n * 100) / 100)
+        links.push(l.target.kind === 'external'
+          ? { page: p, rect, url: l.target.url }
+          : { page: p, rect, target: l.target.dest.page, fit: l.target.dest.fit, x: l.target.dest.x, y: l.target.dest.y })
+      }
+    }
+    await doc.destroy()
+    const internal = links.filter((l) => l.target != null).length
+    return text({ pages: [from, hi], count: links.length, internal, external: links.length - internal, links })
   },
 )
 

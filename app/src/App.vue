@@ -15,11 +15,12 @@ import {
   addRecent, savePosition, restorePosition, effectiveTheme, docPrefsFor, saveDocPrefs,
   addBookmark, removeBookmark, bookmarkAt, type TabState,
 } from './store'
-import { platform, isTauri, isMobile } from './platform'
+import { platform, isTauri, isMobile, openExternal } from './platform'
 import { t } from './i18n'
 import { exportMarkdown } from './export'
 import { openDocument } from './viewer/loader'
-import { PdfViewerController, type SelectionInfo } from './viewer/controller'
+import { PdfViewerController, type SelectionInfo, type PreviewRequest } from './viewer/controller'
+import { navState, remember, jump, goBack, goForward, forgetNav } from './nav'
 import { AnnotationManager } from './annotations/manager'
 import { printDocument } from './print'
 import { initWakeLock, setKeepAwake } from './wakelock'
@@ -42,6 +43,7 @@ import StatsPanel from './components/StatsPanel.vue'
 import LibraryView from './components/LibraryView.vue'
 import LibrarySearch from './components/LibrarySearch.vue'
 import ComicView from './components/ComicView.vue'
+import LinkPreview from './components/LinkPreview.vue'
 import { noteOpened, captureCover, addToLibrary } from './library'
 import { startStats, stopStats, noteTurn } from './stats'
 import { speaker, startReading, stopReading } from './readaloud'
@@ -283,6 +285,9 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
     }
     ctrl.onSelection = (sel) => { selection.value = sel && store.activeTabId === tab.id ? sel : null }
     ctrl.onFormsDirty = () => { tab.formsDirty = true }
+    ctrl.onBeforeJump = () => remember(tab.id)
+    ctrl.onExternalLink = (url) => { void openExternal(url) }
+    ctrl.onPreview = (req) => onLinkPreview(tab.id, req)
     await ctrl.init()
 
     const mgr = new AnnotationManager(path, tab.name, tab.stripExcerpts)
@@ -341,8 +346,78 @@ async function pickAndOpen(): Promise<void> {
 function onCloseTab(id: number): void {
   const tab = store.tabs.find((t) => t.id === id)
   if (tab) savePosition(tab)
+  if (preview.value?.tabId === id) preview.value = null
+  forgetNav(id)
   closeTab(id)
 }
+
+// ── link / smart-reference preview ──
+const preview = ref<{ tabId: number; req: PreviewRequest } | null>(null)
+let previewHideTimer = 0
+let previewHovered = false
+
+/** controller → preview: a request shows it; null means the pointer left the
+ *  link — hide after a grace period so the pointer can reach the popup */
+function onLinkPreview(tabId: number, req: PreviewRequest | null): void {
+  clearTimeout(previewHideTimer)
+  if (req) {
+    if (store.activeTabId !== tabId) return
+    previewHovered = false
+    preview.value = { tabId, req }
+    return
+  }
+  if (!preview.value || preview.value.req.touch) return
+  previewHideTimer = window.setTimeout(() => {
+    if (!previewHovered && !preview.value?.req.touch) preview.value = null
+  }, 250)
+}
+function onPreviewHover(inside: boolean): void {
+  previewHovered = inside
+  clearTimeout(previewHideTimer)
+  if (!inside && preview.value && !preview.value.req.touch) {
+    previewHideTimer = window.setTimeout(() => { if (!previewHovered) preview.value = null }, 200)
+  }
+}
+/** a mouse preview is pinned to where the link WAS: scrolling retires it */
+function onAnyScroll(): void {
+  if (preview.value && !preview.value.req.touch && !previewHovered) preview.value = null
+}
+function followPreview(): void {
+  const p = preview.value
+  preview.value = null
+  if (!p) return
+  if (p.req.url) { void openExternal(p.req.url); return }
+  if (p.req.dest) controllers.get(p.tabId)?.goToDest(p.req.dest)
+}
+
+// ── back / forward ──
+const IS_MAC = /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent)
+/** the tab whose history the keys/buttons act on: a PDF in page view */
+function navTab(): TabState | undefined {
+  const tab = store.activeTab
+  return tab && tab.kind === 'pdf' && !tab.bookMode && controllers.has(tab.id) ? tab : undefined
+}
+function navBack(): void { const tab = navTab(); if (tab) goBack(tab.id) }
+function navForward(): void { const tab = navTab(); if (tab) goForward(tab.id) }
+/** mouse buttons 4/5 (back/forward) — and keep the webview from navigating */
+function onMouseNav(e: MouseEvent): void {
+  if (e.button !== 3 && e.button !== 4) return
+  e.preventDefault()
+  if (e.type !== 'mouseup') return
+  if (e.button === 3) navBack()
+  else navForward()
+}
+
+/** phone pill: shown for a while after each jump */
+const pillShown = ref(false)
+let pillTimer = 0
+const activeNav = computed(() => navState[store.activeTabId])
+watch(() => activeNav.value?.at, (at) => {
+  clearTimeout(pillTimer)
+  pillShown.value = !!at && Date.now() - at < 10000
+  if (pillShown.value) pillTimer = window.setTimeout(() => { pillShown.value = false }, 10000)
+})
+watch(() => store.activeTabId, () => { preview.value = null })
 
 // ── highlight ──
 async function highlightSelection(color: string, kind: AnnotationKind = 'highlight', note = ''): Promise<void> {
@@ -435,7 +510,8 @@ function gotoBookmark(page: number, block?: number): void {
     if (block != null) tab.bookBlock = block
     return
   }
-  controllers.get(tab.id)?.scrollToPage(page)
+  const ctrl = controllers.get(tab.id)
+  if (ctrl) jump(tab.id, () => { ctrl.scrollToPage(page); ctrl.settle() })
 }
 
 // ── focus refresh (external SoloMD edits) ──
@@ -450,6 +526,15 @@ function onKey(e: KeyboardEvent): void {
   const mod = e.metaKey || e.ctrlKey
   const tab = store.activeTab
   const ctrl = tab ? controllers.get(tab.id) : undefined
+  // back/forward: ⌥←/⌥→ everywhere, ⌘[ / ⌘] on a Mac
+  if (!isTyping(e) && !e.shiftKey) {
+    const back = (e.altKey && !mod && e.key === 'ArrowLeft') || ((IS_MAC ? e.metaKey : e.ctrlKey) && e.key === '[')
+    const fwd = (e.altKey && !mod && e.key === 'ArrowRight') || ((IS_MAC ? e.metaKey : e.ctrlKey) && e.key === ']')
+    if (back || fwd) {
+      if (navTab()) { e.preventDefault(); back ? navBack() : navForward() }
+      return
+    }
+  }
   if (mod && e.key === 'o') { e.preventDefault(); void pickAndOpen() }
   else if (mod && e.key === 'f') { e.preventDefault(); if (tab) searchOpen.value = true }
   else if (mod && e.key === 'w') { e.preventDefault(); if (tab) onCloseTab(tab.id) }
@@ -636,6 +721,10 @@ onMounted(async () => {
   window.addEventListener('keydown', onKey)
   window.addEventListener('focus', onFocus)
   window.addEventListener('resize', onResize)
+  window.addEventListener('mousedown', onMouseNav)
+  window.addEventListener('mouseup', onMouseNav)
+  window.addEventListener('auxclick', onMouseNav)
+  document.addEventListener('scroll', onAnyScroll, true)
   posTimer = window.setInterval(() => { const t = store.activeTab; if (t) savePosition(t) }, 5000)
 
   // E2E harness — used by browser tests and by the native debug bridge
@@ -667,6 +756,11 @@ onMounted(async () => {
     epubBooks,
     comicBooks,
     closeTab,
+    navBack,
+    navForward,
+    navState,
+    preview,
+    followPreview,
   }
 
   if (isTauri()) {
@@ -720,6 +814,10 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('focus', onFocus)
   window.removeEventListener('resize', onResize)
+  window.removeEventListener('mousedown', onMouseNav)
+  window.removeEventListener('mouseup', onMouseNav)
+  window.removeEventListener('auxclick', onMouseNav)
+  document.removeEventListener('scroll', onAnyScroll, true)
   stopStats()
   clearTimeout(resizeTimer)
   clearInterval(posTimer)
@@ -747,7 +845,7 @@ watch(() => store.settings.theme, () => {
         class="sidebar-backdrop"
         @click="store.settings.sidebarOpen = false"
       ></div>
-      <Sidebar v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind === 'pdf'" />
+      <Sidebar v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind === 'pdf'" @goto="gotoBookmark" />
       <div class="app-content">
         <Toolbar
           v-if="store.activeTab && store.activeTab.kind === 'pdf' && (!store.activeTab.bookMode || chromeReveal)"
@@ -809,6 +907,12 @@ watch(() => store.settings.theme, () => {
           <button v-if="isTauri()" class="banner-ocr-btn" @click="ocrOpen = true">{{ t('app.ocrBanner') }}</button>
         </div>
         <SearchBar v-if="searchOpen && store.activeTab" @close="searchOpen = false" />
+        <button
+          v-if="pillShown && activeNav?.back && navTab()"
+          class="nav-pill"
+          :title="t('nav.backTip')"
+          @click="navBack()"
+        >← {{ t('nav.back') }}</button>
       </div>
     </div>
 
@@ -827,6 +931,15 @@ watch(() => store.settings.theme, () => {
       :anchor="dictWord.anchor"
       @close="dictWord = null"
       @toast="showToast"
+    />
+
+    <LinkPreview
+      v-if="preview && preview.tabId === store.activeTabId"
+      :req="preview.req"
+      :tab-id="preview.tabId"
+      @follow="followPreview"
+      @close="preview = null"
+      @hover="onPreviewHover"
     />
 
     <AnnotToolLayer

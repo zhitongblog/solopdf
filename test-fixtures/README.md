@@ -11,6 +11,7 @@
 | `scanned-no-textlayer.pdf` | 真·无文字层（测"禁用高亮"降级） | 10 页 | 由上书前 10 页栅格化重封装（150dpi JPEG） |
 | `form-irs-w9.pdf` | 表单（AcroForm，v1 只读渲染） | 6 页 | IRS W-9 官方可填写表单 |
 | `chinese-wikipedia-hanzi.pdf` | 中文排版（数字文字层，文字提取已验证） | 28 页 | 中文维基百科「汉字」条目官方 PDF 导出（CC BY-SA） |
+| `smart-refs-paper.pdf` | 智能引用（无链接注释的论文：图/表/公式/参考文献 + 中文“图 3/表 1/公式 (2)”） | 4 页 / 6KB | 由 `scripts/gen-smartref-fixture.mjs` 手写生成（可复现），中文用非嵌入 STSong-Light |
 | `encrypted-password-solopdf.pdf` | 加密 PDF（密码输入框 + 明文批注提示） | 28 页 / AES-256 | 由中文样本加密生成，**密码：`solopdf`** |
 
 ## 验收要点对照（来自设计蓝图 Success Criteria）
@@ -21,6 +22,8 @@
 - `scanned-no-textlayer.pdf`：工具栏提示"该页无文字层"，文字高亮禁用
 - `form-irs-w9.pdf`：表单域只读渲染正常（v1 不支持填写）
 - `chinese-wikipedia-hanzi.pdf`：中文选择/搜索/高亮→伴生文件全链路；`汉字`「漢字」引号标点提取正确
+- `toc-pdf-spec-iso32000.pdf`（链接）：前 60 页 277 个内部链接 + 18 个外链（`solopdf links … --pages 1-60`）；点击内部链接落到 /XYZ 精确位置，外链走系统浏览器；⌥← 返回
+- `smart-refs-paper.pdf`：p1 悬停 Figure 1 / Table 1 / Eq. (2) / (1) / [2] / [1, 3] / Fig. 2 / 图 3 / 表 1 / 公式 (2) / [4] 均弹出目标区域预览；Figure 9、[0, 1]、“(7) alone” 不弹
 - `encrypted-password-solopdf.pdf`：密码框（记住本次会话）；高亮时弹一次明文保存提示
 
 注：`*.pdf` 均来自公有领域/官方公开渠道，可安全入库；如嫌 157MB 太大可 git-lfs 或 .gitignore。
