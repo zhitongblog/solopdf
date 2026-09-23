@@ -74,3 +74,12 @@ describe('compactPageLabels', () => {
     expect(formatPageLabelRanges(null)).toBe('')
   })
 })
+
+describe('resolvePageInput — full-width IME input', () => {
+  const labels = ['Cover', 'i', 'ii', 'iii', '1', '2']
+  it('reads full-width digits, # and letters like their ASCII forms', () => {
+    expect(resolvePageInput('＃３', labels, 6)).toBe(3)
+    expect(resolvePageInput('２', labels, 6)).toBe(6)
+    expect(resolvePageInput('ｉｉｉ', labels, 6)).toBe(4)
+  })
+})

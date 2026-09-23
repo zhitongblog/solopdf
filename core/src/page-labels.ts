@@ -51,7 +51,8 @@ export function resolvePageInput(
   labels: readonly string[] | null | undefined,
   numPages: number,
 ): number | null {
-  const s = input.trim()
+  // NFKC: a Chinese/Japanese IME in full-width mode types "＃３５" / "ｘｉｉ"
+  const s = input.normalize('NFKC').trim()
   if (!s) return null
   const physical = (v: string): number | null => {
     if (!/^\d+$/.test(v)) return null

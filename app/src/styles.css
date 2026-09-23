@@ -103,7 +103,15 @@ input:focus { border-color: var(--accent); }
 .toolbar .hint {
   color: var(--fg-dim); font-size: 12px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
+  flex: 0 1 auto; min-width: 0;
 }
+/* a crowded toolbar gives up the sidecar hint first (it ellipsizes); the
+   controls keep their size — a squeezed "适宽" wraps into a two-line stack.
+   Past that the bar scrolls sideways rather than squeezing. */
+.toolbar { overflow-x: auto; scrollbar-width: none; }
+.toolbar::-webkit-scrollbar { display: none; }
+.toolbar > :not(.hint):not(.grow) { flex-shrink: 0; }
+.toolbar button { white-space: nowrap; }
 
 /* ── sidebar ── */
 .sidebar {
