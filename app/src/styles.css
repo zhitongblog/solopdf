@@ -1345,3 +1345,27 @@ g.pv-hl-flash, .pv-textbox.pv-hl-flash { animation: drawflash 1.5s ease; }
   .dt-swatch { width: 28px; height: 28px; }
   .at-hint.dt-bar { left: 8px; right: 8px; transform: none; padding: 8px; }
 }
+}
+
+/* ── split view: two panes on one document (viewer/split.ts) ──
+   .pv-panes wraps every PDF tab's scroll host; unsplit it is a plain flex
+   box whose only child fills it, so the single-pane layout is unchanged. */
+.pv-panes { flex: 1; min-height: 0; min-width: 0; display: flex; position: relative; }
+.pv-panes > .pv-scroll { min-width: 0; min-height: 0; }
+.pv-split-col { flex-direction: column; }
+.pv-split > .pv-scroll:first-child { flex: 0 0 calc(var(--split-ratio, 0.5) * (100% - 6px)); }
+.pv-split > .pv-split-pane { flex: 1 1 0; }
+.pv-divider {
+  flex: 0 0 6px; background: var(--border); position: relative; z-index: 2;
+  cursor: col-resize; touch-action: none; transition: background 0.15s;
+}
+.pv-split-col > .pv-divider { cursor: row-resize; }
+.pv-divider:hover, .pv-divider.dragging { background: var(--accent); }
+/* wider invisible grab zone, so a finger on an iPad can hit it */
+.pv-divider::after { content: ''; position: absolute; inset: 0 -6px; }
+.pv-split-col > .pv-divider::after { inset: -6px 0; }
+/* the focused pane (the one the toolbar/keys/outline drive): a quiet frame.
+   Outlines paint above the scrolled content and don't move with it. */
+.pv-split > .pv-scroll.pv-focused { outline: 2px solid var(--split-focus); outline-offset: -2px; }
+:root { --split-focus: rgba(58, 109, 240, 0.45); }
+html.dark { --split-focus: rgba(107, 149, 255, 0.5); }

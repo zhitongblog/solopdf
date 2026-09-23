@@ -15,6 +15,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Quad } from '@solopdf/core'
 import { store, controllers, annotManagers } from '../store'
 import { t } from '../i18n'
+import { focusPaneAt } from '../viewer/split'
 
 const props = defineProps<{ tabId: number; tool: 'note' | 'region' }>()
 const emit = defineEmits<{ done: [msg: string]; cancel: [] }>()
@@ -47,9 +48,8 @@ function host(): HTMLElement | null {
 
 /** clamp a client point into the visible (cropped) box of one page */
 function clampToPage(page: number, x: number, y: number): { x: number; y: number } {
-  const el = document.querySelector(
-    `.pv-scroll[data-tab="${props.tabId}"] .pv-page[data-page="${page}"]`,
-  ) as HTMLElement | null
+  // via the controller: in split view the page may live in the second pane
+  const el = ctrl.value?.pageElement(page)
   if (!el) return { x, y }
   const r = el.getBoundingClientRect()
   return {
@@ -59,8 +59,12 @@ function clampToPage(page: number, x: number, y: number): { x: number; y: number
 }
 
 function onPointerDown(e: PointerEvent): void {
-  const c = ctrl.value
-  if (!c || busy.value || editor.value) return
+  if (busy.value || editor.value) return
+  // split view: the overlay covers both panes — the one under the pointer
+  // becomes the focused pane, and its controller does the coordinate math
+  const tab = store.tabs.find((x) => x.id === props.tabId)
+  const c = tab ? focusPaneAt(tab, e.clientX, e.clientY) : ctrl.value
+  if (!c) return
   const page = c.pageAt(e.clientX, e.clientY)
   if (!page) return
   startPage = page

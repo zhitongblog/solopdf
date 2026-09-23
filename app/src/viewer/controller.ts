@@ -191,6 +191,14 @@ export class PdfViewerController {
   private pointerType = 'mouse'
   private refMarks: HTMLElement[] = []
 
+  /**
+   * Split view: the other pane showing the same document. Rotation, crop and
+   * layout are properties of the document (or global prefs), so every such
+   * setter is mirrored onto the peer; scroll position and zoom are not —
+   * that independence is the whole point of splitting. null when unsplit.
+   */
+  peer: PdfViewerController | null = null
+
   constructor(
     public doc: PDFDocumentProxy,
     private scroll: HTMLElement,
@@ -389,6 +397,7 @@ export class PdfViewerController {
   setRotation(deg: number): void {
     this.rotation = normRotation(deg)
     this.afterGeometryChange()
+    this.mirror((p) => p.setRotation(this.rotation))
   }
 
   setPageRotation(page: number, deg: number): void {
@@ -396,6 +405,7 @@ export class PdfViewerController {
     if (d === 0) this.pageRotation.delete(page)
     else this.pageRotation.set(page, d)
     this.afterGeometryChange()
+    this.mirror((p) => p.setPageRotation(page, d))
   }
 
   /** serialize per-page rotations for persistence */
@@ -409,14 +419,17 @@ export class PdfViewerController {
       const d = normRotation(v)
       if (d) this.pageRotation.set(Number(k), d)
     }
+    this.mirror((p) => p.setPageRotations(map))
   }
 
   setCrop(crop: CropRect | null): void {
     this.crop = crop ?? NO_CROP
     this.afterGeometryChange()
+    this.mirror((p) => p.setCrop(crop))
   }
 
   setScrollMode(mode: ScrollMode): void {
+    this.mirror((p) => p.setScrollMode(mode))
     if (this.scrollMode === mode) return
     const anchor = this.currentPage()
     this.scrollMode = mode
@@ -425,12 +438,21 @@ export class PdfViewerController {
   }
 
   setSpread(spread: Spread, coverAlone = this.coverAlone): void {
+    this.mirror((p) => p.setSpread(spread, coverAlone))
     if (this.spread === spread && this.coverAlone === coverAlone) return
     const anchor = this.currentPage()
     this.spread = spread
     this.coverAlone = coverAlone
     this.rows = []
     this.afterGeometryChange(anchor)
+  }
+
+  /** apply a document-level setting to the split peer, without echoing back */
+  private mirror(fn: (peer: PdfViewerController) => void): void {
+    const p = this.peer
+    if (!p) return
+    p.peer = null
+    try { fn(p) } finally { p.peer = this }
   }
 
   /** shared tail of every geometry mutation: rebuild, re-fit, re-anchor */
@@ -1396,7 +1418,10 @@ export class PdfViewerController {
     const range = sel.getRangeAt(0)
     const startPageEl = closestPage(range.startContainer)
     const endPageEl = closestPage(range.endContainer)
-    if (!startPageEl || !endPageEl) {
+    // the page must be one of OURS: in split view (and with several tabs)
+    // other controllers' pages carry the same data-page numbers, and our
+    // slot geometry would turn their rects into garbage quads
+    if (!startPageEl || !endPageEl || !this.area.contains(startPageEl)) {
       this.onSelection(null)
       return
     }
@@ -1659,13 +1684,27 @@ export class PdfViewerController {
   pageAt(clientX: number, clientY: number): number | null {
     for (const el of document.elementsFromPoint(clientX, clientY)) {
       const page = (el as HTMLElement).closest?.('.pv-page') as HTMLElement | null
-      if (page?.dataset.page) return parseInt(page.dataset.page, 10)
+      // only our own pages — a split peer has identical data-page numbers
+      if (page?.dataset.page && this.area.contains(page)) return parseInt(page.dataset.page, 10)
     }
     return null
   }
 
-  destroy(): void {
+  /** the (crop-window) element of a page, for callers that need its rect */
+  pageElement(pageNum: number): HTMLElement | null {
+    return this.slots[pageNum - 1]?.el ?? null
+  }
+
+  /** the scroll container this controller renders into */
+  get host(): HTMLElement {
+    return this.scroll
+  }
+
+  /** keepDoc: a split pane shares its PDFDocumentProxy with the main pane,
+   *  so closing the split must not tear the document down */
+  destroy(keepDoc = false): void {
     this.destroyed = true
+    if (this.peer) { this.peer.peer = null; this.peer = null }
     this.stopAutoScroll()
     this.scroll.removeEventListener('scroll', this.onScroll)
     document.removeEventListener('selectionchange', this.onSelChange)
@@ -1682,7 +1721,7 @@ export class PdfViewerController {
     clearTimeout(this.hoverRaf)
     for (const s of this.slots) this.releasePage(s)
     this.area.remove()
-    void this.doc.destroy()
+    if (!keepDoc) void this.doc.destroy()
   }
 }
 

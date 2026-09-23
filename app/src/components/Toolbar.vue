@@ -7,12 +7,13 @@ import { isMobile, isTauri } from '../platform'
 import { t } from '../i18n'
 import { navState, jump, goBack, goForward } from '../nav'
 import { isDrawTool, TOOL_GLYPH, type DrawTool } from '../annotations/drawing'
+import { splitAvailable } from '../viewer/split'
 
 defineProps<{ bookmarked?: boolean; tool?: 'none' | 'note' | 'region' | DrawTool; speaking?: boolean }>()
 defineEmits<{
   search: []; settings: []; print: []; saveFilled: []; exportMd: []; ocr: []
   book: []; view: []; rotate: []; bookmark: []; tool: [kind: 'note' | 'region' | 'draw']; docTools: []; speak: []
-  undo: []; redo: []
+  undo: []; redo: []; split: []
 }>()
 
 const tab = computed(() => store.activeTab)
@@ -92,6 +93,13 @@ function zoom(dir: 1 | -1): void {
       :title="t('tb.viewTip')"
       @click="$emit('view')"
     >{{ t('tb.view') }}</button>
+    <button
+      v-if="splitAvailable && !tab.bookMode"
+      class="split-btn"
+      :class="{ active: !!tab.split }"
+      :title="t('tb.splitTip')"
+      @click="$emit('split')"
+    >{{ tab.split?.dir === 'col' ? '⬒' : '◫' }}</button>
     <div class="sep" />
     <button :class="{ active: bookmarked }" :title="t('tb.bookmark')" @click="$emit('bookmark')">
       {{ bookmarked ? '★' : '☆' }}
