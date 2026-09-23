@@ -38,6 +38,9 @@ import ImageOcrDialog from './components/ImageOcrDialog.vue'
 import BookView from './components/BookView.vue'
 import ViewMenu from './components/ViewMenu.vue'
 import AnnotToolLayer from './components/AnnotToolLayer.vue'
+import DrawToolLayer from './components/DrawToolLayer.vue'
+import DrawSelect from './components/DrawSelect.vue'
+import { isDrawTool, penState, type DrawTool } from './annotations/drawing'
 import DocTools from './components/doctools/DocTools.vue'
 import ReadAloudBar from './components/ReadAloudBar.vue'
 import DictPopup from './components/DictPopup.vue'
@@ -58,7 +61,19 @@ const searchOpen = ref(false)
 const settingsOpen = ref(false)
 const viewMenuOpen = ref(false)
 /** armed annotation tool; 'none' means normal reading/selection */
-const tool = ref<'none' | 'note' | 'region'>('none')
+const tool = ref<'none' | 'note' | 'region' | DrawTool>('none')
+const drawTool = computed<DrawTool | null>(() => (isDrawTool(tool.value) ? tool.value : null))
+
+/** toolbar: ✎/⬚ toggle their tool; 🖊 toggles the drawing group, arming the
+ *  last drawing tool used */
+function onToolButton(k: 'note' | 'region' | 'draw'): void {
+  if (k === 'draw') tool.value = drawTool.value ? 'none' : store.settings.draw.tool
+  else tool.value = tool.value === k ? 'none' : k
+}
+function switchDrawTool(k: DrawTool): void {
+  tool.value = k
+  store.settings.draw.tool = k
+}
 const docToolsOpen = ref(false)
 const readAloud = ref(false)
 const dictWord = ref<{ word: string; anchor: DOMRect | null } | null>(null)
@@ -895,7 +910,8 @@ onMounted(async () => {
     undo: () => undoAnnot('undo'),
     redo: () => undoAnnot('redo'),
     toast: () => toast.value,
-    setTool: (k: 'none' | 'note' | 'region') => { tool.value = k },
+    setTool: (k: 'none' | 'note' | 'region' | DrawTool) => { tool.value = k },
+    penState,
     openDocTools: () => { docToolsOpen.value = true },
     setReadAloud: (on: boolean) => { readAloud.value = on },
     lookupWord: (w: string) => { dictWord.value = { word: w, anchor: null } },
@@ -1022,7 +1038,7 @@ watch(() => store.settings.theme, () => {
           @undo="undoAnnot('undo')"
           @redo="undoAnnot('redo')"
           :speaking="readAloud"
-          @tool="(k) => (tool = tool === k ? 'none' : k)"
+          @tool="onToolButton"
           :bookmarked="!!currentBookmark"
           :tool="tool"
         />
@@ -1111,11 +1127,26 @@ watch(() => store.settings.theme, () => {
     />
 
     <AnnotToolLayer
-      v-if="tool !== 'none' && store.activeTab && store.activeTab.kind === 'pdf' && !store.activeTab.bookMode"
+      v-if="(tool === 'note' || tool === 'region') && store.activeTab && store.activeTab.kind === 'pdf' && !store.activeTab.bookMode"
       :tab-id="store.activeTab.id"
       :tool="tool"
       @cancel="tool = 'none'"
       @done="(m) => { tool = 'none'; showToast(m) }"
+    />
+    <DrawToolLayer
+      v-if="drawTool && store.activeTab && store.activeTab.kind === 'pdf' && !store.activeTab.bookMode"
+      :key="store.activeTab.id"
+      :tab-id="store.activeTab.id"
+      :tool="drawTool"
+      @switch="switchDrawTool"
+      @cancel="tool = 'none'"
+      @toast="showToast"
+    />
+    <DrawSelect
+      v-if="tool === 'none' && store.activeTab && store.activeTab.kind === 'pdf' && !store.activeTab.bookMode && !store.activeTab.loadError"
+      :key="'sel' + store.activeTab.id"
+      :tab-id="store.activeTab.id"
+      @toast="showToast"
     />
 
     <div v-if="pendingNote" class="modal-mask" @click.self="pendingNote = null">

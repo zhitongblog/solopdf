@@ -6,11 +6,12 @@ import { undoLabelText } from '../annotations/manager'
 import { isMobile, isTauri } from '../platform'
 import { t } from '../i18n'
 import { navState, jump, goBack, goForward } from '../nav'
+import { isDrawTool, TOOL_GLYPH, type DrawTool } from '../annotations/drawing'
 
-defineProps<{ bookmarked?: boolean; tool?: 'none' | 'note' | 'region'; speaking?: boolean }>()
+defineProps<{ bookmarked?: boolean; tool?: 'none' | 'note' | 'region' | DrawTool; speaking?: boolean }>()
 defineEmits<{
   search: []; settings: []; print: []; saveFilled: []; exportMd: []; ocr: []
-  book: []; view: []; rotate: []; bookmark: []; tool: [kind: 'note' | 'region']; docTools: []; speak: []
+  book: []; view: []; rotate: []; bookmark: []; tool: [kind: 'note' | 'region' | 'draw']; docTools: []; speak: []
   undo: []; redo: []
 }>()
 
@@ -97,6 +98,14 @@ function zoom(dir: 1 | -1): void {
     </button>
     <button :class="{ active: tool === 'note' }" :title="t('tb.noteTool')" @click="$emit('tool', 'note')">✎</button>
     <button :class="{ active: tool === 'region' }" :title="t('tb.regionTool')" @click="$emit('tool', 'region')">⬚</button>
+    <!-- one button for the whole drawing group: pen, eraser, text box,
+         shapes — the tools themselves live in the draw bar it opens -->
+    <button
+      class="draw-btn"
+      :class="{ active: tool && isDrawTool(tool) }"
+      :title="t('tb.drawTool')"
+      @click="$emit('tool', 'draw')"
+    >{{ tool && isDrawTool(tool) ? TOOL_GLYPH[tool] : '🖊' }}</button>
     <span class="undo-group">
       <button class="undo-btn" :disabled="!undoState.canUndo" :title="undoState.undoTip" :aria-label="t('un.undo')" @click="$emit('undo')">↶</button>
       <button class="redo-btn" :disabled="!undoState.canRedo" :title="undoState.redoTip" :aria-label="t('un.redo')" @click="$emit('redo')">↷</button>

@@ -115,6 +115,19 @@ export interface Settings {
   /** tint laid under PDF pages (multiply blend); ignored while dark mode
    *  inverts pages — see paperActive() */
   paper: PaperColor
+  /** pen / shape / text-box tool state, remembered between sessions */
+  draw: DrawSettings
+}
+
+export interface DrawSettings {
+  /** tool the 🖊 button arms */
+  tool: import('./annotations/drawing').DrawTool
+  /** #rrggbb */
+  color: string
+  /** stroke width, PDF points */
+  width: number
+  /** text box font size, PDF points */
+  fontSize: number
 }
 
 export type PaperColor = 'white' | 'sepia' | 'green' | 'grey'
@@ -174,6 +187,7 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultColor: 'yellow',
   webLookupUrl: 'https://www.google.com/search?q=define+%s',
   paper: 'white',
+  draw: { tool: 'pen', color: '#e53935', width: 2, fontSize: 14 },
 }
 
 export function applyLanguage(): void {
@@ -266,6 +280,7 @@ export async function initStore(): Promise<void> {
     store.settings.book = { ...DEFAULT_SETTINGS.book, ...(s.settings.book ?? {}) }
     store.settings.tts = { ...DEFAULT_SETTINGS.tts, ...(s.settings.tts ?? {}) }
     store.settings.comic = { ...DEFAULT_SETTINGS.comic, ...(s.settings.comic ?? {}) }
+    store.settings.draw = { ...DEFAULT_SETTINGS.draw, ...(s.settings.draw ?? {}) }
   }
   if (s.recents) store.recents = s.recents
   if (s.positions) store.positions = s.positions

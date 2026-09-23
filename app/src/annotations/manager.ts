@@ -38,6 +38,12 @@ function labels(): SidecarLabels {
       squiggly: t('sc.squiggly'),
       note: t('sc.note'),
       region: t('sc.region'),
+      ink: t('sc.ink'),
+      textbox: t('sc.textbox'),
+      rect: t('sc.rect'),
+      ellipse: t('sc.ellipse'),
+      line: t('sc.line'),
+      arrow: t('sc.arrow'),
     },
   }
 }
@@ -55,8 +61,11 @@ export interface UndoLabel {
 interface UndoEntry {
   edit: SidecarEdit
   label: UndoLabel
-  /** image file name -> bytes, for every region image the edit touched */
-  assets: Map<string, Uint8Array>
+  /** image file name -> bytes as they were BEFORE the edit (undo target) */
+  before: Map<string, Uint8Array>
+  /** image file name -> bytes AFTER the edit (redo target). A reshaped ink
+   *  mark rewrites its picture under the same name, so one map is not enough */
+  after: Map<string, Uint8Array>
 }
 
 export type UndoResult =
@@ -101,6 +110,8 @@ export class AnnotationManager {
   private meta: SidecarMeta
   private history = new UndoStack<UndoEntry>(100)
   private undoBusy = false
+  /** pictures about to be overwritten by update(), captured for record() */
+  private overwritten = new Map<string, Uint8Array>()
   onChange: (annots: Annotation[]) => void = () => {}
 
   constructor(
@@ -208,6 +219,69 @@ export class AnnotationManager {
     return a
   }
 
+  /**
+   * Add a drawn mark (ink / shape / text box). Geometry is already in
+   * `anchor` (PDF user space); `png` is its picture for the sidecar, written
+   * BEFORE the section so the Markdown never points at a missing file.
+   */
+  async addDrawn(
+    fields: Pick<Annotation, 'anchor' | 'kind' | 'color'> & { note?: string },
+    png?: Uint8Array | null,
+  ): Promise<Annotation> {
+    const id = genId()
+    let image: string | undefined
+    if (png) {
+      image = `${id}.png`
+      await platform().writeSidecarAsset(this.pdfPath, image, png)
+    }
+    const a: Annotation = {
+      id,
+      anchor: fields.anchor,
+      excerpt: '',
+      note: fields.note ?? '',
+      color: fields.color,
+      kind: fields.kind,
+      image,
+      createdAt: new Date().toISOString(),
+    }
+    await this.write(upsertAnnotation(this.text, a, this.pdfPath, this.meta, labels()))
+    this.annotations = parse(this.text).annotations
+    this.onChange(this.annotations)
+    return a
+  }
+
+  /**
+   * Generic in-place change of one annotation (move / recolour / reshape /
+   * retext). Spliced by id like every other write. A new `png` overwrites
+   * the mark's picture under the same name.
+   */
+  async update(
+    id: string,
+    patch: Partial<Pick<Annotation, 'anchor' | 'note' | 'color' | 'kind'>>,
+    png?: Uint8Array | null,
+  ): Promise<Annotation | null> {
+    const a = this.annotations.find((x) => x.id === id)
+    if (!a) return null
+    const next: Annotation = { ...a, ...patch }
+    if (png) {
+      next.image = a.image ?? `${id}.png`
+      const old = await platform().readSidecarAsset(this.pdfPath, next.image).catch(() => null)
+      if (old) this.overwritten.set(next.image, old)
+      await platform().writeSidecarAsset(this.pdfPath, next.image, png)
+      this.dropAssetUrl(id)
+    }
+    await this.write(upsertAnnotation(this.text, next, this.pdfPath, this.meta, labels()))
+    this.annotations = parse(this.text).annotations
+    this.onChange(this.annotations)
+    return this.annotations.find((x) => x.id === id) ?? null
+  }
+
+  private dropAssetUrl(id: string): void {
+    const u = this.assetUrls.get(id)
+    if (u) URL.revokeObjectURL(u)
+    this.assetUrls.delete(id)
+  }
+
   /** Blob URL for a region screenshot, cached per annotation id. */
   async assetUrl(a: Annotation): Promise<string | null> {
     if (!a.image) return null
@@ -224,16 +298,8 @@ export class AnnotationManager {
     await this.update(id, { note })
   }
 
-  /** Change note / colour / kind of one annotation in a single undo step. */
-  async update(id: string, patch: Partial<Pick<Annotation, 'note' | 'color' | 'kind'>>): Promise<void> {
-    const a = this.annotations.find((x) => x.id === id)
-    if (!a) return
-    await this.write(upsertAnnotation(this.text, { ...a, ...patch }, this.pdfPath, this.meta, labels()))
-    this.annotations = parse(this.text).annotations
-    this.onChange(this.annotations)
-  }
-
   async remove(id: string): Promise<void> {
+    this.dropAssetUrl(id)
     await this.write(removeAnnotation(this.text, id))
     this.annotations = parse(this.text).annotations
     this.onChange(this.annotations)
@@ -275,7 +341,7 @@ export class AnnotationManager {
         this.onChange(this.annotations)
         return { ok: false, reason: 'conflict' }
       }
-      await this.restoreAssets(entry, next)
+      await this.restoreAssets(dir === 'undo' ? entry.before : entry.after, next)
       this.sidecarLocation = await platform().writeSidecar(this.pdfPath, next)
       this.text = next
       if (dir === 'undo') this.history.undo()
@@ -290,28 +356,36 @@ export class AnnotationManager {
     }
   }
 
-  /** put back any image the restored sections reference but the disk lost */
-  private async restoreAssets(entry: UndoEntry, text: string): Promise<void> {
-    for (const [name, bytes] of entry.assets) {
+  /** write back the pictures of the state being restored — a missing file
+   *  (region deleted elsewhere) and a stale one (ink reshaped since) alike */
+  private async restoreAssets(assets: Map<string, Uint8Array>, text: string): Promise<void> {
+    for (const [name, bytes] of assets) {
       if (!text.includes(name)) continue
-      const have = await platform().readSidecarAsset(this.pdfPath, name).catch(() => null)
-      if (!have) await platform().writeSidecarAsset(this.pdfPath, name, bytes)
+      await platform().writeSidecarAsset(this.pdfPath, name, bytes)
+      const owner = this.annotations.find((a) => a.image === name)
+      if (owner) this.dropAssetUrl(owner.id)
     }
   }
 
   private async record(oldText: string, newText: string): Promise<void> {
+    const overwritten = this.overwritten
+    this.overwritten = new Map()
     const edit = diffSidecar(oldText, newText)
     if (!edit) return
-    const assets = new Map<string, Uint8Array>()
+    const before = new Map<string, Uint8Array>()
+    const after = new Map<string, Uint8Array>()
     for (const c of edit.changes) {
-      for (const sec of [c.before, c.after]) {
+      for (const [sec, into] of [[c.before, before], [c.after, after]] as const) {
         const img = sectionAnnot(sec)?.image
-        if (!img || assets.has(img)) continue
-        const bytes = await platform().readSidecarAsset(this.pdfPath, img).catch(() => null)
-        if (bytes) assets.set(img, bytes)
+        if (!img || into.has(img)) continue
+        // the disk already holds the AFTER picture; an overwrite kept the old one
+        const bytes = into === before && overwritten.has(img)
+          ? overwritten.get(img)!
+          : await platform().readSidecarAsset(this.pdfPath, img).catch(() => null)
+        if (bytes) into.set(img, bytes)
       }
     }
-    this.history.push({ edit, label: describe(edit), assets })
+    this.history.push({ edit, label: describe(edit), before, after })
   }
 
   private async write(newText: string): Promise<void> {

@@ -41,6 +41,12 @@ export const DEFAULT_LABELS: SidecarLabels = {
     squiggly: '波浪线',
     note: '便签',
     region: '截图',
+    ink: '手绘',
+    textbox: '文本框',
+    rect: '矩形',
+    ellipse: '椭圆',
+    line: '直线',
+    arrow: '箭头',
   },
 }
 
@@ -91,9 +97,10 @@ function kindLabel(kind: AnnotationKind | undefined, labels: SidecarLabels): str
 export function renderAnnotation(a: Annotation, pdfPath: string, labels: SidecarLabels = DEFAULT_LABELS): string {
   const lines: string[] = []
   lines.push(`## p.${a.anchor.page} — ${kindLabel(a.kind, labels)} <!-- solopdf:id ${a.id} -->`)
-  // region screenshots render as a plain Markdown image so SoloMD (and any
+  // region screenshots — and pictures of drawn marks, since Markdown can't
+  // show a stroke — render as a plain Markdown image so SoloMD (and any
   // other Markdown viewer, and GitHub) shows the figure inline
-  if (a.kind === 'region' && a.image) {
+  if (a.image) {
     const dir = assetsDirName(pdfPath.split('/').pop() ?? '')
     lines.push(`![${kindLabel(a.kind, labels)} p.${a.anchor.page}](${dir}/${a.image})`)
   }

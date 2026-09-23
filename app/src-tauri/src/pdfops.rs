@@ -13,6 +13,7 @@
 //!   stamp        — signature and date images placed on a page
 //!   security     — set or remove an open password
 
+use lopdf::content::{Content, Operation};
 use lopdf::{dictionary, Dictionary, Document, Object, ObjectId, Stream};
 use serde::Deserialize;
 
@@ -78,13 +79,14 @@ fn page_ids(doc: &Document) -> Vec<ObjectId> {
 
 // ── annotations ──────────────────────────────────────────────────────────
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, Default)]
 pub struct AnnotSpec {
     /// 1-based
     pub page: u32,
-    /// highlight | underline | strike | squiggly | note | region
+    /// highlight | underline | strike | squiggly | note | region |
+    /// ink | textbox | rect | ellipse | line | arrow
     pub kind: String,
-    /// PDF user-space rects, one per visual line
+    /// PDF user-space rects, one per visual line (drawn marks: their box)
     pub quads: Vec<[f32; 4]>,
     /// 0–1 RGB
     pub color: [f32; 3],
@@ -92,6 +94,25 @@ pub struct AnnotSpec {
     pub contents: String,
     #[serde(default)]
     pub author: String,
+    /// drawn marks: stroke width in points
+    #[serde(default)]
+    pub width: f32,
+    /// ink: strokes as flat [x0, y0, x1, y1, …] Catmull-Rom control points
+    #[serde(default)]
+    pub strokes: Vec<Vec<f32>>,
+    /// ink: per-point width factors (stylus pressure), parallel to `strokes`
+    #[serde(default)]
+    pub pressure: Vec<Vec<f32>>,
+    /// line/arrow: start → end
+    #[serde(default)]
+    pub line: Option<[f32; 4]>,
+    /// text box: font size in points
+    #[serde(default)]
+    pub font_size: f32,
+    /// text box: screen rotation it was typed at (0/90/180/270) — the text
+    /// runs along that screen's x axis, see core DrawData.rotate
+    #[serde(default)]
+    pub rotate: i32,
 }
 
 fn subtype_of(kind: &str) -> &'static str {
@@ -100,9 +121,27 @@ fn subtype_of(kind: &str) -> &'static str {
         "strike" => "StrikeOut",
         "squiggly" => "Squiggly",
         "note" => "Text",
-        "region" => "Square",
+        "region" | "rect" => "Square",
+        "ellipse" => "Circle",
+        "line" | "arrow" => "Line",
+        "ink" => "Ink",
+        "textbox" => "FreeText",
         _ => "Highlight",
     }
+}
+
+/// A PDF *text string*: plain bytes when ASCII, else UTF-16BE with a BOM.
+/// Raw UTF-8 is not a valid text string — every reader decodes it as
+/// PDFDocEncoding and a Chinese note turns into mojibake.
+fn text_string(s: &str) -> Object {
+    if s.is_ascii() {
+        return Object::string_literal(s);
+    }
+    let mut b = vec![0xFE, 0xFF];
+    for u in s.encode_utf16() {
+        b.extend_from_slice(&u.to_be_bytes());
+    }
+    Object::String(b, lopdf::StringFormat::Hexadecimal)
 }
 
 fn bbox(quads: &[[f32; 4]]) -> [f32; 4] {
@@ -123,10 +162,12 @@ fn nums(v: &[f32]) -> Object {
 /// Write sidecar marks into a copy of the PDF as standard markup annotations,
 /// so Preview / Acrobat / Foxit show them too.
 ///
-/// No appearance streams: every mainstream renderer (PDFium, Preview,
-/// Acrobat, pdf.js) synthesises appearances for Highlight/Underline/
-/// StrikeOut/Squiggly/Text from QuadPoints, and a hand-rolled /AP is one more
-/// thing to get wrong per viewer.
+/// Text marks get no appearance stream: every mainstream renderer (PDFium,
+/// Preview, Acrobat, pdf.js) synthesises Highlight/Underline/StrikeOut/
+/// Squiggly/Text from QuadPoints, and a hand-rolled /AP is one more thing to
+/// get wrong per viewer. Drawn marks (Ink/Square/Circle/Line/FreeText) DO
+/// get one — viewers are far less consistent at synthesising those, and a
+/// pressure-varying ink stroke can't be described by /BS at all.
 pub fn write_annotations(pdf: &[u8], password: Option<&str>, annots: &[AnnotSpec]) -> R<Vec<u8>> {
     let mut doc = load(pdf, password)?;
     let pages = page_ids(&doc);
@@ -148,10 +189,13 @@ pub fn write_annotations(pdf: &[u8], password: Option<&str>, annots: &[AnnotSpec
                 // 4 = Print: an annotation nobody can print is half a feature
                 "F" => 4,
                 "C" => nums(&a.color),
-                "Contents" => Object::string_literal(a.contents.as_str()),
-                "T" => Object::string_literal(if a.author.is_empty() { "SoloPDF" } else { &a.author }),
+                "Contents" => text_string(&a.contents),
+                "T" => text_string(if a.author.is_empty() { "SoloPDF" } else { &a.author }),
             };
             match a.kind.as_str() {
+                "ink" | "rect" | "ellipse" | "line" | "arrow" | "textbox" => {
+                    drawn_annotation(&mut doc, &mut dict, a);
+                }
                 "note" => {
                     // a pin, drawn by the viewer at a fixed icon size
                     dict.set("Rect", nums(&[rect[0], rect[1] - 20.0, rect[0] + 20.0, rect[1]]));
@@ -202,6 +246,369 @@ pub fn write_annotations(pdf: &[u8], password: Option<&str>, annots: &[AnnotSpec
     }
     save(&mut doc)
 }
+
+// ── drawn marks: ink / shapes / text boxes ───────────────────────────────
+
+/// Uniform Catmull-Rom through `pts` as cubic Béziers — the exact mirror of
+/// core/src/drawing.ts catmullRom(), so the exported stroke is the curve the
+/// reader saw on screen. Each item: [c1x, c1y, c2x, c2y, x, y].
+fn catmull_rom(pts: &[(f32, f32)]) -> Vec<[f32; 6]> {
+    let n = pts.len();
+    let p = |i: isize| pts[i.clamp(0, n as isize - 1) as usize];
+    (0..n.saturating_sub(1))
+        .map(|i| {
+            let i = i as isize;
+            let (x0, y0) = p(i - 1);
+            let (x1, y1) = p(i);
+            let (x2, y2) = p(i + 1);
+            let (x3, y3) = p(i + 2);
+            [
+                x1 + (x2 - x0) / 6.0,
+                y1 + (y2 - y0) / 6.0,
+                x2 - (x3 - x1) / 6.0,
+                y2 - (y3 - y1) / 6.0,
+                x2,
+                y2,
+            ]
+        })
+        .collect()
+}
+
+/// Wings of an open arrowhead at the END of `line` (mirrors arrowHead()).
+fn arrow_wings(line: [f32; 4], width: f32) -> [f32; 4] {
+    let [x1, y1, x2, y2] = line;
+    let len = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt().max(0.001);
+    let (ux, uy) = ((x2 - x1) / len, (y2 - y1) / len);
+    let size = (width * 4.0).max(7.0);
+    let a = std::f32::consts::PI / 7.0;
+    let (back, side) = (size * a.cos(), size * a.sin());
+    [
+        x2 - ux * back - uy * side,
+        y2 - uy * back + ux * side,
+        x2 - ux * back + uy * side,
+        y2 - uy * back - ux * side,
+    ]
+}
+
+fn op(name: &str, args: &[f32]) -> Operation {
+    Operation::new(name, args.iter().map(|n| Object::Real(*n)).collect())
+}
+
+fn pairs(v: &[f32]) -> Vec<(f32, f32)> {
+    v.chunks_exact(2).map(|c| (c[0], c[1])).collect()
+}
+
+/// Grow `r` to cover every point, padded by `pad`.
+fn cover(mut r: [f32; 4], pts: &[(f32, f32)], pad: f32) -> [f32; 4] {
+    for (x, y) in pts {
+        r[0] = r[0].min(x - pad);
+        r[1] = r[1].min(y - pad);
+        r[2] = r[2].max(x + pad);
+        r[3] = r[3].max(y + pad);
+    }
+    r
+}
+
+/// Standard Helvetica advance widths (AFM, per mille) for ASCII 32–126.
+const HELV: [u16; 95] = [
+    278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556,
+    556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, 1015, 667, 667, 722, 722, 667,
+    611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667,
+    667, 611, 278, 278, 278, 469, 556, 333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500,
+    222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
+];
+
+/// Text a WinAnsi Helvetica can show (Latin-1 printable, which WinAnsi
+/// shares byte for byte). Anything else goes through the CJK font.
+fn is_latin(c: char) -> bool {
+    matches!(c as u32, 0x20..=0x7E | 0xA0..=0xFF)
+}
+
+fn char_width(c: char, latin_font: bool, fs: f32) -> f32 {
+    let u = c as u32;
+    if (0x20..=0x7E).contains(&u) {
+        // the CJK font's Latin range is half-width
+        if latin_font { HELV[(u - 0x20) as usize] as f32 / 1000.0 * fs } else { fs * 0.5 }
+    } else if latin_font {
+        fs * 0.556
+    } else {
+        fs
+    }
+}
+
+/// Greedy wrap to `max_w`: Latin words stay whole where they fit, CJK breaks
+/// anywhere (as it does on screen).
+fn wrap(text: &str, latin_font: bool, fs: f32, max_w: f32) -> Vec<String> {
+    let mut out = Vec::new();
+    for para in text.split('\n') {
+        // tokens: a run of Latin letters/digits, or any single other char
+        let mut tokens: Vec<String> = Vec::new();
+        for c in para.chars() {
+            let wordy = c.is_ascii_alphanumeric() || (is_latin(c) && c.is_alphanumeric());
+            match tokens.last_mut() {
+                Some(t) if wordy && t.chars().last().map_or(false, |p| p.is_ascii_alphanumeric() || (is_latin(p) && p.is_alphanumeric())) => t.push(c),
+                _ => tokens.push(c.to_string()),
+            }
+        }
+        let mut line = String::new();
+        let mut w = 0.0;
+        for t in tokens {
+            let tw: f32 = t.chars().map(|c| char_width(c, latin_font, fs)).sum();
+            if w + tw > max_w && !line.is_empty() {
+                out.push(line.trim_end().to_string());
+                line = String::new();
+                w = 0.0;
+                if t == " " {
+                    continue;
+                }
+            }
+            if tw > max_w {
+                // a single word wider than the box: split it by characters
+                for c in t.chars() {
+                    let cw = char_width(c, latin_font, fs);
+                    if w + cw > max_w && !line.is_empty() {
+                        out.push(std::mem::take(&mut line));
+                        w = 0.0;
+                    }
+                    line.push(c);
+                    w += cw;
+                }
+                continue;
+            }
+            line.push_str(&t);
+            w += tw;
+        }
+        out.push(line.trim_end().to_string());
+    }
+    out
+}
+
+/// Font resource for a text box: WinAnsi Helvetica, or — for anything past
+/// Latin-1 — Adobe's non-embedded STSong-Light via UniGB-UCS2-H. That is the
+/// standard "CJK without embedding a font" route: Acrobat maps it to its
+/// Asian font pack, Preview/PDFium/pdf.js to a system CJK face.
+fn text_font(latin_font: bool) -> Dictionary {
+    if latin_font {
+        return dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+            "Encoding" => "WinAnsiEncoding",
+        };
+    }
+    let descriptor = dictionary! {
+        "Type" => "FontDescriptor",
+        "FontName" => "STSong-Light",
+        "Flags" => 6,
+        "FontBBox" => vec![Object::Integer(-25), Object::Integer(-254), Object::Integer(1000), Object::Integer(880)],
+        "ItalicAngle" => 0,
+        "Ascent" => 880,
+        "Descent" => -120,
+        "CapHeight" => 880,
+        "StemV" => 93,
+    };
+    let cid = dictionary! {
+        "Type" => "Font",
+        "Subtype" => "CIDFontType0",
+        "BaseFont" => "STSong-Light",
+        "CIDSystemInfo" => dictionary! {
+            "Registry" => Object::string_literal("Adobe"),
+            "Ordering" => Object::string_literal("GB1"),
+            "Supplement" => 2,
+        },
+        "FontDescriptor" => descriptor,
+        "DW" => 1000,
+        // CIDs 1–95 are the half-width Latin range in Adobe-GB1
+        "W" => vec![Object::Integer(1), Object::Integer(95), Object::Integer(500)],
+    };
+    dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type0",
+        "BaseFont" => "STSong-Light",
+        "Encoding" => "UniGB-UCS2-H",
+        "DescendantFonts" => vec![Object::Dictionary(cid)],
+    }
+}
+
+fn text_bytes(line: &str, latin_font: bool) -> Object {
+    if latin_font {
+        let b: Vec<u8> = line.chars().map(|c| c as u32 as u8).collect();
+        return Object::String(b, lopdf::StringFormat::Literal);
+    }
+    // UCS-2: characters beyond the BMP have no code in this CMap
+    let mut b = Vec::with_capacity(line.len() * 2);
+    for c in line.chars() {
+        let u = if (c as u32) < 0x10000 { c as u32 as u16 } else { '?' as u16 };
+        b.extend_from_slice(&u.to_be_bytes());
+    }
+    Object::String(b, lopdf::StringFormat::Hexadecimal)
+}
+
+/// Fill in an Ink / Square / Circle / Line / FreeText annotation: geometry
+/// keys, border style and a normal appearance stream drawn in page space
+/// (BBox = Rect, identity Matrix, so the stream's coordinates ARE the page's).
+fn drawn_annotation(doc: &mut Document, dict: &mut Dictionary, a: &AnnotSpec) {
+    let w = if a.width > 0.0 { a.width } else { 1.5 };
+    let [r, g, b] = a.color;
+    let mut rect = bbox(&a.quads);
+    let mut ops: Vec<Operation> = vec![
+        op("q", &[]),
+        op("RG", &[r, g, b]),
+        // round caps + joins: a pen stroke, not a technical drawing
+        Operation::new("J", vec![Object::Integer(1)]),
+        Operation::new("j", vec![Object::Integer(1)]),
+    ];
+    let mut resources: Option<Dictionary> = None;
+    match a.kind.as_str() {
+        "ink" => {
+            let mut ink_list = Vec::new();
+            for (si, s) in a.strokes.iter().enumerate() {
+                let pts = pairs(s);
+                if pts.is_empty() {
+                    continue;
+                }
+                ink_list.push(nums(s));
+                let f = a.pressure.get(si).filter(|f| f.len() == pts.len());
+                let max_f = f.map_or(1.0, |f| f.iter().cloned().fold(1.0, f32::max));
+                rect = cover(rect, &pts, w * max_f / 2.0 + 0.5);
+                if pts.len() == 1 {
+                    // a dot: zero-length line, the round cap draws the disc
+                    let (x, y) = pts[0];
+                    ops.push(op("w", &[w * f.map_or(1.0, |f| f[0])]));
+                    ops.push(op("m", &[x, y]));
+                    ops.push(op("l", &[x, y]));
+                    ops.push(op("S", &[]));
+                    continue;
+                }
+                let segs = catmull_rom(&pts);
+                match f {
+                    None => {
+                        ops.push(op("w", &[w]));
+                        ops.push(op("m", &[pts[0].0, pts[0].1]));
+                        for c in &segs {
+                            ops.push(op("c", c));
+                        }
+                        ops.push(op("S", &[]));
+                    }
+                    Some(f) => {
+                        // pressure: each segment at its own width, round caps
+                        // hide the seams
+                        for (i, c) in segs.iter().enumerate() {
+                            ops.push(op("w", &[w * (f[i] + f[i + 1]) / 2.0]));
+                            ops.push(op("m", &[pts[i].0, pts[i].1]));
+                            ops.push(op("c", c));
+                            ops.push(op("S", &[]));
+                        }
+                    }
+                }
+            }
+            dict.set("InkList", Object::Array(ink_list));
+        }
+        "rect" | "ellipse" => {
+            let i = w / 2.0;
+            let (x1, y1, x2, y2) = (rect[0] + i, rect[1] + i, rect[2] - i, rect[3] - i);
+            ops.push(op("w", &[w]));
+            if a.kind == "rect" {
+                ops.push(op("re", &[x1, y1, x2 - x1, y2 - y1]));
+            } else {
+                // four Béziers, κ = 0.5523 — the classic circle approximation
+                let (cx, cy, rx, ry) = ((x1 + x2) / 2.0, (y1 + y2) / 2.0, (x2 - x1) / 2.0, (y2 - y1) / 2.0);
+                let (kx, ky) = (rx * 0.5523, ry * 0.5523);
+                ops.push(op("m", &[cx + rx, cy]));
+                ops.push(op("c", &[cx + rx, cy + ky, cx + kx, cy + ry, cx, cy + ry]));
+                ops.push(op("c", &[cx - kx, cy + ry, cx - rx, cy + ky, cx - rx, cy]));
+                ops.push(op("c", &[cx - rx, cy - ky, cx - kx, cy - ry, cx, cy - ry]));
+                ops.push(op("c", &[cx + kx, cy - ry, cx + rx, cy - ky, cx + rx, cy]));
+                ops.push(op("h", &[]));
+            }
+            ops.push(op("S", &[]));
+            // RD: how far the drawn border sits inside Rect (none here)
+            dict.set("RD", nums(&[0.0, 0.0, 0.0, 0.0]));
+        }
+        "line" | "arrow" => {
+            let l = a.line.unwrap_or([rect[0], rect[1], rect[2], rect[3]]);
+            ops.push(op("w", &[w]));
+            ops.push(op("m", &[l[0], l[1]]));
+            ops.push(op("l", &[l[2], l[3]]));
+            ops.push(op("S", &[]));
+            let mut pts = vec![(l[0], l[1]), (l[2], l[3])];
+            let end = if a.kind == "arrow" {
+                let h = arrow_wings(l, w);
+                ops.push(op("m", &[h[0], h[1]]));
+                ops.push(op("l", &[l[2], l[3]]));
+                ops.push(op("l", &[h[2], h[3]]));
+                ops.push(op("S", &[]));
+                pts.push((h[0], h[1]));
+                pts.push((h[2], h[3]));
+                "OpenArrow"
+            } else {
+                "None"
+            };
+            rect = cover(rect, &pts, w / 2.0 + 0.5);
+            dict.set("L", nums(&l));
+            dict.set("LE", Object::Array(vec![Object::Name(b"None".to_vec()), Object::Name(end.as_bytes().to_vec())]));
+        }
+        "textbox" => {
+            let fs = if a.font_size > 0.0 { a.font_size } else { 12.0 };
+            let latin_font = a.contents.chars().all(|c| c == '\n' || is_latin(c));
+            let pad = 2.0;
+            // text frame: origin at the box's top-left AS SEEN when typed,
+            // x along the text, y up the text (see drawing.ts textFrame)
+            let [x1, y1, x2, y2] = rect;
+            let (m, frame_w) = match ((a.rotate % 360) + 360) % 360 {
+                90 => ([0.0, 1.0, -1.0, 0.0, x1, y1], y2 - y1),
+                180 => ([-1.0, 0.0, 0.0, -1.0, x2, y1], x2 - x1),
+                270 => ([0.0, -1.0, 1.0, 0.0, x2, y2], y2 - y1),
+                _ => ([1.0, 0.0, 0.0, 1.0, x1, y2], x2 - x1),
+            };
+            let lines = wrap(&a.contents, latin_font, fs, (frame_w - 2.0 * pad).max(fs));
+            let lead = fs * 1.25;
+            ops.push(op("cm", &m));
+            ops.push(op("BT", &[]));
+            ops.push(Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), Object::Real(fs)]));
+            ops.push(op("rg", &[r, g, b]));
+            ops.push(op("Td", &[pad, -pad - fs * 0.9]));
+            for (i, line) in lines.iter().enumerate() {
+                if i > 0 {
+                    ops.push(op("Td", &[0.0, -lead]));
+                }
+                ops.push(Operation::new("Tj", vec![text_bytes(line, latin_font)]));
+            }
+            ops.push(op("ET", &[]));
+            resources = Some(dictionary! { "Font" => dictionary! { "F1" => text_font(latin_font) } });
+            let hex = format!(
+                "#{:02x}{:02x}{:02x}",
+                (r * 255.0).round() as u8,
+                (g * 255.0).round() as u8,
+                (b * 255.0).round() as u8
+            );
+            // DA is what a viewer regenerates the look from; DS is the
+            // rich-text default style Acrobat and Preview read on edit
+            dict.set("DA", Object::string_literal(format!("/Helv {fs} Tf {r} {g} {b} rg")));
+            dict.set("DS", Object::string_literal(format!("font: {fs}pt Helvetica; color: {hex}")));
+            // no border: it is text on the page, not a form field
+            dict.set("BS", Object::Dictionary(dictionary! { "W" => 0 }));
+        }
+        _ => {}
+    }
+    ops.push(op("Q", &[]));
+    if a.kind != "textbox" {
+        dict.set("BS", Object::Dictionary(dictionary! { "W" => Object::Real(w), "S" => "S" }));
+    }
+    dict.set("Rect", nums(&rect));
+    let content = Content { operations: ops }.encode().unwrap_or_default();
+    let mut form = dictionary! {
+        "Type" => "XObject",
+        "Subtype" => "Form",
+        "BBox" => nums(&rect),
+    };
+    if let Some(res) = resources {
+        form.set("Resources", Object::Dictionary(res));
+    }
+    let ap = doc.add_object(Stream::new(form, content));
+    dict.set("AP", Object::Dictionary(dictionary! { "N" => Object::Reference(ap) }));
+}
+
 
 // ── page operations ──────────────────────────────────────────────────────
 
@@ -791,6 +1198,7 @@ mod tests {
                 color: [1.0, 0.85, 0.2],
                 contents: "hello".into(),
                 author: String::new(),
+                ..Default::default()
             },
             AnnotSpec {
                 page: 2,
@@ -799,6 +1207,7 @@ mod tests {
                 color: [0.2, 0.6, 0.35],
                 contents: String::new(),
                 author: "alex".into(),
+                ..Default::default()
             },
             AnnotSpec {
                 page: 4,
@@ -807,6 +1216,7 @@ mod tests {
                 color: [1.0, 0.85, 0.2],
                 contents: "check this".into(),
                 author: String::new(),
+                ..Default::default()
             },
         ];
         let out = write_annotations(&sample(), None, &specs).unwrap();
@@ -854,13 +1264,13 @@ mod tests {
         let one = write_annotations(
             &sample(),
             None,
-            &[AnnotSpec { page: 1, kind: "highlight".into(), quads: vec![[10.0, 10.0, 20.0, 20.0]], color: [1.0, 1.0, 0.0], contents: String::new(), author: String::new() }],
+            &[AnnotSpec { page: 1, kind: "highlight".into(), quads: vec![[10.0, 10.0, 20.0, 20.0]], color: [1.0, 1.0, 0.0], contents: String::new(), author: String::new(), ..Default::default() }],
         )
         .unwrap();
         let two = write_annotations(
             &one,
             None,
-            &[AnnotSpec { page: 1, kind: "strike".into(), quads: vec![[30.0, 30.0, 40.0, 40.0]], color: [1.0, 0.0, 0.0], contents: String::new(), author: String::new() }],
+            &[AnnotSpec { page: 1, kind: "strike".into(), quads: vec![[30.0, 30.0, 40.0, 40.0]], color: [1.0, 0.0, 0.0], contents: String::new(), author: String::new(), ..Default::default() }],
         )
         .unwrap();
         let doc = Document::load_mem(&two).unwrap();
@@ -872,6 +1282,167 @@ mod tests {
             .filter(|d| d.get(b"T").and_then(Object::as_str).map(|t| t == b"SoloPDF").unwrap_or(false))
             .count();
         assert_eq!(mine, 2, "the second pass must append, not replace");
+    }
+
+    /// Every drawn kind lands as its real subtype, with the geometry keys a
+    /// viewer needs and a non-empty normal appearance stream.
+    #[test]
+    fn drawn_marks_export_as_real_annotations_with_appearances() {
+        let red = [0.9, 0.2, 0.2];
+        let specs = vec![
+            AnnotSpec {
+                page: 1,
+                kind: "ink".into(),
+                quads: vec![[98.0, 98.0, 162.0, 142.0]],
+                color: red,
+                width: 2.0,
+                strokes: vec![vec![100.0, 100.0, 120.0, 140.0, 160.0, 110.0], vec![130.0, 130.0]],
+                pressure: vec![vec![0.5, 1.0, 1.5]],
+                ..Default::default()
+            },
+            AnnotSpec {
+                page: 1,
+                kind: "rect".into(),
+                quads: vec![[200.0, 200.0, 300.0, 260.0]],
+                color: red,
+                width: 3.0,
+                ..Default::default()
+            },
+            AnnotSpec {
+                page: 1,
+                kind: "ellipse".into(),
+                quads: vec![[200.0, 300.0, 300.0, 360.0]],
+                color: red,
+                width: 1.0,
+                ..Default::default()
+            },
+            AnnotSpec {
+                page: 1,
+                kind: "arrow".into(),
+                quads: vec![[50.0, 400.0, 150.0, 420.0]],
+                color: red,
+                width: 2.0,
+                line: Some([50.0, 410.0, 150.0, 410.0]),
+                ..Default::default()
+            },
+            AnnotSpec {
+                page: 1,
+                kind: "line".into(),
+                quads: vec![[50.0, 450.0, 150.0, 470.0]],
+                color: red,
+                width: 1.0,
+                line: Some([50.0, 460.0, 150.0, 460.0]),
+                ..Default::default()
+            },
+            AnnotSpec {
+                page: 1,
+                kind: "textbox".into(),
+                quads: vec![[300.0, 500.0, 420.0, 540.0]],
+                color: [0.1, 0.4, 0.8],
+                contents: "Check this figure again before sending".into(),
+                font_size: 12.0,
+                ..Default::default()
+            },
+            AnnotSpec {
+                page: 1,
+                kind: "textbox".into(),
+                quads: vec![[300.0, 600.0, 420.0, 640.0]],
+                color: [0.1, 0.4, 0.8],
+                contents: "再核对一次".into(),
+                font_size: 14.0,
+                ..Default::default()
+            },
+        ];
+        let out = write_annotations(&sample(), None, &specs).unwrap();
+        let doc = Document::load_mem(&out).unwrap();
+        let page = doc.get_pages().into_values().next().unwrap();
+        let mine: Vec<&Dictionary> = doc
+            .get_page_annotations(page)
+            .unwrap()
+            .into_iter()
+            .filter(|d| d.get(b"T").and_then(Object::as_str).map(|t| t == b"SoloPDF").unwrap_or(false))
+            .collect();
+        let by = |sub: &[u8]| -> Vec<&Dictionary> {
+            mine.iter().copied().filter(|d| d.get(b"Subtype").and_then(Object::as_name).unwrap() == sub).collect()
+        };
+        let appearance = |d: &Dictionary| -> String {
+            let ap = d.get(b"AP").and_then(Object::as_dict).expect("drawn mark needs /AP");
+            let id = ap.get(b"N").and_then(Object::as_reference).expect("/AP /N stream");
+            let mut st = doc.get_object(id).unwrap().as_stream().unwrap().clone();
+            let _ = st.decompress();
+            String::from_utf8_lossy(&st.content).into_owned()
+        };
+
+        let ink = by(b"Ink");
+        assert_eq!(ink.len(), 1);
+        let list = ink[0].get(b"InkList").and_then(Object::as_array).unwrap();
+        assert_eq!(list.len(), 2, "one InkList entry per stroke");
+        let ap = appearance(ink[0]);
+        assert!(ap.contains(" c"), "strokes must be drawn as Béziers: {ap}");
+        // pressure → several different widths in one stream
+        assert!(ap.matches(" w").count() >= 3, "{ap}");
+
+        let sq = by(b"Square");
+        assert_eq!(sq.len(), 1);
+        assert!(appearance(sq[0]).contains(" re"));
+        assert_eq!(by(b"Circle").len(), 1);
+        assert!(appearance(by(b"Circle")[0]).contains(" c"));
+
+        let lines = by(b"Line");
+        assert_eq!(lines.len(), 2);
+        let arrow = lines
+            .iter()
+            .find(|d| {
+                d.get(b"LE").and_then(Object::as_array).unwrap()[1].as_name().unwrap() == b"OpenArrow"
+            })
+            .expect("arrow ends in an OpenArrow");
+        let l: Vec<f32> = arrow.get(b"L").and_then(Object::as_array).unwrap().iter().map(|o| o.as_float().unwrap()).collect();
+        assert_eq!(l, vec![50.0, 410.0, 150.0, 410.0]);
+        // the arrow's Rect must include the head, not just the shaft
+        let rect: Vec<f32> = arrow.get(b"Rect").and_then(Object::as_array).unwrap().iter().map(|o| o.as_float().unwrap()).collect();
+        assert!(rect[3] > 412.0 && rect[1] < 408.0);
+
+        let ft = by(b"FreeText");
+        assert_eq!(ft.len(), 2);
+        for d in &ft {
+            assert!(d.get(b"DA").is_ok(), "FreeText needs /DA");
+            assert!(appearance(d).contains("Tj"));
+        }
+        // the Chinese box: UTF-16 /Contents and a CJK font in its appearance
+        let cjk = ft
+            .iter()
+            .find(|d| d.get(b"Contents").and_then(Object::as_str).unwrap().starts_with(&[0xFE, 0xFF]))
+            .expect("non-ASCII /Contents must be UTF-16BE with BOM");
+        let ap = cjk.get(b"AP").and_then(Object::as_dict).unwrap();
+        let form = doc.get_object(ap.get(b"N").and_then(Object::as_reference).unwrap()).unwrap().as_stream().unwrap();
+        let font = form.dict.get(b"Resources").and_then(Object::as_dict).unwrap()
+            .get(b"Font").and_then(Object::as_dict).unwrap()
+            .get(b"F1").and_then(Object::as_dict).unwrap();
+        assert_eq!(font.get(b"Subtype").and_then(Object::as_name).unwrap(), b"Type0");
+        let latin = ft.iter().find(|d| !std::ptr::eq(**d, *cjk)).unwrap();
+        let lap = appearance(latin); assert!(lap.contains(" cm") && lap.contains("540"), "unrotated frame starts top-left: {lap}");
+        let wrapped = appearance(latin);
+        assert!(wrapped.matches("Tj").count() >= 2, "long text must wrap in a 120pt box: {wrapped}");
+    }
+
+    #[test]
+    fn catmull_rom_passes_through_its_points() {
+        let segs = catmull_rom(&[(0.0, 0.0), (10.0, 10.0), (20.0, 0.0)]);
+        assert_eq!(segs.len(), 2);
+        assert_eq!([segs[0][4], segs[0][5]], [10.0, 10.0]);
+        assert_eq!([segs[1][4], segs[1][5]], [20.0, 0.0]);
+        // same numbers as core/src/drawing.ts: c1 = p1 + (p2 - p0) / 6
+        assert!((segs[0][0] - 10.0 / 6.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn wrap_keeps_words_and_breaks_cjk_anywhere() {
+        let lines = wrap("hello world again", true, 10.0, 30.0);
+        assert!(lines.len() >= 2);
+        assert!(lines.iter().all(|l| !l.starts_with(' ')));
+        assert!(lines.iter().any(|l| l == "hello"));
+        let cjk = wrap("一二三四五六", false, 10.0, 30.0);
+        assert_eq!(cjk, vec!["一二三", "四五六"]);
     }
 
     #[test]
