@@ -25,8 +25,14 @@ SoloPDF：秒开、零广告、零遥测（更新检查可完全关闭）、永�
   `![](…)` 引用——SoloMD、GitHub、任何 Markdown 阅读器都直接显示图）
 - **导出带标准 PDF 注释的副本**：把伴生文件里的标注写成真正的 PDF 注释，
   Preview / Acrobat / 福昕都能看到（原文件永不修改）
-- **视图**：整档或单页旋转、单页 / 双页对开、连续滚动 / 单屏翻页、
-  自动裁白边（移动端读双栏论文的关键）、自动滚动、阅读时屏幕常亮
+- **视图**：整档或单页旋转（工具栏一键）、单页 / 双页对开、连续滚动 / 单屏翻页、
+  自动裁白边（移动端读双栏论文的关键）、纸张颜色、分屏（同一文档两个视口）、
+  全屏阅读与演示模式、自动滚动、阅读时屏幕常亮
+- **导航**：PDF 超链接可点（精确落点）、前进/后退、链接与 Figure/Table/[12]
+  智能引用的悬停预览（没有链接的论文也行）、印刷页码（xii、A-3）
+- **手绘与图形**：画笔 / 橡皮 / 文本框 / 矩形 / 椭圆 / 直线 / 箭头，支持触控笔压感；
+  **撤销 / 重做**覆盖所有批注操作
+- **选区翻译**：Apple 平台用系统本机翻译（不联网），其他平台可自配服务
 - **朗读**：调用系统语音，句子级跟随高亮并自动翻页，零体积零联网
 - **离线词典**：内置 CC-CEDICT（12 万词条，4MB），中文按最长前缀匹配；
   macOS/iOS 另可直接唤起系统词典
@@ -61,6 +67,8 @@ test-fixtures/  标准测试集（7 个真实样本，见其 README）
 ```bash
 node cli/src/index.mjs info <file.pdf> [--password pw]      # 页数/书签/元数据
 node cli/src/index.mjs extract-text <file.pdf> [--pages A-B]
+node cli/src/index.mjs links <file.pdf> [--pages A-B]       # 超链接 → JSON
+node cli/src/index.mjs translate "text" [--to zh-Hans]      # 本机翻译（macOS）
 node cli/src/index.mjs export-annotations <file.pdf>        # 伴生批注 → JSON
 node cli/src/index.mjs annotate <file.pdf> --out x.pdf      # 伴生批注 → 标准 PDF 注释
 node cli/src/index.mjs to-images <file.pdf> --out-dir d     # 页面 → PNG/JPEG
@@ -98,7 +106,8 @@ claude mcp add solopdf -- node /path/to/pdf/dev-mcp/src/index.mjs --allow-write
 
 只读工具：`solopdf_info` / `solopdf_extract_text` / `solopdf_search` /
 `solopdf_search_library`（跨文件夹）/ `solopdf_read_annotations` /
-`solopdf_page_image` / `solopdf_define`（离线词典）。
+`solopdf_page_image` / `solopdf_define`（离线词典）/ `solopdf_links` /
+`solopdf_translate`。
 
 写门控（`--allow-write`）：`solopdf_add_annotation` /
 `solopdf_export_annotated_pdf` / `solopdf_pages` / `solopdf_merge`。
