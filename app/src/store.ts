@@ -130,6 +130,17 @@ export interface Settings {
   draw: DrawSettings
   /** 分屏方向(上次的选择) */
   splitDir: 'row' | 'col'
+  /** selection translation */
+  translate: TranslateSettings
+}
+
+export interface TranslateSettings {
+  /** target language tag; '' = the UI language (English when the text is
+   *  already in it) */
+  target: string
+  /** the reader's own online provider — off by default, the key never
+   *  leaves this device except in the request to that provider */
+  provider: import('@solopdf/core').ProviderConfig
 }
 
 export interface DrawSettings {
@@ -202,6 +213,10 @@ export const DEFAULT_SETTINGS: Settings = {
   paper: 'white',
   draw: { tool: 'pen', color: '#e53935', width: 2, fontSize: 14 },
   splitDir: 'row',
+  translate: {
+    target: '',
+    provider: { kind: 'off', deeplKey: '', baseUrl: 'https://api.openai.com/v1', apiKey: '', model: '' },
+  },
 }
 
 export function applyLanguage(): void {
@@ -298,6 +313,11 @@ export async function initStore(): Promise<void> {
     store.settings.tts = { ...DEFAULT_SETTINGS.tts, ...(s.settings.tts ?? {}) }
     store.settings.comic = { ...DEFAULT_SETTINGS.comic, ...(s.settings.comic ?? {}) }
     store.settings.draw = { ...DEFAULT_SETTINGS.draw, ...(s.settings.draw ?? {}) }
+    store.settings.translate = {
+      ...DEFAULT_SETTINGS.translate,
+      ...(s.settings.translate ?? {}),
+      provider: { ...DEFAULT_SETTINGS.translate.provider, ...(s.settings.translate?.provider ?? {}) },
+    }
   }
   if (s.recents) store.recents = s.recents
   if (s.positions) store.positions = s.positions

@@ -10,10 +10,21 @@
 //       [{"page":0,"lines":[{"text","x","y","w","h"}]}] in PDF points
 //       (y = box bottom, PDF y-up). Produces a searchable copy.
 //
+//   solopdf-ocr translate <text|-> --to zh-Hans [--fallback en]
+//       On-device translation (Apple Translation framework, macOS 15+).
+//       `-` reads the text from stdin. Prints the engine's JSON:
+//       {"text","source","target"} or {"error","code",…}; exit 2 on error.
+//
+//   solopdf-ocr translate-download --from en --to zh-Hans
+//       Show the system "Download Languages" sheet for a pair (needs a GUI
+//       session — the one step on-device translation can't do headless).
+//
 // Engines: Apple Vision on macOS/iOS builds; PP-OCRv4 ONNX elsewhere
 // (models via SOLOPDF_PPOCR_DIR, exe-sibling ppocr/, or the source tree).
+// Translation lives here too: it is the same "Apple on-device ML" helper.
 
-use solopdf_lib::ocr;
+use solopdf_lib::{ocr, translate};
+use std::io::Read;
 
 fn die(msg: &str) -> ! {
     eprintln!("{msg}");
@@ -62,11 +73,45 @@ fn main() {
             eprintln!("✓ {dest}");
         }
         Some("engine") => println!("{}", ocr::engine_name()),
+        Some("translate") => {
+            let opt = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+            let mut text = args
+                .get(1)
+                .filter(|a| !a.starts_with("--"))
+                .cloned()
+                .unwrap_or_else(|| die("用法: solopdf-ocr translate <text|-> --to zh-Hans [--fallback en]"));
+            if text == "-" {
+                text.clear();
+                std::io::stdin().read_to_string(&mut text).unwrap_or_else(|e| die(&format!("读取 stdin 失败: {e}")));
+            }
+            let to = opt("--to").unwrap_or_default();
+            let fallback = opt("--fallback").unwrap_or_default();
+            let v = translate::translate(&text, &to, &fallback);
+            println!("{v}");
+            if v.get("error").is_some() {
+                std::process::exit(2);
+            }
+        }
+        Some("translate-download") => {
+            let opt = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+            let (Some(from), Some(to)) = (opt("--from"), opt("--to")) else {
+                die("用法: solopdf-ocr translate-download --from en --to zh-Hans")
+            };
+            let v = translate::prepare(&from, &to);
+            println!("{v}");
+            if v.get("error").is_some() {
+                std::process::exit(2);
+            }
+        }
+        Some("translate-engine") => println!("{}", translate::engine_name()),
         _ => die(
             "solopdf-ocr — 本地 OCR 命令行\n\n\
              用法:\n  solopdf-ocr image <img.png|jpg> [--lang ja|ko|zh|en] [--json] [--photo]\n  \
              solopdf-ocr overlay <src.pdf> <results.json> <dest.pdf>\n  \
-             solopdf-ocr engine",
+             solopdf-ocr engine\n  \
+             solopdf-ocr translate <text|-> --to zh-Hans [--fallback en]\n  \
+             solopdf-ocr translate-download --from en --to zh-Hans\n  \
+             solopdf-ocr translate-engine",
         ),
     }
 }

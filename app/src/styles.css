@@ -872,6 +872,27 @@ h4.bk-block { font-size: 1.15em; }
 .dc-pop.phone .dc-def { font-size: 15px; }
 .dc-pop.phone .dc-actions button { min-height: 44px; }
 
+/* ── translation popup (dictionary shell) ── */
+.tr-pop { width: 360px; max-height: 380px; }
+.tr-title { font-size: 15px; flex: none; }
+.tr-from { font-size: 12px; color: var(--fg-dim); margin-left: 4px; white-space: nowrap; }
+.tr-target { max-width: 130px; font-size: 12px; padding: 2px 4px; }
+.tr-src {
+  font-size: 12px; color: var(--fg-dim); line-height: 1.5; padding: 2px 0 8px;
+  border-bottom: 1px solid var(--border); margin-bottom: 8px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.tr-out { font-size: 14px; line-height: 1.7; white-space: pre-wrap; user-select: text; -webkit-user-select: text; }
+.tr-msg p { font-size: 13px; line-height: 1.6; margin: 4px 0 10px; }
+.tr-msg-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.tr-pop .primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.tr-pop .primary:hover { opacity: 0.9; background: var(--accent); }
+.tr-engine { font-size: 10px; color: var(--fg-dim); padding: 0 12px 8px; text-align: right; flex: none; }
+.dc-pop.phone.tr-pop { max-height: 70vh; }
+.dc-pop.phone .tr-out { font-size: 16px; }
+.dc-pop.phone .tr-target { max-width: 40vw; font-size: 14px; min-height: 32px; }
+.dc-pop.phone .tr-msg-actions button { min-height: 44px; flex: 1 1 40%; }
+
 /* ── reading statistics ── */
 .sx-shell {
   width: min(560px, 94vw); max-height: 86vh; display: flex; flex-direction: column;
@@ -1071,6 +1092,9 @@ h4.bk-block { font-size: 1.15em; }
 .st-swatches .swatch.on { border-color: var(--fg); }
 .st-wide { width: 100%; }
 .st-note { padding: 6px 0 0; line-height: 1.6; }
+/* the one settings line that talks about text leaving the device */
+.st-warn { color: #a86400; }
+html.dark .st-warn { color: #e0a64a; }
 .st-cache-btns { display: flex; gap: 6px; }
 .st-shell.phone .settings-row { min-height: 48px; }
 .st-shell.phone .st-body input[type='checkbox'] { width: 22px; height: 22px; }
