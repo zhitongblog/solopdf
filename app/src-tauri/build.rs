@@ -95,23 +95,26 @@ fn build_translate_shim(target: &str) {
     // `#available` lowers to __isPlatformVersionAtLeast, which lives in
     // compiler-rt — and rustc links with -nodefaultlibs (see the ObjC shim
     // notes). Pull in clang's builtins archive for this platform.
-    let rt = PathBuf::from(xcrun(&["--sdk", sdk, "clang", "-print-resource-dir"])).join("lib/darwin");
-    let rt_name = if ios {
-        if sim { "clang_rt.iossim" } else { "clang_rt.ios" }
-    } else {
-        "clang_rt.osx"
-    };
-    if rt.join(format!("lib{rt_name}.a")).exists() {
-        println!("cargo:rustc-link-search=native={}", rt.display());
-        println!("cargo:rustc-link-lib=static={rt_name}");
-    }
-    // iOS: libapp.a is linked by Xcode, which ignores these — the frameworks
-    // go into gen/apple/project.yml (scripts/build-ios.sh patches them in)
+    // iOS is different: the crate is a staticlib (libapp.a) that Xcode's clang
+    // links, and clang adds compiler-rt by itself. Bundling the archive into
+    // the staticlib also fails outright — rustc can't read the archive format
+    // newer Xcodes ship ("Unsupported archive identifier").
     if !ios {
-        println!("cargo:rustc-link-arg=-Wl,-weak_framework,Translation");
-        println!("cargo:rustc-link-arg=-Wl,-weak_framework,_Translation_SwiftUI");
-        println!("cargo:rustc-link-arg=-Wl,-weak_framework,SwiftUI");
-        println!("cargo:rustc-link-arg=-Wl,-weak-lswift_Concurrency");
+        let rt = PathBuf::from(xcrun(&["--sdk", sdk, "clang", "-print-resource-dir"])).join("lib/darwin");
+        if rt.join("libclang_rt.osx.a").exists() {
+            println!("cargo:rustc-link-search=native={}", rt.display());
+            println!("cargo:rustc-link-lib=static=clang_rt.osx");
+        }
+    }
+    // Weak, so systems without them (iOS 15–17, macOS 14) still launch and the
+    // shim reports "unavailable". On iOS these reach the cdylib that cargo also
+    // links (the libapp.a that Xcode links gets its frameworks from
+    // gen/apple/project.yml, which scripts/build-ios.sh patches)
+    println!("cargo:rustc-link-arg=-Wl,-weak_framework,Translation");
+    println!("cargo:rustc-link-arg=-Wl,-weak_framework,_Translation_SwiftUI");
+    println!("cargo:rustc-link-arg=-Wl,-weak_framework,SwiftUI");
+    println!("cargo:rustc-link-arg=-Wl,-weak-lswift_Concurrency");
+    if !ios {
         // back-deployable Swift libs are referenced as @rpath/libswift_*.dylib;
         // the OS copy lives in /usr/lib/swift (what swiftc/Xcode add by default)
         println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");

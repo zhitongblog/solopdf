@@ -38,7 +38,8 @@ if 'PROVISIONING_PROFILE_SPECIFIER' not in s:
 print('signing config ok')
 PY
 echo "==> Linking the translation shim's frameworks (libapp.a is linked by Xcode)"
-# Translation / SwiftUI are weak so iOS 15–17 still launch (the shim reports
+# Translation / SwiftUI (+ _Translation_SwiftUI, home of .translationTask) are
+# weak so iOS 15–17 still launch (the shim reports
 # "unavailable" there); NaturalLanguage exists on every supported iOS.
 python3 - "$PROJECT_YML" << 'PY'
 import sys
@@ -47,7 +48,7 @@ s = open(p).read()
 anchor = "      - sdk: Vision.framework\n"
 assert anchor in s, 'Vision.framework dependency anchor not found'
 add = ""
-for fw, weak in (("NaturalLanguage", False), ("Translation", True), ("SwiftUI", True)):
+for fw, weak in (("NaturalLanguage", False), ("Translation", True), ("_Translation_SwiftUI", True), ("SwiftUI", True)):
     if f"sdk: {fw}.framework" not in s:
         add += f"      - sdk: {fw}.framework\n" + ("        weak: true\n" if weak else "")
 if add:
