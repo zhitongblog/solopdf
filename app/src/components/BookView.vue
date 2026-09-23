@@ -17,9 +17,10 @@ import { t } from '../i18n'
 import type { SelectionInfo } from '../viewer/controller'
 import { extractBook } from '../book/extract'
 import { applyMarks } from '../book/marks'
+import { undoLabelText } from '../annotations/manager'
 
 const props = defineProps<{ tabId: number; source: 'pdf' | 'epub' | 'txt' }>()
-const emit = defineEmits<{ selection: [sel: SelectionInfo | null]; ocr: []; chrome: [] }>()
+const emit = defineEmits<{ selection: [sel: SelectionInfo | null]; ocr: []; chrome: []; undo: []; redo: [] }>()
 
 const SECTION = 120
 
@@ -503,6 +504,21 @@ function applyAllScrollMarks(): void {
 watch(() => store.docTick, () => (layout.value === 'paged' ? applySectionMarks() : applyAllScrollMarks()))
 watch(visibleSections, () => applyAllScrollMarks())
 
+// 撤销/重做:图书模式没有工具栏,有可撤销的批注时才浮出两枚小钮
+const undoState = computed(() => {
+  void store.docTick
+  const m = annotManagers.get(props.tabId)
+  const u = m?.nextUndo
+  const r = m?.nextRedo
+  return {
+    show: !!(m?.canUndo || m?.canRedo),
+    canUndo: !!m?.canUndo,
+    canRedo: !!m?.canRedo,
+    undoTip: t('un.undo') + (u ? ' · ' + undoLabelText(u) : ''),
+    redoTip: t('un.redo') + (r ? ' · ' + undoLabelText(r) : ''),
+  }
+})
+
 // ── 划选 → 高亮 ──
 function onSelChange(): void {
   const sel = window.getSelection()
@@ -611,6 +627,10 @@ function tocJump(chapter: number): void {
     <button class="bk-chrome-btn" :title="t('bk.chrome')" @click.stop="emit('chrome')">‹</button>
     <button v-if="!isMobile()" class="bk-fs-btn" :title="t('bk.fullscreen')" @click.stop="toggleFullscreen">⛶</button>
     <button v-if="tocEntries.length" class="bk-toc-btn" :title="t('bk.toc')" @click.stop="tocOpen = !tocOpen">☰</button>
+    <div v-if="undoState.show" class="bk-undo"><div class="bk-undo-btns">
+      <button :disabled="!undoState.canUndo" :title="undoState.undoTip" :aria-label="t('un.undo')" @click.stop="emit('undo')">↶</button>
+      <button :disabled="!undoState.canRedo" :title="undoState.redoTip" :aria-label="t('un.redo')" @click.stop="emit('redo')">↷</button>
+    </div></div>
     <button class="bk-aa" :title="t('bk.settings')" @click.stop="settingsOpen = !settingsOpen">Aa</button>
 
     <div v-if="tocOpen" class="bk-settings bk-toc" @click.stop>

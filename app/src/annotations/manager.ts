@@ -6,10 +6,20 @@
  * Write policy (design doc): locate-and-replace by anchor id via core's
  * upsertAnnotation — the manager NEVER regenerates the whole file over an
  * existing one.
+ *
+ * Undo/redo: every write goes through write(), which diffs the sidecar by
+ * anchor id and pushes the touched sections onto a per-document history
+ * (core/history.ts). New mutating methods therefore get undo for free as
+ * long as they write through write() — never call platform().writeSidecar
+ * directly from here. Region images are never deleted on remove, and the
+ * bytes of any image a command touches are kept in memory so an undone
+ * delete (or redone create) can put a missing file back.
  */
 import {
   parse, upsertAnnotation, removeAnnotation, stripPrivate, genId, makeFingerprint,
+  diffSidecar, applyEdit, UndoStack,
 } from '@solopdf/core'
+import type { SidecarEdit } from '@solopdf/core'
 import type { Annotation, AnnotationKind, Quad, SidecarMeta, SidecarLabels } from '@solopdf/core'
 import { platform } from '../platform'
 import { t } from '../i18n'
@@ -32,12 +42,65 @@ function labels(): SidecarLabels {
   }
 }
 
+/**
+ * What an undo step did, for the toast. `kind` is the annotation kind
+ * (unknown kinds pass through — the UI falls back to a generic word).
+ */
+export interface UndoLabel {
+  op: 'add' | 'delete' | 'note' | 'color' | 'kind' | 'edit' | 'multi'
+  kind: string
+  count: number
+}
+
+interface UndoEntry {
+  edit: SidecarEdit
+  label: UndoLabel
+  /** image file name -> bytes, for every region image the edit touched */
+  assets: Map<string, Uint8Array>
+}
+
+export type UndoResult =
+  | { ok: true; label: UndoLabel }
+  | { ok: false; reason: 'empty' | 'busy' | 'conflict' | 'error'; message?: string }
+
+/** "删除高亮" / "Delete Highlight" … — the action name used in toasts and tooltips */
+export function undoLabelText(l: UndoLabel): string {
+  if (l.op === 'multi') return t('un.multi', { n: l.count })
+  const word = t('sc.' + l.kind)
+  const kind = word === 'sc.' + l.kind ? t('un.annot') : word
+  return t('un.' + l.op, { kind })
+}
+
+function sectionAnnot(section: string | null): Annotation | undefined {
+  return section ? parse(section).annotations[0] : undefined
+}
+
+/** Describe an edit from its before/after sections — works for any kind. */
+function describe(edit: SidecarEdit): UndoLabel {
+  const ch = edit.changes
+  if (ch.length > 1) {
+    const a = sectionAnnot(ch[0].after ?? ch[0].before)
+    return { op: 'multi', kind: a?.kind ?? 'highlight', count: ch.length }
+  }
+  const b = sectionAnnot(ch[0].before)
+  const a = sectionAnnot(ch[0].after)
+  const kind = (a ?? b)?.kind ?? 'highlight'
+  if (!b) return { op: 'add', kind, count: 1 }
+  if (!a) return { op: 'delete', kind: b.kind ?? 'highlight', count: 1 }
+  if (a.kind !== b.kind) return { op: 'kind', kind, count: 1 }
+  if (a.color !== b.color) return { op: 'color', kind, count: 1 }
+  if (a.note !== b.note) return { op: 'note', kind, count: 1 }
+  return { op: 'edit', kind, count: 1 }
+}
+
 export class AnnotationManager {
   annotations: Annotation[] = []
   sidecarLocation = ''
   private text = ''
   private assetUrls = new Map<string, string>()
   private meta: SidecarMeta
+  private history = new UndoStack<UndoEntry>(100)
+  private undoBusy = false
   onChange: (annots: Annotation[]) => void = () => {}
 
   constructor(
@@ -62,6 +125,9 @@ export class AnnotationManager {
     const { text } = await platform().readSidecar(this.pdfPath)
     if (text === this.text) return
     this.text = text
+    // edited outside the app: our recorded sections may no longer describe
+    // the file, so history starts over (same rule as any editor on reload)
+    this.history.clear()
     this.annotations = text.trim() ? parse(text).annotations : []
     this.onChange(this.annotations)
   }
@@ -155,9 +221,14 @@ export class AnnotationManager {
   }
 
   async updateNote(id: string, note: string): Promise<void> {
+    await this.update(id, { note })
+  }
+
+  /** Change note / colour / kind of one annotation in a single undo step. */
+  async update(id: string, patch: Partial<Pick<Annotation, 'note' | 'color' | 'kind'>>): Promise<void> {
     const a = this.annotations.find((x) => x.id === id)
     if (!a) return
-    await this.write(upsertAnnotation(this.text, { ...a, note }, this.pdfPath, this.meta, labels()))
+    await this.write(upsertAnnotation(this.text, { ...a, ...patch }, this.pdfPath, this.meta, labels()))
     this.annotations = parse(this.text).annotations
     this.onChange(this.annotations)
   }
@@ -174,8 +245,79 @@ export class AnnotationManager {
     this.assetUrls.clear()
   }
 
+  // ── undo / redo ──
+
+  get canUndo(): boolean { return this.history.canUndo }
+  get canRedo(): boolean { return this.history.canRedo }
+  /** label of the step the next undo / redo would apply (button tooltips) */
+  get nextUndo(): UndoLabel | undefined { return this.history.peekUndo()?.label }
+  get nextRedo(): UndoLabel | undefined { return this.history.peekRedo()?.label }
+
+  undo(): Promise<UndoResult> { return this.step('undo') }
+  redo(): Promise<UndoResult> { return this.step('redo') }
+
+  private async step(dir: 'undo' | 'redo'): Promise<UndoResult> {
+    if (this.undoBusy) return { ok: false, reason: 'busy' }
+    const entry = dir === 'undo' ? this.history.peekUndo() : this.history.peekRedo()
+    if (!entry) return { ok: false, reason: 'empty' }
+    this.undoBusy = true
+    try {
+      // the focus refresh may not have run yet (e.g. SoloMD saved while we
+      // kept focus) — look at the file itself before splicing into it
+      const { text } = await platform().readSidecar(this.pdfPath)
+      const next = text === this.text ? applyEdit(text, entry.edit, dir) : null
+      if (next === null) {
+        this.history.clear()
+        if (text !== this.text) {
+          this.text = text
+          this.annotations = text.trim() ? parse(text).annotations : []
+        }
+        this.onChange(this.annotations)
+        return { ok: false, reason: 'conflict' }
+      }
+      await this.restoreAssets(entry, next)
+      this.sidecarLocation = await platform().writeSidecar(this.pdfPath, next)
+      this.text = next
+      if (dir === 'undo') this.history.undo()
+      else this.history.redo()
+      this.annotations = parse(next).annotations
+      this.onChange(this.annotations)
+      return { ok: true, label: entry.label }
+    } catch (err) {
+      return { ok: false, reason: 'error', message: (err as Error).message }
+    } finally {
+      this.undoBusy = false
+    }
+  }
+
+  /** put back any image the restored sections reference but the disk lost */
+  private async restoreAssets(entry: UndoEntry, text: string): Promise<void> {
+    for (const [name, bytes] of entry.assets) {
+      if (!text.includes(name)) continue
+      const have = await platform().readSidecarAsset(this.pdfPath, name).catch(() => null)
+      if (!have) await platform().writeSidecarAsset(this.pdfPath, name, bytes)
+    }
+  }
+
+  private async record(oldText: string, newText: string): Promise<void> {
+    const edit = diffSidecar(oldText, newText)
+    if (!edit) return
+    const assets = new Map<string, Uint8Array>()
+    for (const c of edit.changes) {
+      for (const sec of [c.before, c.after]) {
+        const img = sectionAnnot(sec)?.image
+        if (!img || assets.has(img)) continue
+        const bytes = await platform().readSidecarAsset(this.pdfPath, img).catch(() => null)
+        if (bytes) assets.set(img, bytes)
+      }
+    }
+    this.history.push({ edit, label: describe(edit), assets })
+  }
+
   private async write(newText: string): Promise<void> {
+    const old = this.text
     this.sidecarLocation = await platform().writeSidecar(this.pdfPath, newText)
     this.text = newText
+    await this.record(old, newText)
   }
 }

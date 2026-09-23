@@ -20,7 +20,7 @@ import { t } from './i18n'
 import { exportMarkdown } from './export'
 import { openDocument } from './viewer/loader'
 import { PdfViewerController, type SelectionInfo } from './viewer/controller'
-import { AnnotationManager } from './annotations/manager'
+import { AnnotationManager, undoLabelText } from './annotations/manager'
 import { printDocument } from './print'
 import { initWakeLock, setKeepAwake } from './wakelock'
 import TabBar from './components/TabBar.vue'
@@ -445,11 +445,46 @@ function onFocus(): void {
   void annotManagers.get(tab.id)?.refresh()
 }
 
+// ── undo / redo (annotation edits of the active document) ──
+async function undoAnnot(dir: 'undo' | 'redo'): Promise<void> {
+  const tab = store.activeTab
+  const mgr = tab && annotManagers.get(tab.id)
+  if (!mgr) return
+  const r = dir === 'undo' ? await mgr.undo() : await mgr.redo()
+  if (r.ok) showToast(t(dir === 'undo' ? 'un.undone' : 'un.redone', { action: undoLabelText(r.label) }))
+  else if (r.reason === 'empty') showToast(t(dir === 'undo' ? 'un.nothingUndo' : 'un.nothingRedo'))
+  else if (r.reason === 'conflict') showToast(t('un.conflict'))
+  else if (r.reason === 'error') showToast(t('app.annotSaveFail', { msg: r.message ?? '' }))
+}
+
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+/**
+ * ⌘Z / ⇧⌘Z on macOS; Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z elsewhere. Returns
+ * 'undo' | 'redo' for an undo chord, null otherwise. Text fields keep their
+ * own native undo — the caller checks isTyping first.
+ */
+function undoChord(e: KeyboardEvent): 'undo' | 'redo' | null {
+  if (e.altKey) return null
+  const mod = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
+  if (!mod) return null
+  const k = e.key.toLowerCase()
+  if (k === 'z') return e.shiftKey ? 'redo' : 'undo'
+  if (k === 'y' && !IS_MAC && !e.shiftKey) return 'redo'
+  return null
+}
+
 // ── keyboard ──
 function onKey(e: KeyboardEvent): void {
   const mod = e.metaKey || e.ctrlKey
   const tab = store.activeTab
   const ctrl = tab ? controllers.get(tab.id) : undefined
+  const chord = undoChord(e)
+  if (chord) {
+    if (isTyping(e) || !tab || !annotManagers.get(tab.id)) return
+    e.preventDefault()
+    void undoAnnot(chord)
+    return
+  }
   if (mod && e.key === 'o') { e.preventDefault(); void pickAndOpen() }
   else if (mod && e.key === 'f') { e.preventDefault(); if (tab) searchOpen.value = true }
   else if (mod && e.key === 'w') { e.preventDefault(); if (tab) onCloseTab(tab.id) }
@@ -474,7 +509,7 @@ function onKey(e: KeyboardEvent): void {
 }
 function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement
-  return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable
+  return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable
 }
 
 function rotateDoc(delta: number): void {
@@ -656,6 +691,9 @@ onMounted(async () => {
     toggleAutoScroll,
     toggleBookmark,
     highlightSelection,
+    undo: () => undoAnnot('undo'),
+    redo: () => undoAnnot('redo'),
+    toast: () => toast.value,
     setTool: (k: 'none' | 'note' | 'region') => { tool.value = k },
     openDocTools: () => { docToolsOpen.value = true },
     setReadAloud: (on: boolean) => { readAloud.value = on },
@@ -762,6 +800,8 @@ watch(() => store.settings.theme, () => {
           @bookmark="toggleBookmark"
           @doc-tools="docToolsOpen = true"
           @speak="readAloud = !readAloud"
+          @undo="undoAnnot('undo')"
+          @redo="undoAnnot('redo')"
           :speaking="readAloud"
           @tool="(k) => (tool = tool === k ? 'none' : k)"
           :bookmarked="!!currentBookmark"
@@ -801,6 +841,8 @@ watch(() => store.settings.theme, () => {
             @selection="(s) => (selection = s)"
             @ocr="ocrOpen = true"
             @chrome="chromeReveal = !chromeReveal"
+            @undo="undoAnnot('undo')"
+            @redo="undoAnnot('redo')"
           />
         </template>
         <div v-if="noTextBanner" class="notext-banner">
