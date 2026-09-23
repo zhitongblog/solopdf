@@ -3854,7 +3854,7 @@ dependencies = [
 
 [[package]]
 name = "solopdf"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "cc",
  "djvu-rs",

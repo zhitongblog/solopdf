@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## v0.7.1 — 0.7 的第一个公开版本
+
+功能与 v0.7.0 相同。v0.7.0 打了 tag 但没有发出 GitHub Release（发布说明漏写），
+这一版把它发出来，并带上发布过程中修掉的构建问题：
+
+- 老版本 Xcode（CI 的 macOS 机器）编译翻译模块时不再失败，退回「翻译不可用」
+- iOS 上翻译模块的链接问题（compiler-rt 归档、Translation / SwiftUI 弱链接）
+- 页码框认全角输入（中文输入法下打的「＃３」「２」）
+- 工具栏挤的时候按钮文字不再折成两行
+
 ## v0.7.0 — 链接、手绘、撤销、分屏、翻译
 
 对照主流阅读器（Acrobat / PDF Expert / Zotero / Sioyek / Okular / 福昕）补上的一批：
