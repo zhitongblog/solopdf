@@ -18,7 +18,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { gunzipSync } from 'fflate'
-import { parse, upsertAnnotation, genId, normalize, pageLinks } from '@solopdf/core'
+import { parse, upsertAnnotation, genId, normalize, pageLinks, normalizePageLabels, compactPageLabels } from '@solopdf/core'
 
 const ALLOW_WRITE = process.argv.includes('--allow-write')
 
@@ -70,18 +70,22 @@ async function canvasBackend() {
 
 server.tool(
   'solopdf_info',
-  '读取 PDF 文档信息：页数、书签数、元数据、是否加密',
+  '读取 PDF 文档信息：页数、书签数、元数据、页码标签（印刷页码，如罗马数字前言；按物理页区间压缩给出，null=无标签）',
   { path: z.string(), password: z.string().optional() },
   async ({ path, password }) => {
     const doc = await open(path, password)
     const meta = await doc.getMetadata().catch(() => null)
     const outline = await doc.getOutline().catch(() => null)
     const count = (items) => (!items ? 0 : items.reduce((n, it) => n + 1 + count(it.items), 0))
+    const labels = normalizePageLabels(await doc.getPageLabels().catch(() => null), doc.numPages)
     const out = {
       pages: doc.numPages,
       title: meta?.info?.Title || null,
       producer: meta?.info?.Producer || null,
       outlineEntries: count(outline),
+      // physical page numbers stay the addressing scheme everywhere else;
+      // these are the numbers printed on the paper
+      pageLabels: labels ? compactPageLabels(labels) : null,
     }
     await doc.destroy()
     return text(out)

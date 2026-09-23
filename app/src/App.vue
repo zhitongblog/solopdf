@@ -13,7 +13,7 @@ import { computed, onMounted, onBeforeUnmount, ref, watch, nextTick } from 'vue'
 import {
   store, controllers, documents, annotManagers, epubBooks, txtBooks, comicBooks, initStore, newTab, closeTab,
   addRecent, savePosition, restorePosition, effectiveTheme, docPrefsFor, saveDocPrefs,
-  addBookmark, removeBookmark, bookmarkAt, type TabState,
+  addBookmark, removeBookmark, bookmarkAt, paperActive, labelOf, type TabState,
 } from './store'
 import { platform, isTauri, isMobile, openExternal } from './platform'
 import { t } from './i18n'
@@ -24,6 +24,8 @@ import { navState, remember, jump, goBack, goForward, forgetNav } from './nav'
 import { AnnotationManager } from './annotations/manager'
 import { printDocument } from './print'
 import { initWakeLock, setKeepAwake } from './wakelock'
+import { setWindowFullscreen, watchFullscreenExit } from './fullscreen'
+import { normalizePageLabels } from '@solopdf/core'
 import TabBar from './components/TabBar.vue'
 import Toolbar from './components/Toolbar.vue'
 import Sidebar from './components/Sidebar.vue'
@@ -44,6 +46,7 @@ import LibraryView from './components/LibraryView.vue'
 import LibrarySearch from './components/LibrarySearch.vue'
 import ComicView from './components/ComicView.vue'
 import LinkPreview from './components/LinkPreview.vue'
+import PresentationView from './components/PresentationView.vue'
 import { noteOpened, captureCover, addToLibrary } from './library'
 import { startStats, stopStats, noteTurn } from './stats'
 import { speaker, startReading, stopReading } from './readaloud'
@@ -79,8 +82,17 @@ function showToast(msg: string): void {
 // ── theme ──
 function applyTheme(): void {
   document.documentElement.classList.toggle('dark', effectiveTheme() === 'dark')
+  applyPaper()
+}
+/** paper colour lives on <html data-paper> so the page tint (styles.css)
+ *  reaches the reading view and presentation mode alike */
+function applyPaper(): void {
+  const p = paperActive()
+  if (p === 'white') delete document.documentElement.dataset.paper
+  else document.documentElement.dataset.paper = p
 }
 watch(() => store.settings.theme, applyTheme)
+watch(() => [store.settings.paper, store.settings.darkPdf], applyPaper)
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme)
 
 /**
@@ -289,6 +301,10 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
     ctrl.onExternalLink = (url) => { void openExternal(url) }
     ctrl.onPreview = (req) => onLinkPreview(tab.id, req)
     await ctrl.init()
+    // printed page numbers — display only, never written anywhere
+    void doc.getPageLabels()
+      .then((l) => { tab.pageLabels = normalizePageLabels(l, doc.numPages) })
+      .catch(() => {})
 
     const mgr = new AnnotationManager(path, tab.name, tab.stripExcerpts)
     annotManagers.set(tab.id, mgr)
@@ -497,7 +513,7 @@ function toggleBookmark(): void {
     ratio: ctrl?.getPosition().ratio,
     // a bookmark with no name is a page number you have to remember; default
     // to the page so the list is at least scannable
-    label: t('app.bookmarkLabel', { page: tab.currentPage }),
+    label: t('app.bookmarkLabel', { page: labelOf(tab, tab.currentPage) }),
   })
   showToast(t('app.bookmarkAdded'))
 }
@@ -526,6 +542,17 @@ function onKey(e: KeyboardEvent): void {
   const mod = e.metaKey || e.ctrlKey
   const tab = store.activeTab
   const ctrl = tab ? controllers.get(tab.id) : undefined
+  if (presenting.value) return // PresentationView owns the keyboard
+  // full screen: F11 (Windows/Linux habit) or ⌃⌘F (macOS standard) — checked
+  // before ⌘F so the macOS chord doesn't open search
+  if (e.key === 'F11' || (e.metaKey && e.ctrlKey && e.key.toLowerCase() === 'f')) {
+    e.preventDefault(); void setReadingFs(!readingFs.value); return
+  }
+  // presentation: F5 (PowerPoint/Keynote habit) or ⌘⇧P / Ctrl+Shift+P —
+  // checked before ⌘P (print), which it would otherwise shadow
+  if (e.key === 'F5' || (mod && e.shiftKey && e.key.toLowerCase() === 'p')) {
+    e.preventDefault(); startPresentation(); return
+  }
   // back/forward: ⌥←/⌥→ everywhere, ⌘[ / ⌘] on a Mac
   if (!isTyping(e) && !e.shiftKey) {
     const back = (e.altKey && !mod && e.key === 'ArrowLeft') || ((IS_MAC ? e.metaKey : e.ctrlKey) && e.key === '[')
@@ -545,7 +572,12 @@ function onKey(e: KeyboardEvent): void {
   else if (mod && e.key === ',') { e.preventDefault(); settingsOpen.value = !settingsOpen.value }
   else if (mod && e.key === 'b') { e.preventDefault(); store.settings.sidebarOpen = !store.settings.sidebarOpen }
   else if (mod && e.key === 'd') { e.preventDefault(); toggleBookmark() }
-  else if (!mod && e.key === 'Escape') { searchOpen.value = false; settingsOpen.value = false }
+  else if (!mod && e.key === 'Escape') {
+    // Esc peels one layer: an open panel first, then full-screen reading
+    if (searchOpen.value || settingsOpen.value || viewMenuOpen.value) {
+      searchOpen.value = false; settingsOpen.value = false; viewMenuOpen.value = false
+    } else if (readingFs.value) void setReadingFs(false)
+  }
   else if (!mod && tab && ctrl && !tab.bookMode && !isTyping(e)) {
     if (e.key === 'j' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); ctrl.turnPage(1) }
     else if (e.key === 'k' || e.key === 'PageUp') { e.preventDefault(); ctrl.turnPage(-1) }
@@ -611,6 +643,82 @@ async function exportMd(): Promise<void> {
     showToast(t('app.exportFail', { msg: (err as Error).message }))
   }
 }
+
+// ── full-screen reading + presentation ──
+/** hides tab bar / toolbar / sidebar around the PDF view; the layout
+ *  (zoom, spread, scroll mode) stays exactly as it was */
+const readingFs = ref(false)
+const presenting = ref<{
+  tabId: number
+  page: number
+  /** reading position to put back on exit, to the pixel */
+  pos: { page: number; ratio: number }
+} | null>(null)
+const pdfViewActive = computed(() => {
+  void store.docTick
+  const tab = store.activeTab
+  return !!tab && tab.kind === 'pdf' && !tab.bookMode && !tab.loadError && controllers.has(tab.id)
+})
+const chromeHidden = computed(() => readingFs.value && pdfViewActive.value)
+
+/** re-fit after the chrome around the scroll host appears/disappears — no
+ *  window resize event fires for that, and the position must survive it */
+async function refitActive(): Promise<void> {
+  const tab = store.activeTab
+  const ctrl = tab && controllers.get(tab.id)
+  if (!ctrl) return
+  const pos = ctrl.getPosition()
+  await nextTick()
+  ctrl.onResize()
+  ctrl.restorePosition(pos)
+}
+
+async function setReadingFs(on: boolean): Promise<void> {
+  if (on === readingFs.value) return
+  if (on && !pdfViewActive.value) return
+  readingFs.value = on
+  viewMenuOpen.value = false
+  if (!presenting.value) void setWindowFullscreen(on)
+  await refitActive()
+}
+
+function startPresentation(): void {
+  const tab = store.activeTab
+  const ctrl = tab && controllers.get(tab.id)
+  if (!tab || !ctrl || tab.kind !== 'pdf' || presenting.value) return
+  viewMenuOpen.value = false
+  searchOpen.value = false
+  selection.value = null
+  if (ctrl.autoScrolling) { ctrl.stopAutoScroll(); store.docTick++ }
+  // ask the controller, not tab.currentPage: that one trails the scroll by a frame
+  const pos = ctrl.getPosition()
+  presenting.value = { tabId: tab.id, page: pos.page, pos }
+  setKeepAwake(true) // nobody wants the deck to dim mid-talk
+  if (!readingFs.value) void setWindowFullscreen(true)
+}
+
+function stopPresentation(): void {
+  const p = presenting.value
+  if (!p) return
+  presenting.value = null
+  setKeepAwake(store.settings.keepAwake)
+  if (!readingFs.value) void setWindowFullscreen(false)
+  // the window changes size under the reading view as it leaves full
+  // screen: put the reader back now, and again once the resize has landed
+  const ctrl = controllers.get(p.tabId)
+  if (!ctrl) return
+  ctrl.restorePosition(p.pos)
+  setTimeout(() => { if (controllers.get(p.tabId) === ctrl) ctrl.restorePosition(p.pos) }, 450)
+}
+
+// the window left full screen on its own (browser Esc, green button)
+const unwatchFs = watchFullscreenExit(() => {
+  if (presenting.value) stopPresentation()
+  else if (readingFs.value) void setReadingFs(false)
+})
+// full screen belongs to the PDF view: switching to a book/comic tab ends it
+watch(pdfViewActive, (on) => { if (!on && readingFs.value) void setReadingFs(false) })
+watch(() => store.activeTabId, () => { if (presenting.value) stopPresentation() })
 
 // ── 图书模式 ──
 function toggleBookMode(): void {
@@ -745,6 +853,11 @@ onMounted(async () => {
     toggleAutoScroll,
     toggleBookmark,
     highlightSelection,
+    setReadingFs,
+    readingFs,
+    startPresentation,
+    stopPresentation,
+    presenting,
     setTool: (k: 'none' | 'note' | 'region') => { tool.value = k },
     openDocTools: () => { docToolsOpen.value = true },
     setReadAloud: (on: boolean) => { readAloud.value = on },
@@ -818,6 +931,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('mouseup', onMouseNav)
   window.removeEventListener('auxclick', onMouseNav)
   document.removeEventListener('scroll', onAnyScroll, true)
+  unwatchFs()
   stopStats()
   clearTimeout(resizeTimer)
   clearInterval(posTimer)
@@ -837,18 +951,25 @@ watch(() => store.settings.theme, () => {
 </script>
 
 <template>
-  <div class="app">
-    <TabBar v-if="!store.activeTab?.bookMode || chromeReveal" @new="pickAndOpen" @close="onCloseTab" />
+  <div class="app" :class="{ 'reading-fs': chromeHidden }">
+    <TabBar
+      v-if="(!store.activeTab?.bookMode || chromeReveal) && !chromeHidden"
+      @new="pickAndOpen"
+      @close="onCloseTab"
+    />
     <div class="app-main">
       <div
-        v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind === 'pdf'"
+        v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind === 'pdf' && !chromeHidden"
         class="sidebar-backdrop"
         @click="store.settings.sidebarOpen = false"
       ></div>
-      <Sidebar v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind === 'pdf'" @goto="gotoBookmark" />
+      <Sidebar
+        v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind === 'pdf' && !chromeHidden"
+        @goto="gotoBookmark"
+      />
       <div class="app-content">
         <Toolbar
-          v-if="store.activeTab && store.activeTab.kind === 'pdf' && (!store.activeTab.bookMode || chromeReveal)"
+          v-if="store.activeTab && store.activeTab.kind === 'pdf' && (!store.activeTab.bookMode || chromeReveal) && !chromeHidden"
           @search="searchOpen = !searchOpen"
           @settings="settingsOpen = true"
           @print="doPrint"
@@ -913,6 +1034,12 @@ watch(() => store.settings.theme, () => {
           :title="t('nav.backTip')"
           @click="navBack()"
         >← {{ t('nav.back') }}</button>
+        <button
+          v-if="chromeHidden"
+          class="fs-exit-btn"
+          :title="t('fs.exit')"
+          @click="setReadingFs(false)"
+        >⤡</button>
       </div>
     </div>
 
@@ -987,8 +1114,18 @@ watch(() => store.settings.theme, () => {
 
     <ViewMenu
       v-if="viewMenuOpen && store.activeTab && store.activeTab.kind === 'pdf'"
+      :reading-fs="readingFs"
       @close="viewMenuOpen = false"
       @toast="showToast"
+      @fullscreen="setReadingFs(!readingFs)"
+      @present="startPresentation"
+    />
+    <PresentationView
+      v-if="presenting"
+      :key="presenting.tabId"
+      :tab-id="presenting.tabId"
+      :start-page="presenting.page"
+      @exit="stopPresentation"
     />
     <ReadAloudBar v-if="readAloud && store.activeTab" @close="readAloud = false" />
 

@@ -1137,3 +1137,84 @@ h4.bk-block { font-size: 1.15em; }
 @media (min-width: 700px) and (pointer: fine) {
   .nav-pill { display: none; }
 }
+
+/* ── paper colour (View → Paper colour) ──
+   The tint sits UNDER the page canvas and the canvas multiplies onto it:
+   white paper takes the tint, black ink stays black, photos are only toned —
+   no filter on the canvas, so text keeps its exact pixels. html[data-paper]
+   is only set while pages aren't being dark-inverted (see paperActive). */
+html[data-paper] :is(.pv-page, .pres-page) { isolation: isolate; }
+html[data-paper] :is(.pv-page, .pres-page) canvas { mix-blend-mode: multiply; }
+html[data-paper='sepia'] :is(.pv-page, .pres-page) { background: #f4ecd8; }
+html[data-paper='green'] :is(.pv-page, .pres-page) { background: #cfe8cf; }
+html[data-paper='grey'] :is(.pv-page, .pres-page) { background: #e2e2e0; }
+
+.vm-paper { display: flex; gap: 6px; }
+.vm-paper .vm-swatch {
+  flex: 1; height: 44px; padding: 0; border: 1px solid var(--border);
+  border-radius: 8px; color: #333; font-size: 11px;
+  display: flex; align-items: flex-end; justify-content: center; padding-bottom: 4px;
+}
+.vm-paper .vm-swatch.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+.vm-paper.off .vm-swatch.active { outline-color: var(--border); }
+.vm-note { font-size: 11px; color: var(--fg-dim); margin: 6px 0 0; line-height: 1.4; }
+.vm-key { font-size: 10px; opacity: 0.6; margin-left: 4px; }
+.vm-row button.vm-fs, .vm-row button.vm-present { border: 1px solid var(--border); }
+
+/* ── toolbar page box with printed labels ── */
+.toolbar .page-nav input.page-box.labelled { width: 60px; }
+.toolbar .page-phys { color: var(--fg-dim); white-space: nowrap; font-size: 12px; }
+.thumb .thumb-phys { opacity: 0.7; }
+
+/* ── full-screen reading: chrome hidden, the page view takes everything ── */
+.app.reading-fs .app-content {
+  /* phones: the status bar / home indicator areas keep the reading background
+     (body paints under them) while the content steps clear of them */
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.fs-exit-btn {
+  position: absolute; z-index: 30;
+  top: calc(10px + env(safe-area-inset-top, 0px)); right: 16px;
+  width: 36px; height: 36px; border-radius: 18px; padding: 0;
+  font-size: 18px; line-height: 1;
+  background: var(--bg-panel); color: var(--fg); border: 1px solid var(--border);
+  box-shadow: var(--shadow); opacity: 0.35; transition: opacity 0.2s;
+}
+.fs-exit-btn:hover, .fs-exit-btn:focus-visible { opacity: 0.95; background: var(--bg-panel); }
+@media (hover: none) { .fs-exit-btn { opacity: 0.6; width: 44px; height: 44px; border-radius: 22px; } }
+
+/* ── presentation mode ── */
+.pres {
+  position: fixed; inset: 0; z-index: 200; background: #000;
+  display: flex; align-items: center; justify-content: center;
+  user-select: none; -webkit-user-select: none; touch-action: none;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+.pres.pres-idle, .pres.pres-idle * { cursor: none; }
+.pres-page { background: #fff; flex: none; }
+.pres-page canvas { display: block; }
+.pres-counter {
+  position: absolute; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.62); color: #fff; font-size: 14px;
+  padding: 5px 14px; border-radius: 16px; pointer-events: none;
+  opacity: 0; transition: opacity 0.35s; white-space: pre;
+  font-variant-numeric: tabular-nums;
+}
+.pres-exit {
+  position: absolute; top: calc(12px + env(safe-area-inset-top, 0px)); right: 14px;
+  width: 40px; height: 40px; border-radius: 20px; padding: 0;
+  background: rgba(255, 255, 255, 0.14); color: #fff; font-size: 17px;
+  opacity: 0; pointer-events: none; transition: opacity 0.35s;
+}
+.pres-exit:hover { background: rgba(255, 255, 255, 0.28); }
+.pres-counter.on, .pres-exit.on { opacity: 1; }
+.pres-exit.on { pointer-events: auto; }
+.pres-fail { position: absolute; color: #bbb; font-size: 14px; }
+/* phones: the toolbar scrolls sideways instead of squeezing labels onto two
+   lines (the page box grew a "(35 / 400)" suffix for labelled documents) */
+@media (max-width: 700px) {
+  .toolbar > * { flex-shrink: 0; }
+  .toolbar button { white-space: nowrap; }
+}
