@@ -31,6 +31,17 @@ export interface TabState {
   /** 图书模式的精确位置(块序):TXT 的 page 粒度是"章",长章恢复
    *  到章首体验差——存/恢复都以块为准,page 仅作章级回退 */
   bookBlock: number
+  /** 分屏(同一文档两个视口);null = 单视口。见 viewer/split.ts */
+  split: SplitState | null
+}
+
+export interface SplitState {
+  /** row = 左右并排,col = 上下 */
+  dir: 'row' | 'col'
+  /** 第一个视口所占比例 (0.2–0.8) */
+  ratio: number
+  /** 哪个视口有焦点:0 = 原视口 (.pv-scroll[data-tab]),1 = 分屏视口 */
+  focus: 0 | 1
 }
 
 export interface BookSettings {
@@ -108,6 +119,8 @@ export interface Settings {
   /** where the dictionary's explicit "search the web" button goes; %s = word.
    *  Never used automatically — SoloPDF makes no network request on its own. */
   webLookupUrl: string
+  /** 分屏方向(上次的选择) */
+  splitDir: 'row' | 'col'
 }
 
 export interface ComicSettings {
@@ -164,6 +177,7 @@ export const DEFAULT_SETTINGS: Settings = {
   comic: { spread: MOBILE ? 1 : 2, rtl: false, fit: 'height' },
   defaultColor: 'yellow',
   webLookupUrl: 'https://www.google.com/search?q=define+%s',
+  splitDir: 'row',
 }
 
 export function applyLanguage(): void {
@@ -197,6 +211,9 @@ export const store = reactive({
 
 /** non-reactive registries, keyed by tab id */
 export const controllers = new Map<number, PdfViewerController>()
+/** split view: the NON-focused pane's controller. `controllers` always holds
+ *  the focused one, so every existing caller acts on the focused pane. */
+export const splitControllers = new Map<number, PdfViewerController>()
 export const documents = new Map<number, PDFDocumentProxy>()
 export const annotManagers = new Map<number, AnnotationManager>()
 /** EPUB and MOBI/KF8 share a chapter interface, so they share a registry —
@@ -291,6 +308,7 @@ export function newTab(path: string): TabState {
     formsDirty: false,
     bookMode: false,
     bookBlock: 0,
+    split: null,
     kind: /\.epub$/i.test(path) ? 'epub'
       : /\.txt$/i.test(path) ? 'txt'
       : /\.(cbz|cbr)$/i.test(path) ? 'comic'
@@ -308,6 +326,8 @@ export function newTab(path: string): TabState {
 export function closeTab(id: number): void {
   const i = store.tabs.findIndex((t) => t.id === id)
   if (i < 0) return
+  splitControllers.get(id)?.destroy(true) // shares the document; the main one frees it
+  splitControllers.delete(id)
   controllers.get(id)?.destroy()
   controllers.delete(id)
   documents.delete(id)
@@ -337,6 +357,10 @@ export function saveDocPrefs(path: string, patch: DocPrefs): void {
     !Object.keys(next.pageRotations ?? {}).length
   if (empty) {
     delete store.docPrefs[path]
+    // the hash twin too — docPrefsFor() falls back to it, so leaving it
+    // behind brings a reset rotation back on the next open
+    const h = store.hashes[path]
+    if (h) delete store.docPrefs[`hash:${h}`]
   } else {
     store.docPrefs[path] = next
     const h = store.hashes[path]

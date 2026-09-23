@@ -8,10 +8,11 @@
  *     ├── new PdfViewerController . owns scroll DOM (non-reactive)
  *     ├── new AnnotationManager ... sidecar load + anchor resolve
  *     └── restorePosition() ....... path key, hash fallback (bg)
+ * Split view (two panes, one document) lives in viewer/split.ts.
  */
 import { computed, onMounted, onBeforeUnmount, ref, watch, nextTick } from 'vue'
 import {
-  store, controllers, documents, annotManagers, epubBooks, txtBooks, comicBooks, initStore, newTab, closeTab,
+  store, controllers, splitControllers, documents, annotManagers, epubBooks, txtBooks, comicBooks, initStore, newTab, closeTab,
   addRecent, savePosition, restorePosition, effectiveTheme, docPrefsFor, saveDocPrefs,
   addBookmark, removeBookmark, bookmarkAt, type TabState,
 } from './store'
@@ -21,6 +22,9 @@ import { exportMarkdown } from './export'
 import { openDocument } from './viewer/loader'
 import { PdfViewerController, type SelectionInfo } from './viewer/controller'
 import { AnnotationManager } from './annotations/manager'
+import {
+  openSplit, closeSplit, focusPane, startDividerDrag, splitAvailable, relayoutPanes,
+} from './viewer/split'
 import { printDocument } from './print'
 import { initWakeLock, setKeepAwake } from './wakelock'
 import TabBar from './components/TabBar.vue'
@@ -277,19 +281,16 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
     if (prefs.pageRotations) ctrl.setPageRotations(prefs.pageRotations)
     if (prefs.crop) ctrl.crop = prefs.crop
     controllers.set(tab.id, ctrl)
-    ctrl.onVisiblePage = (p) => {
-      if (p !== tab.currentPage) noteTurn()
-      tab.currentPage = p
-    }
-    ctrl.onSelection = (sel) => { selection.value = sel && store.activeTabId === tab.id ? sel : null }
-    ctrl.onFormsDirty = () => { tab.formsDirty = true }
+    wireController(tab, ctrl)
     await ctrl.init()
 
     const mgr = new AnnotationManager(path, tab.name, tab.stripExcerpts)
     annotManagers.set(tab.id, mgr)
     store.docTick++
     mgr.onChange = (annots) => {
-      void ctrl.setAnnotations(annots)
+      // both panes when split — a highlight made in one shows in the other
+      void controllers.get(tab.id)?.setAnnotations(annots)
+      void splitControllers.get(tab.id)?.setAnnotations(annots)
       store.docTick++ // 图书模式的内联高亮靠它重渲染
     }
     await mgr.load()
@@ -309,6 +310,49 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
       : String((err as Error)?.message ?? err)
     showToast(t('app.openFail', { msg: tab.loadError }))
   }
+}
+
+/** who set the current selection — only that controller may clear it */
+let selOwner: PdfViewerController | null = null
+
+/**
+ * Host callbacks for a viewer controller. Shared by the main pane and the
+ * split pane (viewer/split.ts); with split off `controllers.get(tab.id)` is
+ * always `ctrl`, so the gate below is a no-op for the single-pane path.
+ */
+function wireController(tab: TabState, ctrl: PdfViewerController): void {
+  ctrl.onVisiblePage = (p) => {
+    if (controllers.get(tab.id) !== ctrl) return // the unfocused pane doesn't drive the page box
+    if (p !== tab.currentPage) noteTurn()
+    tab.currentPage = p
+  }
+  ctrl.onSelection = (sel) => {
+    if (sel) {
+      if (store.activeTabId !== tab.id) return
+      selection.value = sel
+      selOwner = ctrl
+    } else if (selOwner === ctrl || !selOwner) {
+      // a pane (or background tab) that never owned the selection must not
+      // wipe the one the user just made in the other pane
+      selection.value = null
+      selOwner = null
+    }
+  }
+  ctrl.onFormsDirty = () => { tab.formsDirty = true }
+}
+
+// ── split view ──
+function toggleSplit(dir?: 'row' | 'col'): void {
+  const tab = store.activeTab
+  if (!tab || tab.kind !== 'pdf') return
+  if (tab.split && (!dir || dir === tab.split.dir)) void closeSplit(tab)
+  else void openSplit(tab, dir ?? store.settings.splitDir, (c) => wireController(tab, c))
+}
+function setSplit(dir: 'row' | 'col' | null): void {
+  const tab = store.activeTab
+  if (!tab) return
+  if (dir === null) void closeSplit(tab)
+  else void openSplit(tab, dir, (c) => wireController(tab, c))
 }
 
 function jumpAfterLoad(tabId: number, jump: { page: number; annot?: string }): void {
@@ -460,6 +504,10 @@ function onKey(e: KeyboardEvent): void {
   else if (mod && e.key === ',') { e.preventDefault(); settingsOpen.value = !settingsOpen.value }
   else if (mod && e.key === 'b') { e.preventDefault(); store.settings.sidebarOpen = !store.settings.sidebarOpen }
   else if (mod && e.key === 'd') { e.preventDefault(); toggleBookmark() }
+  else if (mod && e.key === '\\') {
+    e.preventDefault()
+    if (splitAvailable.value && tab?.kind === 'pdf' && !tab.bookMode) toggleSplit()
+  }
   else if (!mod && e.key === 'Escape') { searchOpen.value = false; settingsOpen.value = false }
   else if (!mod && tab && ctrl && !tab.bookMode && !isTyping(e)) {
     if (e.key === 'j' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); ctrl.turnPage(1) }
@@ -605,7 +653,7 @@ watch(
     bannerTimer = window.setTimeout(() => {
       const tab = store.activeTab
       if (!tab) { noTextBanner.value = false; return }
-      const pageEl = document.querySelector(`.pv-scroll[data-tab="${tab.id}"] .pv-page[data-page="${tab.currentPage}"]`)
+      const pageEl = controllers.get(tab.id)?.pageElement(tab.currentPage)
       noTextBanner.value = pageEl?.getAttribute('data-has-text') === '0'
     }, 400)
   },
@@ -616,6 +664,7 @@ function onResize(): void {
   clearTimeout(resizeTimer)
   resizeTimer = window.setTimeout(() => {
     for (const c of controllers.values()) c.onResize()
+    for (const c of splitControllers.values()) c.onResize()
   }, 150)
 }
 
@@ -645,6 +694,10 @@ onMounted(async () => {
     openLink: (url: string) => handleDeepLink(url),
     store,
     controllers,
+    splitControllers,
+    toggleSplit,
+    setSplit,
+    focusPane: (pane: 0 | 1) => { const t = store.activeTab; if (t) focusPane(t, pane) },
     annotManagers,
     documents,
     printDocument,
@@ -732,9 +785,16 @@ watch(() => store.activeTabId, () => { readAloud.value = false })
 // zoom / dark-pdf propagation
 watch(() => store.settings.darkPdf, (m) => {
   for (const c of controllers.values()) c.setDarkPdf(m)
+  for (const c of splitControllers.values()) c.setDarkPdf(m)
 })
 watch(() => store.settings.theme, () => {
   for (const c of controllers.values()) c.setDarkPdf(store.settings.darkPdf)
+  for (const c of splitControllers.values()) c.setDarkPdf(store.settings.darkPdf)
+})
+// the sidebar squeezes the content area on desktop: re-fit split panes
+watch(() => store.settings.sidebarOpen, () => {
+  const tab = store.activeTab
+  if (tab?.split) void relayoutPanes(tab)
 })
 </script>
 
@@ -762,6 +822,7 @@ watch(() => store.settings.theme, () => {
           @bookmark="toggleBookmark"
           @doc-tools="docToolsOpen = true"
           @speak="readAloud = !readAloud"
+          @split="toggleSplit()"
           :speaking="readAloud"
           @tool="(k) => (tool = tool === k ? 'none' : k)"
           :bookmarked="!!currentBookmark"
@@ -778,14 +839,38 @@ watch(() => store.settings.theme, () => {
         <template v-for="tab in store.tabs" :key="tab.id">
           <div
             v-show="tab.id === store.activeTabId && !tab.bookMode"
-            class="pv-scroll"
-            :data-tab="tab.id"
+            class="pv-panes"
+            :class="tab.split ? ['pv-split', `pv-split-${tab.split.dir}`] : null"
+            :style="tab.split ? { '--split-ratio': tab.split.ratio } : undefined"
           >
-            <div v-if="tab.loadError" class="welcome">
-              <h1>{{ t('app.cantOpen') }}</h1>
-              <p>{{ tab.loadError }}</p>
-              <button class="open-btn" @click="onCloseTab(tab.id)">{{ t('app.closeTab') }}</button>
+            <div
+              class="pv-scroll"
+              :class="{ 'pv-focused': tab.split?.focus === 0 }"
+              :data-tab="tab.id"
+              @pointerdown.capture="focusPane(tab, 0)"
+            >
+              <div v-if="tab.loadError" class="welcome">
+                <h1>{{ t('app.cantOpen') }}</h1>
+                <p>{{ tab.loadError }}</p>
+                <button class="open-btn" @click="onCloseTab(tab.id)">{{ t('app.closeTab') }}</button>
+              </div>
             </div>
+            <template v-if="tab.split">
+              <div
+                class="pv-divider"
+                role="separator"
+                :aria-orientation="tab.split.dir === 'row' ? 'vertical' : 'horizontal'"
+                :title="t('sp.dragTip')"
+                @pointerdown="startDividerDrag(tab, $event)"
+                @dblclick="tab.split.ratio = 0.5; relayoutPanes(tab)"
+              ></div>
+              <div
+                class="pv-scroll pv-split-pane"
+                :class="{ 'pv-focused': tab.split.focus === 1 }"
+                :data-split-tab="tab.id"
+                @pointerdown.capture="focusPane(tab, 1)"
+              ></div>
+            </template>
           </div>
           <ComicView
             v-if="tab.kind === 'comic' || tab.kind === 'djvu'"
@@ -798,7 +883,7 @@ watch(() => store.settings.theme, () => {
             v-show="tab.id === store.activeTabId"
             :tab-id="tab.id"
             :source="tab.kind === 'mobi' ? 'epub' : tab.kind"
-            @selection="(s) => (selection = s)"
+            @selection="(s) => { selection = s; selOwner = null }"
             @ocr="ocrOpen = true"
             @chrome="chromeReveal = !chromeReveal"
           />
@@ -875,6 +960,7 @@ watch(() => store.settings.theme, () => {
       v-if="viewMenuOpen && store.activeTab && store.activeTab.kind === 'pdf'"
       @close="viewMenuOpen = false"
       @toast="showToast"
+      @split="setSplit"
     />
     <ReadAloudBar v-if="readAloud && store.activeTab" @close="readAloud = false" />
 

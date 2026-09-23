@@ -12,8 +12,9 @@ import { detectCrop } from '../viewer/crop'
 import { NO_CROP, type CropRect } from '../viewer/geometry'
 import { t } from '../i18n'
 import { isMobile } from '../platform'
+import { splitAvailable } from '../viewer/split'
 
-const emit = defineEmits<{ close: []; toast: [msg: string] }>()
+const emit = defineEmits<{ close: []; toast: [msg: string]; split: [dir: 'row' | 'col' | null] }>()
 
 const tab = computed(() => store.activeTab)
 const ctrl = computed(() => { void store.docTick; return tab.value ? controllers.get(tab.value.id) : undefined })
@@ -158,6 +159,21 @@ const canFace = computed(() => !isMobile() || window.innerWidth >= 820)
         />
         {{ t('vm.coverAlone') }}
       </label>
+
+      <template v-if="splitAvailable && tab && !tab.bookMode">
+        <h4>{{ t('vm.split') }}</h4>
+        <div class="vm-seg">
+          <button :class="{ active: !tab.split }" @click="emit('split', null)">{{ t('vm.splitOff') }}</button>
+          <button
+            :class="{ active: tab.split?.dir === 'row' }"
+            @click="emit('split', 'row')"
+          >{{ t('vm.splitRow') }}</button>
+          <button
+            :class="{ active: tab.split?.dir === 'col' }"
+            @click="emit('split', 'col')"
+          >{{ t('vm.splitCol') }}</button>
+        </div>
+      </template>
 
       <h4>{{ t('vm.crop') }}</h4>
       <div class="vm-row">
