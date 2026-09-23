@@ -7,7 +7,7 @@ import { t } from '../i18n'
 defineProps<{ bookmarked?: boolean; tool?: 'none' | 'note' | 'region'; speaking?: boolean }>()
 defineEmits<{
   search: []; settings: []; print: []; saveFilled: []; exportMd: []; ocr: []
-  book: []; view: []; bookmark: []; tool: [kind: 'note' | 'region']; docTools: []; speak: []
+  book: []; view: []; rotate: []; bookmark: []; tool: [kind: 'note' | 'region']; docTools: []; speak: []
 }>()
 
 const tab = computed(() => store.activeTab)
@@ -39,6 +39,7 @@ function zoom(dir: 1 | -1): void {
     <button :title="t('tb.zoomIn')" @click="zoom(1)">+</button>
     <button :title="t('tb.fitWidthTip')" @click="ctrl?.setZoom('width')">{{ t('tb.fitWidth') }}</button>
     <button :title="t('tb.fitPageTip')" @click="ctrl?.setZoom('page')">{{ t('tb.fitPage') }}</button>
+    <button class="rotate-btn" :title="t('tb.rotate')" @click="$emit('rotate')"><svg class="rot-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.46-3.54" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12.5 1.5v3.5H9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <button
       class="view-btn"
       :class="{ active: ctrl?.autoScrolling }"

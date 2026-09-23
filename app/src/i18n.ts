@@ -39,6 +39,7 @@ const zhCN: Dict = {
   'tb.saveFilledTip': '保存已填写的表单为 PDF 副本',
   'tb.view': '视图',
   'tb.viewTip': '旋转 / 版式 / 裁边 / 自动滚动',
+  'tb.rotate': '向右旋转 90°（R；Shift+R 向左）',
   // view menu
   'vm.rotate': '旋转',
   'vm.ccw': '左转',
@@ -465,6 +466,7 @@ const zhTW: Dict = {
   'tb.saveFilledTip': '將已填寫的表單另存為 PDF 副本',
   'tb.view': '檢視',
   'tb.viewTip': '旋轉 / 版式 / 裁邊 / 自動捲動',
+  'tb.rotate': '向右旋轉 90°（R；Shift+R 向左）',
   // view menu
   'vm.rotate': '旋轉',
   'vm.ccw': '左轉',
@@ -879,6 +881,7 @@ const en: Dict = {
   'tb.saveFilledTip': 'Save the filled form as a PDF copy',
   'tb.view': 'View',
   'tb.viewTip': 'Rotation / layout / crop / auto-scroll',
+  'tb.rotate': 'Rotate 90° right (R; Shift+R rotates left)',
   // view menu
   'vm.rotate': 'Rotate',
   'vm.ccw': 'Left',
@@ -1293,6 +1296,7 @@ const ja: Dict = {
   'tb.saveFilledTip': '記入済みフォームを PDF コピーとして保存',
   'tb.view': '表示',
   'tb.viewTip': '回転 / レイアウト / 余白裁ち / 自動スクロール',
+  'tb.rotate': '右へ 90° 回転（R／Shift+R で左へ）',
   // view menu
   'vm.rotate': '回転',
   'vm.ccw': '左へ',

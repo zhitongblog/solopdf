@@ -759,6 +759,7 @@ watch(() => store.settings.theme, () => {
           @ocr="ocrOpen = true"
           @book="toggleBookMode"
           @view="viewMenuOpen = !viewMenuOpen"
+          @rotate="rotateDoc(90)"
           @bookmark="toggleBookmark"
           @doc-tools="docToolsOpen = true"
           @speak="readAloud = !readAloud"

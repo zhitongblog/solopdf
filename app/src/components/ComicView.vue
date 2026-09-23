@@ -212,6 +212,7 @@ onBeforeUnmount(() => {
         class="cm-slider" type="range" min="0" :max="Math.max(0, total - 1)"
         :value="index" @input="index = Number(($event.target as HTMLInputElement).value)"
       />
+      <button class="cm-rot-btn" :title="t('tb.rotate')" @click="rotate(90)"><svg class="rot-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.46-3.54" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12.5 1.5v3.5H9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </div>
 
     <button class="bk-chrome-btn" :title="t('bk.chrome')" @click.stop="emit('chrome')">‹</button>

@@ -561,6 +561,9 @@ h4.bk-block { font-size: 1.15em; }
 
 /* auto-scroll indicator on the toolbar button */
 .toolbar button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+/* ⟳ is drawn tiny in most UI fonts, so the rotate buttons use an SVG */
+.rot-icon { display: block; }
+.toolbar .rotate-btn, .cm-bar .cm-rot-btn { display: inline-flex; align-items: center; justify-content: center; }
 
 /* Phones: the view menu is a bottom sheet, not a dropdown — thumbs reach the
    bottom of a phone, not the top-right corner. Controls grow to 44pt targets. */
