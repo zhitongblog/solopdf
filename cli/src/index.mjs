@@ -20,7 +20,7 @@
  * file; nothing here ever modifies its input.
  */
 import { readFile } from 'node:fs/promises'
-import { existsSync, readFileSync as require$readFileSync } from 'node:fs'
+import { existsSync, statSync, readFileSync as require$readFileSync } from 'node:fs'
 import path from 'node:path'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import {
@@ -210,19 +210,18 @@ async function cmdExportMd(file) {
 
 /** locate a Rust helper binary (SOLOPDF_<NAME>_BIN overrides) */
 function nativeBin(name) {
-  const env = process.env[`SOLOPDF_${name.toUpperCase().replace(/-/g, '_')}_BIN`]
+  const key = name.toUpperCase().replace(/-/g, '_') // SOLOPDF_OCR
+  const env = process.env[`${key}_BIN`] ?? process.env[`SOLOPDF_${key}_BIN`]
   if (env) return env
   const here = path.dirname(new URL(import.meta.url).pathname)
   const exe = process.platform === 'win32' ? `${name}.exe` : name
-  for (const rel of [
-    `../../app/src-tauri/target/release/${exe}`,
-    `../../app/src-tauri/target/debug/${exe}`,
-    exe, // PATH
-  ]) {
-    const p = rel === exe ? exe : path.resolve(here, rel)
-    if (rel === exe || existsSync(p)) return p
-  }
-  return exe
+  // the NEWER of release/debug: a stale release build left over from an
+  // older checkout would otherwise shadow the one just compiled
+  const built = ['release', 'debug']
+    .map((p) => path.resolve(here, `../../app/src-tauri/target/${p}/${exe}`))
+    .filter((p) => existsSync(p))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
+  return built[0] ?? exe // PATH
 }
 
 const ocrBin = () => nativeBin('solopdf-ocr')

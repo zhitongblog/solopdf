@@ -1369,7 +1369,6 @@ g.pv-hl-flash, .pv-textbox.pv-hl-flash { animation: drawflash 1.5s ease; }
   .dt-swatch { width: 28px; height: 28px; }
   .at-hint.dt-bar { left: 8px; right: 8px; transform: none; padding: 8px; }
 }
-}
 
 /* ── split view: two panes on one document (viewer/split.ts) ──
    .pv-panes wraps every PDF tab's scroll host; unsplit it is a plain flex

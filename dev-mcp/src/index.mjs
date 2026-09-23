@@ -9,7 +9,7 @@
  *   claude mcp add solopdf -- node /path/to/dev-mcp/src/index.mjs [--allow-write]
  */
 import { readFile, writeFile, mkdtemp, rm, readdir, mkdir } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import os from 'node:os'
 import nodePath from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -39,29 +39,23 @@ function sidecarPath(pdfPath) {
 
 const text = (s) => ({ content: [{ type: 'text', text: typeof s === 'string' ? s : JSON.stringify(s, null, 2) }] })
 
-/** the native document driver, same lookup rule as the CLI */
-function docBin() {
-  if (process.env.SOLOPDF_DOC_BIN) return process.env.SOLOPDF_DOC_BIN
+/**
+ * A native helper (solopdf-doc / solopdf-ocr), same lookup rule as the CLI:
+ * env override, else the NEWER of the release/debug builds (a stale release
+ * build must not shadow the one just compiled), else PATH.
+ */
+function nativeBin(name, envKey) {
+  if (process.env[envKey]) return process.env[envKey]
   const here = nodePath.dirname(new URL(import.meta.url).pathname)
-  const exe = process.platform === 'win32' ? 'solopdf-doc.exe' : 'solopdf-doc'
-  for (const rel of [`../../app/src-tauri/target/release/${exe}`, `../../app/src-tauri/target/debug/${exe}`]) {
-    const p = nodePath.resolve(here, rel)
-    if (existsSync(p)) return p
-  }
-  return exe // PATH
+  const exe = process.platform === 'win32' ? `${name}.exe` : name
+  const built = ['release', 'debug']
+    .map((p) => nodePath.resolve(here, `../../app/src-tauri/target/${p}/${exe}`))
+    .filter((p) => existsSync(p))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
+  return built[0] ?? exe
 }
-
-/** the native OCR/translation helper, same lookup rule as the CLI */
-function ocrBin() {
-  if (process.env.SOLOPDF_OCR_BIN) return process.env.SOLOPDF_OCR_BIN
-  const here = nodePath.dirname(new URL(import.meta.url).pathname)
-  const exe = process.platform === 'win32' ? 'solopdf-ocr.exe' : 'solopdf-ocr'
-  for (const rel of [`../../app/src-tauri/target/release/${exe}`, `../../app/src-tauri/target/debug/${exe}`]) {
-    const p = nodePath.resolve(here, rel)
-    if (existsSync(p)) return p
-  }
-  return exe // PATH
-}
+const docBin = () => nativeBin('solopdf-doc', 'SOLOPDF_DOC_BIN')
+const ocrBin = () => nativeBin('solopdf-ocr', 'SOLOPDF_OCR_BIN')
 
 /**
  * pdf.js polyfills its canvas globals from ITS OWN copy of @napi-rs/canvas;

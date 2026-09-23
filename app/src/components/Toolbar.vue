@@ -42,7 +42,10 @@ watch(shownLabel, (l) => { pageInput.value = l }, { immediate: true })
 /** labelled docs show the physical position as a secondary "(35 / 400)" */
 const labelled = computed(() => !!tab.value?.pageLabels)
 
-function gotoPage(e: FocusEvent): void {
+// Enter jumps itself instead of relying on the blur it triggers: blur() on an
+// input in an unfocused window fires no blur event. The blur that may follow
+// finds the page already reached and does nothing.
+function gotoPage(e: Event): void {
   const tb = tab.value
   const c = ctrl.value
   const el = e.target as HTMLInputElement
@@ -74,7 +77,7 @@ function zoom(dir: 1 | -1): void {
         :class="{ labelled }"
         :title="labelled ? t('tb.pageLabelTip') : ''"
         @focus="($event.target as HTMLInputElement).select()"
-        @keydown.enter="($event.target as HTMLInputElement).blur()"
+        @keydown.enter="gotoPage($event); ($event.target as HTMLInputElement).blur()"
         @blur="gotoPage"
       />
       <span v-if="labelled" class="page-phys">({{ tab.currentPage }} / {{ tab.numPages }})</span>
