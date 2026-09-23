@@ -3,11 +3,12 @@ import { computed, ref, watch } from 'vue'
 import { store, controllers } from '../store'
 import { isMobile, isTauri } from '../platform'
 import { t } from '../i18n'
+import { isDrawTool, TOOL_GLYPH, type DrawTool } from '../annotations/drawing'
 
-defineProps<{ bookmarked?: boolean; tool?: 'none' | 'note' | 'region'; speaking?: boolean }>()
+defineProps<{ bookmarked?: boolean; tool?: 'none' | 'note' | 'region' | DrawTool; speaking?: boolean }>()
 defineEmits<{
   search: []; settings: []; print: []; saveFilled: []; exportMd: []; ocr: []
-  book: []; view: []; bookmark: []; tool: [kind: 'note' | 'region']; docTools: []; speak: []
+  book: []; view: []; bookmark: []; tool: [kind: 'note' | 'region' | 'draw']; docTools: []; speak: []
 }>()
 
 const tab = computed(() => store.activeTab)
@@ -51,6 +52,14 @@ function zoom(dir: 1 | -1): void {
     </button>
     <button :class="{ active: tool === 'note' }" :title="t('tb.noteTool')" @click="$emit('tool', 'note')">✎</button>
     <button :class="{ active: tool === 'region' }" :title="t('tb.regionTool')" @click="$emit('tool', 'region')">⬚</button>
+    <!-- one button for the whole drawing group: pen, eraser, text box,
+         shapes — the tools themselves live in the draw bar it opens -->
+    <button
+      class="draw-btn"
+      :class="{ active: tool && isDrawTool(tool) }"
+      :title="t('tb.drawTool')"
+      @click="$emit('tool', 'draw')"
+    >{{ tool && isDrawTool(tool) ? TOOL_GLYPH[tool] : '🖊' }}</button>
     <button
       class="book-toggle"
       :class="{ active: tab.bookMode }"

@@ -1063,3 +1063,88 @@ h4.bk-block { font-size: 1.15em; }
 .st-cache-btns { display: flex; gap: 6px; }
 .st-shell.phone .settings-row { min-height: 48px; }
 .st-shell.phone .st-body input[type='checkbox'] { width: 22px; height: 22px; }
+
+/* ── drawn marks: ink / shapes / text boxes ──
+   Their own layer ABOVE the text layer (strokes must be clickable), but
+   click-through everywhere except the strokes themselves, so reading and
+   text selection around a doodle keep working. */
+.pv-draw-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.pv-draw-svg { position: absolute; left: 0; top: 0; overflow: visible; }
+.pv-draw-hit { stroke: transparent; pointer-events: stroke; cursor: pointer; touch-action: none; }
+.pv-textbox {
+  position: absolute; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.25;
+  padding: 2px; transform-origin: center; pointer-events: auto; cursor: pointer;
+  font-family: Helvetica, Arial, "PingFang SC", "Hiragino Sans", "Microsoft YaHei", sans-serif;
+}
+/* smart-dark pages are inverted canvases; the ink goes with the paper */
+.pv-page.pv-inv .pv-draw-svg, .pv-page.pv-inv .pv-textbox { filter: invert(0.93) hue-rotate(180deg); }
+.pv-draw-sel path:not(.pv-draw-hit) { filter: drop-shadow(0 0 1.5px var(--accent)); }
+.pv-erased { opacity: 0.12; }
+g.pv-hl-flash, .pv-textbox.pv-hl-flash { animation: drawflash 1.5s ease; }
+@keyframes drawflash {
+  0%, 40% { filter: drop-shadow(0 0 4px var(--accent)) drop-shadow(0 0 2px var(--accent)); }
+  100% { filter: none; }
+}
+.pv-scroll.pv-drawing { -webkit-user-select: none; user-select: none; }
+
+/* armed drawing tools */
+.dt-layer { cursor: crosshair; touch-action: none; }
+.dt-layer.dt-eraser { cursor: cell; }
+.dt-layer.dt-text { cursor: text; }
+/* stylus mode: fingers fall through to the page and scroll it */
+.dt-layer.dt-pen-only { pointer-events: none; }
+.dt-live { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; z-index: 40; pointer-events: none; }
+.at-hint.dt-bar {
+  flex-direction: column; align-items: stretch; gap: 6px; padding: 6px 10px;
+  border-radius: 14px; white-space: normal; max-width: calc(100vw - 16px);
+}
+.dt-row { display: flex; align-items: center; justify-content: center; gap: 4px; flex-wrap: wrap; }
+.dt-tool, .dt-size, .dt-act {
+  min-width: 30px; height: 30px; padding: 0 6px; font-size: 15px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.dt-tool.on, .dt-size.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.dt-size i { display: block; border-radius: 50%; }
+.dt-swatch { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; padding: 0; }
+.dt-swatch.on { border-color: var(--fg); box-shadow: 0 0 0 2px var(--bg-panel) inset; }
+.dt-sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+.dt-note { font-size: 12px; color: var(--fg-dim); }
+.dt-done { font-weight: 600; padding: 0 12px; }
+
+/* selection of a drawn mark */
+.ds-box {
+  position: fixed; z-index: 30; border: 1.5px dashed var(--accent); border-radius: 3px;
+  cursor: move; touch-action: none;
+}
+.ds-handle {
+  position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
+  background: var(--bg-panel); border: 2px solid var(--accent); touch-action: none;
+}
+.ds-c0 { left: 0; top: 0; cursor: nwse-resize; }
+.ds-c1 { left: 100%; top: 0; cursor: nesw-resize; }
+.ds-c2 { left: 100%; top: 100%; cursor: nwse-resize; }
+.ds-c3 { left: 0; top: 100%; cursor: nesw-resize; }
+.ds-handle.ds-end { position: fixed; z-index: 31; cursor: crosshair; }
+.ds-bar {
+  position: fixed; z-index: 32; display: flex; align-items: center; gap: 4px;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow); padding: 5px 8px;
+}
+.ds-bar.docked {
+  left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom));
+  justify-content: center; flex-wrap: wrap; padding: 8px; border-radius: 14px;
+}
+.tb-editor {
+  position: fixed; z-index: 45; margin: 0; padding: 2px; line-height: 1.25;
+  background: rgba(255, 255, 255, 0.94); border: 1.5px solid var(--accent); border-radius: 3px;
+  font-family: Helvetica, Arial, "PingFang SC", "Hiragino Sans", "Microsoft YaHei", sans-serif;
+  resize: horizontal; overflow: hidden; outline: none; color-scheme: light;
+}
+.ai-textbox { white-space: pre-wrap; font-size: 13px; margin-bottom: 4px; }
+
+@media (max-width: 700px) {
+  .ds-handle { width: 22px; height: 22px; margin: -11px 0 0 -11px; }
+  .dt-tool, .dt-size, .dt-act { min-width: 36px; height: 36px; font-size: 16px; }
+  .dt-swatch { width: 28px; height: 28px; }
+  .at-hint.dt-bar { left: 8px; right: 8px; transform: none; padding: 8px; }
+}

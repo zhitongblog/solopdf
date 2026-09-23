@@ -13,7 +13,8 @@
  */
 import { computed, ref } from 'vue'
 import { store, controllers, annotManagers } from '../../store'
-import { colorTriple, docOps, pickSavePath, type AnnotSpec } from '../../platform/docops'
+import { exportSpec, isDrawn } from '@solopdf/core'
+import { docOps, pickSavePath, type AnnotSpec } from '../../platform/docops'
 import { t } from '../../i18n'
 
 const emit = defineEmits<{ toast: [msg: string]; open: [path: string] }>()
@@ -38,16 +39,17 @@ function buildSpecs(): AnnotSpec[] {
   for (const a of exportable.value) {
     const resolved = c?.resolvedFor(a.id)
     if (!resolved || resolved.orphan || !resolved.quads.length) continue
-    out.push({
+    // drawn marks export their own geometry (ink strokes, line ends, the
+    // text box's text); text marks go at their resolved position
+    const spec = exportSpec(a, {
       page: resolved.page,
-      kind: a.kind ?? 'highlight',
-      quads: resolved.quads.map((q) => [q.x1, q.y1, q.x2, q.y2] as [number, number, number, number]),
-      color: colorTriple(a.color),
+      quads: isDrawn(a.kind) ? a.anchor.quads : resolved.quads,
       // the excerpt is already in the PDF — only the reader's own words are
       // worth carrying into /Contents
-      contents: includeNotes.value ? a.note : '',
+      includeNotes: includeNotes.value,
       author: author.value,
     })
+    if (spec) out.push(spec)
   }
   return out
 }

@@ -13,7 +13,8 @@ import {
   bookmarksFor, removeBookmark, renameBookmark, type Bookmark,
 } from '../store'
 import { t } from '../i18n'
-import type { Annotation, AnnotationKind } from '@solopdf/core'
+import { SHAPE_KINDS, type Annotation, type AnnotationKind } from '@solopdf/core'
+import { cssColor } from '../annotations/drawing'
 
 const emit = defineEmits<{ goto: [page: number, block?: number] }>()
 
@@ -139,7 +140,9 @@ function saveBmEdit(b: Bookmark): void {
 const editingId = ref<string | null>(null)
 const editText = ref('')
 const annots = ref<Annotation[]>([])
-const filterKind = ref<'all' | AnnotationKind>('all')
+/** 'shape' groups rect/ellipse/line/arrow — four chips for four outlines
+ *  would crowd the filter row on a phone */
+const filterKind = ref<'all' | 'shape' | AnnotationKind>('all')
 const filterColor = ref<'all' | string>('all')
 const filterTag = ref<string>('')
 const query = ref('')
@@ -157,14 +160,16 @@ function syncAnnots(): void {
   void loadPreviews()
 }
 
-/** region screenshots get a thumbnail in the list — that's the whole point */
+/** region screenshots and drawings get a thumbnail in the list — that's
+ *  the whole point. assetUrl() is cached, so asking again is cheap, and a
+ *  redrawn mark hands back a fresh URL. */
 async function loadPreviews(): Promise<void> {
   const m = mgr.value
   if (!m) return
   for (const a of annots.value) {
-    if (a.kind !== 'region' || previews.value[a.id]) continue
+    if (!a.image) continue
     const url = await m.assetUrl(a)
-    if (url) previews.value = { ...previews.value, [a.id]: url }
+    if (url && previews.value[a.id] !== url) previews.value = { ...previews.value, [a.id]: url }
   }
 }
 
@@ -188,7 +193,10 @@ const usedColors = computed(() => [...new Set(annots.value.map((a) => a.color))]
 const shownAnnots = computed(() => {
   const q = query.value.trim().toLowerCase()
   let list = annots.value.filter((a) => {
-    if (filterKind.value !== 'all' && (a.kind ?? 'highlight') !== filterKind.value) return false
+    const kind = a.kind ?? 'highlight'
+    if (filterKind.value === 'shape') {
+      if (!SHAPE_KINDS.includes(kind)) return false
+    } else if (filterKind.value !== 'all' && kind !== filterKind.value) return false
     if (filterColor.value !== 'all' && a.color !== filterColor.value) return false
     if (filterTag.value && !tagsOf(a).includes(filterTag.value)) return false
     if (q && !(a.excerpt + '\n' + a.note).toLowerCase().includes(q)) return false
@@ -202,8 +210,16 @@ const shownAnnots = computed(() => {
 
 const KIND_GLYPH: Record<string, string> = {
   highlight: '▮', underline: 'U̲', strike: 'S̶', squiggly: '∿', note: '✎', region: '⬚',
+  ink: '✏︎', textbox: 'T', rect: '▭', ellipse: '◯', line: '╱', arrow: '↗', shape: '◇',
 }
-const KINDS: (AnnotationKind | 'all')[] = ['all', 'highlight', 'underline', 'strike', 'squiggly', 'note', 'region']
+const KINDS: (AnnotationKind | 'all' | 'shape')[] = [
+  'all', 'highlight', 'underline', 'strike', 'squiggly', 'note', 'region', 'ink', 'textbox', 'shape',
+]
+
+/** pen colours are hex, not one of the four named swatches */
+function swatchStyle(c: string): Record<string, string> {
+  return c.startsWith('#') ? { background: cssColor(c) } : {}
+}
 
 function closeIfNarrow(): void {
   if (window.innerWidth < 700) store.settings.sidebarOpen = false
@@ -311,6 +327,7 @@ onBeforeUnmount(() => observer?.disconnect())
           <button
             v-for="c in usedColors" :key="c"
             class="af-chip af-color" :class="[`sw-${c}`, { on: filterColor === c }]"
+            :style="swatchStyle(c)"
             @click="filterColor = c"
           />
         </div>
@@ -341,6 +358,7 @@ onBeforeUnmount(() => observer?.disconnect())
       >
         <img v-if="previews[a.id]" class="ai-thumb" :src="previews[a.id]" alt="" />
         <div class="ai-excerpt" v-if="a.excerpt">{{ a.excerpt }}</div>
+        <div class="ai-textbox" v-if="a.kind === 'textbox' && editingId !== a.id" :style="{ color: cssColor(a.color) }">{{ a.note }}</div>
         <template v-if="editingId === a.id">
           <textarea v-model="editText" @click.stop @keydown.enter.meta="saveEdit(a)" />
           <div class="ai-meta">
@@ -349,9 +367,9 @@ onBeforeUnmount(() => observer?.disconnect())
           </div>
         </template>
         <template v-else>
-          <div class="ai-note" v-if="a.note">{{ a.note }}</div>
+          <div class="ai-note" v-if="a.note && a.kind !== 'textbox'">{{ a.note }}</div>
           <div class="ai-meta">
-            <span class="ai-kind" :class="`sw-${a.color}`">{{ KIND_GLYPH[a.kind ?? 'highlight'] }}</span>
+            <span class="ai-kind" :class="`sw-${a.color}`" :style="swatchStyle(a.color)">{{ KIND_GLYPH[a.kind ?? 'highlight'] ?? '•' }}</span>
             <span>p.{{ a.anchor.page }}</span>
             <span v-if="a.orphan" :title="t('sb.orphanTip')">{{ t('sb.orphan') }}</span>
             <span style="flex: 1"></span>

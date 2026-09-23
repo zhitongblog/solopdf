@@ -18,7 +18,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { gunzipSync } from 'fflate'
-import { parse, upsertAnnotation, genId, normalize } from '@solopdf/core'
+import { parse, upsertAnnotation, genId, normalize, exportSpec } from '@solopdf/core'
 
 const ALLOW_WRITE = process.argv.includes('--allow-write')
 
@@ -46,15 +46,6 @@ function docBin() {
     if (existsSync(p)) return p
   }
   return exe // PATH
-}
-
-/** #rrggbb or a highlight colour name → 0–1 RGB */
-function colorTriple(name) {
-  const HEX = { yellow: '#ffd54f', green: '#81c784', blue: '#64b5f6', pink: '#f48fb1' }
-  const hex = (HEX[name] ?? name).replace('#', '')
-  const n = parseInt(hex.length === 3 ? hex.split('').map((c) => c + c).join('') : hex, 16)
-  if (Number.isNaN(n)) return [1, 0.84, 0.31]
-  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
 }
 
 /**
@@ -311,15 +302,9 @@ if (ALLOW_WRITE) {
       if (!existsSync(sc)) throw new Error(`没有伴生批注文件: ${sc}`)
       const specs = []
       for (const a of parse(await readFile(sc, 'utf-8')).annotations) {
-        if (a.orphan || !a.anchor.quads?.length) continue
-        specs.push({
-          page: a.anchor.page,
-          kind: a.kind ?? 'highlight',
-          quads: a.anchor.quads.map((q) => [q.x1, q.y1, q.x2, q.y2]),
-          color: colorTriple(a.color ?? 'yellow'),
-          contents: a.note ?? '',
-          author,
-        })
+        // drawn marks (ink / shapes / text boxes) carry their geometry along
+        const spec = exportSpec(a, { author })
+        if (spec) specs.push(spec)
       }
       if (!specs.length) throw new Error('没有可导出的标注')
       const tmp = await mkdtemp(nodePath.join(os.tmpdir(), 'solopdf-mcp-'))

@@ -28,6 +28,12 @@ function labels(): SidecarLabels {
       squiggly: t('sc.squiggly'),
       note: t('sc.note'),
       region: t('sc.region'),
+      ink: t('sc.ink'),
+      textbox: t('sc.textbox'),
+      rect: t('sc.rect'),
+      ellipse: t('sc.ellipse'),
+      line: t('sc.line'),
+      arrow: t('sc.arrow'),
     },
   }
 }
@@ -142,6 +148,67 @@ export class AnnotationManager {
     return a
   }
 
+  /**
+   * Add a drawn mark (ink / shape / text box). Geometry is already in
+   * `anchor` (PDF user space); `png` is its picture for the sidecar, written
+   * BEFORE the section so the Markdown never points at a missing file.
+   */
+  async addDrawn(
+    fields: Pick<Annotation, 'anchor' | 'kind' | 'color'> & { note?: string },
+    png?: Uint8Array | null,
+  ): Promise<Annotation> {
+    const id = genId()
+    let image: string | undefined
+    if (png) {
+      image = `${id}.png`
+      await platform().writeSidecarAsset(this.pdfPath, image, png)
+    }
+    const a: Annotation = {
+      id,
+      anchor: fields.anchor,
+      excerpt: '',
+      note: fields.note ?? '',
+      color: fields.color,
+      kind: fields.kind,
+      image,
+      createdAt: new Date().toISOString(),
+    }
+    await this.write(upsertAnnotation(this.text, a, this.pdfPath, this.meta, labels()))
+    this.annotations = parse(this.text).annotations
+    this.onChange(this.annotations)
+    return a
+  }
+
+  /**
+   * Generic in-place change of one annotation (move / recolour / reshape /
+   * retext). Spliced by id like every other write. A new `png` overwrites
+   * the mark's picture under the same name.
+   */
+  async update(
+    id: string,
+    patch: Partial<Pick<Annotation, 'anchor' | 'note' | 'color' | 'kind'>>,
+    png?: Uint8Array | null,
+  ): Promise<Annotation | null> {
+    const a = this.annotations.find((x) => x.id === id)
+    if (!a) return null
+    const next: Annotation = { ...a, ...patch }
+    if (png) {
+      next.image = a.image ?? `${id}.png`
+      await platform().writeSidecarAsset(this.pdfPath, next.image, png)
+      this.dropAssetUrl(id)
+    }
+    await this.write(upsertAnnotation(this.text, next, this.pdfPath, this.meta, labels()))
+    this.annotations = parse(this.text).annotations
+    this.onChange(this.annotations)
+    return this.annotations.find((x) => x.id === id) ?? null
+  }
+
+  private dropAssetUrl(id: string): void {
+    const u = this.assetUrls.get(id)
+    if (u) URL.revokeObjectURL(u)
+    this.assetUrls.delete(id)
+  }
+
   /** Blob URL for a region screenshot, cached per annotation id. */
   async assetUrl(a: Annotation): Promise<string | null> {
     if (!a.image) return null
@@ -163,6 +230,7 @@ export class AnnotationManager {
   }
 
   async remove(id: string): Promise<void> {
+    this.dropAssetUrl(id)
     await this.write(removeAnnotation(this.text, id))
     this.annotations = parse(this.text).annotations
     this.onChange(this.annotations)

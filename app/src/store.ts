@@ -108,6 +108,19 @@ export interface Settings {
   /** where the dictionary's explicit "search the web" button goes; %s = word.
    *  Never used automatically — SoloPDF makes no network request on its own. */
   webLookupUrl: string
+  /** pen / shape / text-box tool state, remembered between sessions */
+  draw: DrawSettings
+}
+
+export interface DrawSettings {
+  /** tool the 🖊 button arms */
+  tool: import('./annotations/drawing').DrawTool
+  /** #rrggbb */
+  color: string
+  /** stroke width, PDF points */
+  width: number
+  /** text box font size, PDF points */
+  fontSize: number
 }
 
 export interface ComicSettings {
@@ -164,6 +177,7 @@ export const DEFAULT_SETTINGS: Settings = {
   comic: { spread: MOBILE ? 1 : 2, rtl: false, fit: 'height' },
   defaultColor: 'yellow',
   webLookupUrl: 'https://www.google.com/search?q=define+%s',
+  draw: { tool: 'pen', color: '#e53935', width: 2, fontSize: 14 },
 }
 
 export function applyLanguage(): void {
@@ -236,6 +250,7 @@ export async function initStore(): Promise<void> {
     store.settings.book = { ...DEFAULT_SETTINGS.book, ...(s.settings.book ?? {}) }
     store.settings.tts = { ...DEFAULT_SETTINGS.tts, ...(s.settings.tts ?? {}) }
     store.settings.comic = { ...DEFAULT_SETTINGS.comic, ...(s.settings.comic ?? {}) }
+    store.settings.draw = { ...DEFAULT_SETTINGS.draw, ...(s.settings.draw ?? {}) }
   }
   if (s.recents) store.recents = s.recents
   if (s.positions) store.positions = s.positions

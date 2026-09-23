@@ -9,19 +9,12 @@
  * fallback on purpose: a browser build has no file to write back to, and a
  * silently half-working "save" is worse than a disabled button.
  */
-import type { AnnotationKind } from '@solopdf/core'
+import type { AnnotExportSpec } from '@solopdf/core'
 import { isTauri } from './index'
 
-export interface AnnotSpec {
-  page: number
-  kind: AnnotationKind
-  /** PDF user-space rects [x1, y1, x2, y2], one per visual line */
-  quads: [number, number, number, number][]
-  /** 0–1 RGB */
-  color: [number, number, number]
-  contents: string
-  author: string
-}
+/** mirror of pdfops.rs AnnotSpec — built by core exportSpec() so the app,
+ *  the CLI and the MCP server hand the exporter identical JSON */
+export type AnnotSpec = AnnotExportSpec
 
 export interface StampInput {
   page: number
@@ -129,13 +122,6 @@ export async function pickDirectory(): Promise<string | null> {
   return typeof sel === 'string' ? sel : null
 }
 
-/** #rrggbb (or a named highlight colour) → 0–1 RGB triple */
-export function colorTriple(name: string): [number, number, number] {
-  const HEX: Record<string, string> = {
-    yellow: '#ffd54f', green: '#81c784', blue: '#64b5f6', pink: '#f48fb1',
-  }
-  const hex = (HEX[name] ?? name).replace('#', '')
-  const n = parseInt(hex.length === 3 ? hex.split('').map((c) => c + c).join('') : hex, 16)
-  if (Number.isNaN(n)) return [1, 0.84, 0.31]
-  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
-}
+/** #rrggbb (or a named highlight colour) → 0–1 RGB triple (lives in core now,
+ *  shared with the CLI and MCP exporters) */
+export { colorTriple } from '@solopdf/core'

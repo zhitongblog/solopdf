@@ -21,7 +21,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync, readFileSync as require$readFileSync } from 'node:fs'
 import path from 'node:path'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
-import { parse, orderLinesForReading } from '@solopdf/core'
+import { parse, orderLinesForReading, exportSpec } from '@solopdf/core'
 
 // piping into `head` etc. closes stdout early — exit quietly instead of crashing
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0) })
@@ -280,15 +280,6 @@ async function cmdOcr(file) {
 
 // ── new commands ─────────────────────────────────────────────────────────
 
-/** #rrggbb or a highlight colour name → 0–1 RGB, mirroring the app */
-function colorTriple(name) {
-  const HEX = { yellow: '#ffd54f', green: '#81c784', blue: '#64b5f6', pink: '#f48fb1' }
-  const hex = (HEX[name] ?? name).replace('#', '')
-  const n = parseInt(hex.length === 3 ? hex.split('').map((c) => c + c).join('') : hex, 16)
-  if (Number.isNaN(n)) return [1, 0.84, 0.31]
-  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
-}
-
 /**
  * Sidecar marks → real PDF annotations, in a copy. Uses the STORED quads
  * rather than re-resolving fingerprints: the CLI has no viewer to relocate
@@ -303,15 +294,9 @@ async function cmdAnnotate(file) {
   const sc = parse(await readFile(sidecar, 'utf-8'))
   const specs = []
   for (const a of sc.annotations) {
-    if (a.orphan || !a.anchor.quads?.length) continue
-    specs.push({
-      page: a.anchor.page,
-      kind: a.kind ?? 'highlight',
-      quads: a.anchor.quads.map((q) => [q.x1, q.y1, q.x2, q.y2]),
-      color: colorTriple(a.color ?? 'yellow'),
-      contents: a.note ?? '',
-      author: flag('author') ?? 'SoloPDF',
-    })
+    // drawn marks (ink / shapes / text boxes) carry their geometry along
+    const spec = exportSpec(a, { author: flag('author') ?? 'SoloPDF' })
+    if (spec) specs.push(spec)
   }
   if (!specs.length) die('没有可导出的标注（都失效或没有坐标）')
   const out = flag('out') ?? file.replace(/\.pdf$/i, '') + '-annotated.pdf'

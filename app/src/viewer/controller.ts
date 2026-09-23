@@ -8,7 +8,8 @@
  *           │           ├── canvas            (rendered when visible ±BUFFER)
  *           │           ├── .pv-textlayer     (pdf.js TextLayer, selectable)
  *           │           ├── .annotationLayer  (AcroForm widgets)
- *           │           └── .pv-hl-layer      (annotation marks)
+ *           │           ├── .pv-hl-layer      (annotation marks)
+ *           │           └── .pv-draw-layer    (ink / shapes / text boxes)
  *           ├── .pv-page[data-page=2] ...
  *
  * Layout model: pages are grouped into ROWS (1 page, or 2 for facing spreads).
@@ -29,13 +30,14 @@
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 import { TextLayer, OPS, AnnotationLayer, AnnotationMode } from 'pdfjs-dist'
 import { SimpleLinkService } from 'pdfjs-dist/web/pdf_viewer.mjs'
-import { buildPageIndex, matchOnPage, type PageTextIndex } from '@solopdf/core'
+import { buildPageIndex, matchOnPage, isDrawn, type PageTextIndex } from '@solopdf/core'
 import { splitSentences } from '../tts'
 import type { Annotation, Quad } from '@solopdf/core'
 import {
-  NO_CROP, cropOffset, displaySize, normRotation, pdfRectToView, rotatedSize, viewToPdf,
+  NO_CROP, cropOffset, displaySize, normRotation, pdfRectToView, pdfToView, rotatedSize, viewToPdf,
   type CropRect, type PageBox,
 } from './geometry'
+import { drawnSvg, cssColor, textFrame } from '../annotations/drawing'
 
 const RENDER_BUFFER = 1 // rows beyond the viewport kept live
 const MAX_DPR = 2 // cap canvas backing resolution (perf review T6)
@@ -64,6 +66,8 @@ interface PageSlot {
   canvas: HTMLCanvasElement | null
   textLayerDiv: HTMLDivElement | null
   hlLayer: HTMLDivElement | null
+  /** drawn marks; above the text layer so strokes can be clicked */
+  drawLayer: HTMLDivElement | null
   page: PDFPageProxy | null
   rendered: boolean
   rendering: boolean
@@ -193,7 +197,7 @@ export class PdfViewerController {
       el.appendChild(inner)
       this.area.appendChild(el)
       this.slots.push({
-        el, inner, canvas: null, textLayerDiv: null, hlLayer: null,
+        el, inner, canvas: null, textLayerDiv: null, hlLayer: null, drawLayer: null,
         page: i === 0 ? p1 : null,
         rendered: false, rendering: false, renderTask: null,
         renderedScale: 1, renderedRotation: 0,
@@ -616,10 +620,15 @@ export class PdfViewerController {
 
       // dark mode: smart inversion — text pages invert, image pages stay
       // (design-doc degradation rule; full mask-out is post-v1)
+      let inverted = false
       if (this.theme() === 'dark' && this.darkPdf === 'smart') {
         if (s.hasImages === null) s.hasImages = await this.pageHasImages(s.page)
-        canvas.classList.toggle('pv-inverted', !s.hasImages)
+        inverted = !s.hasImages
+        canvas.classList.toggle('pv-inverted', inverted)
       }
+      // drawn marks follow the paper: black ink on an inverted page turns
+      // light with it instead of vanishing into the dark background
+      s.el.classList.toggle('pv-inv', inverted)
 
       // swap in
       s.inner.textContent = ''
@@ -670,6 +679,10 @@ export class PdfViewerController {
       hl.className = 'pv-hl-layer'
       s.inner.appendChild(hl)
       s.hlLayer = hl
+      const dl = document.createElement('div')
+      dl.className = 'pv-draw-layer'
+      s.inner.appendChild(dl)
+      s.drawLayer = dl
       this.paintHighlights(i + 1)
 
       s.rendered = true
@@ -740,6 +753,7 @@ export class PdfViewerController {
     s.canvas = null
     s.textLayerDiv = null
     s.hlLayer = null
+    s.drawLayer = null
     s.rendered = false
     s.rendering = false
     // keep textIndex — cheap, and search/anchor need it
@@ -1046,9 +1060,11 @@ export class PdfViewerController {
     s.hlLayer.textContent = ''
     const box = this.boxes[i]
     const rot = this.rotationOf(i)
+    const drawn: Annotation[] = []
     for (const a of this.annotations) {
       const r = this.resolvedQuads.get(a.id)
       if (!r || r.orphan || r.page !== pageNum) continue
+      if (isDrawn(a.kind)) { drawn.push(a); continue }
       if (a.kind === 'note') {
         const pin = document.createElement('div')
         pin.className = 'pv-note-pin'
@@ -1081,6 +1097,83 @@ export class PdfViewerController {
         s.hlLayer.appendChild(div)
       }
     }
+    this.paintDrawn(i, drawn)
+  }
+
+  /**
+   * Ink, shapes and text boxes. Geometry comes straight from the anchor's
+   * draw data (PDF space) — there is no text to relocate against, so the
+   * stored position IS the position.
+   */
+  private paintDrawn(i: number, drawn: Annotation[]): void {
+    const s = this.slots[i]
+    const layer = s?.drawLayer
+    if (!layer) return
+    layer.textContent = ''
+    if (!drawn.length) return
+    const box = this.boxes[i]
+    const rot = this.rotationOf(i)
+    const toView = (x: number, y: number) => pdfToView(x, y, box, rot, this.scale)
+    let svg = ''
+    for (const a of drawn) {
+      if (a.kind === 'textbox') {
+        const q = a.anchor.quads[0]
+        if (!q) continue
+        const d = a.anchor.draw
+        const created = normRotation(d?.rotate ?? 0)
+        const f = textFrame(q, created)
+        const v = pdfRectToView(q, box, rot, this.scale)
+        const el = document.createElement('div')
+        el.className = 'pv-textbox'
+        el.dataset.annot = a.id
+        el.dataset.draw = 'textbox'
+        const w = f.w * this.scale
+        const h = f.h * this.scale
+        // sized in its own (typed-at) frame, centred on its box, turned by
+        // however far the page has rotated since
+        el.style.cssText =
+          `left:${v.left + v.width / 2 - w / 2}px;top:${v.top + v.height / 2 - h / 2}px;` +
+          `width:${w}px;height:${h}px;font-size:${(d?.fontSize ?? 14) * this.scale}px;` +
+          `color:${cssColor(a.color)};transform:rotate(${normRotation(rot - created)}deg)`
+        el.textContent = a.note
+        layer.appendChild(el)
+        continue
+      }
+      svg += `<g data-annot="${a.id}" data-draw="${a.kind}">${drawnSvg(a, toView, this.scale)}</g>`
+    }
+    if (svg) {
+      const full = this.fullSizeOf(i)
+      layer.insertAdjacentHTML(
+        'afterbegin',
+        `<svg class="pv-draw-svg" width="${full.w}" height="${full.h}" fill="none" stroke-linecap="round" stroke-linejoin="round">${svg}</svg>`,
+      )
+    }
+  }
+
+  /** annotations currently painted on a page (for hit-testing tools) */
+  annotationsOn(pageNum: number): Annotation[] {
+    return this.annotations.filter((a) => {
+      const r = this.resolvedQuads.get(a.id)
+      return r && !r.orphan && r.page === pageNum
+    })
+  }
+
+  /** PDF user space → client (viewport) point, on a rendered page */
+  pdfToClient(pageNum: number, x: number, y: number): { x: number; y: number } | null {
+    const s = this.slots[pageNum - 1]
+    if (!s || s.el.style.display === 'none') return null
+    const rect = s.inner.getBoundingClientRect()
+    const v = pdfToView(x, y, this.boxes[pageNum - 1], this.rotationOf(pageNum - 1), this.scale)
+    return { x: rect.left + v.x, y: rect.top + v.y }
+  }
+
+  /** PDF rect → client rect (rotation/crop/zoom applied) */
+  quadToClient(pageNum: number, q: Quad): { left: number; top: number; width: number; height: number } | null {
+    const s = this.slots[pageNum - 1]
+    if (!s || s.el.style.display === 'none') return null
+    const rect = s.inner.getBoundingClientRect()
+    const v = pdfRectToView(q, this.boxes[pageNum - 1], this.rotationOf(pageNum - 1), this.scale)
+    return { left: rect.left + v.left, top: rect.top + v.top, width: v.width, height: v.height }
   }
 
   flashAnnotation(id: string): void {
@@ -1090,7 +1183,7 @@ export class PdfViewerController {
     // flash after the page renders
     setTimeout(() => {
       const s = this.slots[r.page - 1]
-      s?.hlLayer?.querySelectorAll(`[data-annot="${id}"]`).forEach((el) => {
+      s?.el.querySelectorAll(`[data-annot="${id}"]`).forEach((el) => {
         el.classList.add('pv-hl-flash')
         setTimeout(() => el.classList.remove('pv-hl-flash'), 1600)
       })
