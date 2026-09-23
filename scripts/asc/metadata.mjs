@@ -24,13 +24,13 @@ const zhHans = {
   keywords: 'pdf,阅读器,无广告,批注,高亮,笔记,markdown,表单填写,pdf阅读,本地',
   promotionalText: '干净、快速、本地运行的 PDF 阅读器 —— 高亮自动变成 Markdown 笔记。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `• 阅读:整档/单页旋转、双页对开、单屏翻页、自动裁白边、自动滚动、阅读时常亮
-• 朗读:系统语音按句朗读,跟随高亮并自动翻页
-• 标注新增:下划线 / 删除线 / 波浪线 / 便签 / 框选截图;可导出带标准 PDF 注释的副本
-• 文档工具:页面管理、合并拆分、PDF↔图片、压缩、手写签名、设置/移除密码
-• 书架:封面网格、阅读进度、收藏与标签,支持跨文档全文搜索
-• 离线词典(内置 CC-CEDICT)与本地阅读统计
-• 新格式:MOBI / AZW3、CBZ / CBR 漫画、DjVu`,
+  whatsNew: `• 链接:PDF 里的链接能点,跳到精确位置;前进/后退;悬停预览链接和 Figure / Table / [12] 引用
+• 手绘:画笔、橡皮、文本框、矩形、椭圆、直线、箭头,支持 Apple Pencil 压感
+• 撤销/重做:所有批注操作都能撤销
+• 分屏:同一文档两个视口对照阅读
+• 选区翻译:用系统本机翻译,不联网;译文可存成笔记
+• 全屏阅读、演示模式、纸张颜色、印刷页码(xii、A-3)
+• 工具栏一键旋转`,
 };
 
 const zhHant = {
@@ -47,13 +47,13 @@ const zhHant = {
   keywords: 'pdf,閱讀器,無廣告,批註,螢光筆,筆記,markdown,表單填寫,pdf閱讀,本地',
   promotionalText: '乾淨、快速、本地執行的 PDF 閱讀器 —— 螢光標記自動變成 Markdown 筆記。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `• 閱讀:整份/單頁旋轉、雙頁對開、單螢幕翻頁、自動裁白邊、自動捲動、閱讀時常亮
-• 朗讀:系統語音逐句朗讀,同步標示並自動翻頁
-• 標註新增:底線 / 刪除線 / 波浪線 / 便條 / 框選截圖;可匯出帶標準 PDF 註釋的副本
-• 文件工具:頁面管理、合併分割、PDF↔圖片、壓縮、手寫簽名、設定/移除密碼
-• 書架:封面格狀檢視、閱讀進度、收藏與標籤,支援跨文件全文搜尋
-• 離線辭典(內建 CC-CEDICT)與本機閱讀統計
-• 新格式:MOBI / AZW3、CBZ / CBR 漫畫、DjVu`,
+  whatsNew: `• 連結:PDF 裡的連結能點,跳到精確位置;前進/返回;滑過預覽連結和 Figure / Table / [12] 引用
+• 手繪:畫筆、橡皮擦、文字方塊、矩形、橢圓、直線、箭頭,支援 Apple Pencil 壓力
+• 復原/重做:所有標註操作都能復原
+• 分割畫面:同一文件兩個視窗對照閱讀
+• 選取翻譯:使用系統本機翻譯,不連網;譯文可存成筆記
+• 全螢幕閱讀、簡報模式、紙張顏色、印刷頁碼(xii、A-3)
+• 工具列一鍵旋轉`,
 };
 
 const enUS = {
@@ -70,13 +70,13 @@ Everything runs on your device. No network calls, no data collection.`,
   keywords: 'pdf,reader,annotate,highlight,markdown,notes,forms,viewer,offline,documents',
   promotionalText: 'A clean, fast, local-first PDF reader — highlights become Markdown notes.',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `• Reading: rotate the document or a single page, two-page spreads, single-screen paging, automatic margin cropping, auto-scroll, keep-awake
-• Read aloud: system speech, sentence by sentence, following along and turning pages for you
-• New annotation types: underline, strikethrough, squiggly, sticky notes, and region capture — plus export a copy with standard PDF annotations
-• Document tools: page management, merge/split, PDF↔image, compression, handwritten signatures, set/remove passwords
-• Shelf: cover grid, reading progress, favourites and tags, with search across every document
-• Offline dictionary (CC-CEDICT included) and local reading statistics
-• New formats: MOBI / AZW3, CBZ / CBR comics, DjVu`,
+  whatsNew: `• Links: links inside PDFs now work and land on the exact spot; Back and Forward; hover previews for links and for Figure / Table / [12] references
+• Ink: pen, eraser, text boxes, rectangles, ellipses, lines and arrows, with Apple Pencil pressure
+• Undo and redo for every annotation change
+• Split view: two panes on the same document
+• Translate a selection with the system's on-device translation — no network; save the translation as a note
+• Full screen, presentation mode, paper colours, printed page numbers (xii, A-3)
+• One-tap rotate in the toolbar`,
 };
 
 const ja = {
@@ -93,13 +93,13 @@ const ja = {
   keywords: 'pdf,リーダー,注釈,ハイライト,ノート,markdown,フォーム,閲覧,オフライン',
   promotionalText: '広告なし・完全ローカルの PDF リーダー。ハイライトが Markdown ノートになります。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `• 閲覧:文書全体/1ページ単位の回転、見開き表示、1画面ずつのページ送り、余白の自動トリミング、自動スクロール、読書中の画面点灯維持
-• 読み上げ:システム音声で文単位に読み上げ、ハイライトを追従しながら自動でページ送り
-• 注釈の種類を追加:下線 / 取り消し線 / 波線 / 付箋 / 範囲キャプチャ。標準 PDF 注釈付きのコピーを書き出せます
-• ドキュメントツール:ページ管理、結合/分割、PDF↔画像、圧縮、手書き署名、パスワードの設定/解除
-• 本棚:表紙グリッド、読書進捗、お気に入りとタグ、全文書を横断する検索
-• オフライン辞書(CC-CEDICT 内蔵)とローカルの読書統計
-• 新対応フォーマット:MOBI / AZW3、CBZ / CBR コミック、DjVu`,
+  whatsNew: `• リンク:PDF 内のリンクが正確な位置へジャンプ。戻る/進む。リンクや Figure / Table / [12] 参照をホバーでプレビュー
+• 手書き:ペン、消しゴム、テキストボックス、四角形、楕円、直線、矢印。Apple Pencil の筆圧に対応
+• すべての注釈操作を取り消し/やり直し
+• 分割表示:同じ文書を 2 つのペインで
+• 選択範囲の翻訳:システムのオンデバイス翻訳で通信なし。訳文をメモとして保存
+• 全画面、プレゼンテーション、紙の色、印刷ページ番号(xii、A-3)
+• ツールバーからワンタップで回転`,
 };
 
 // whatsNew is intentionally absent — Apple rejects it on an app's first version.
@@ -155,6 +155,6 @@ export const screenshots = {
 
 // Per-platform release plan: store version string must match the attached build's train.
 export const platforms = {
-  IOS:    { versionString: '0.6.0', buildVersion: '0.6.0' },
-  MAC_OS: { versionString: '1.5.0', buildVersion: '1.5.0' },
+  IOS:    { versionString: '0.7.0', buildVersion: '0.7.0' },
+  MAC_OS: { versionString: '1.6.0', buildVersion: '1.6.0' },
 };

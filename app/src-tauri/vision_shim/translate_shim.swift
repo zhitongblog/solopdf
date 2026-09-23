@@ -32,7 +32,11 @@
 
 import Foundation
 import NaturalLanguage
-#if canImport(Translation)
+// Older SDKs ship a Translation module without TranslationSession (macOS 14
+// SDK) or without the headless init (macOS 15 SDK), so gate on the compiler
+// that comes with each SDK: Swift 6.0 ↔ Xcode 16, Swift 6.2 ↔ Xcode 26. A
+// build on an older Xcode compiles the stubs and reports "unavailable".
+#if canImport(Translation) && compiler(>=6.0)
 @preconcurrency import Translation
 import SwiftUI
 #endif
@@ -77,8 +81,10 @@ private var forceHosted: Bool {
 
 @_cdecl("solopdf_translate_available")
 public func solopdf_translate_available() -> Int32 {
-  #if canImport(Translation)
+  #if canImport(Translation) && compiler(>=6.0)
+  #if compiler(>=6.2)
   if #available(macOS 26.0, iOS 26.0, *) { return forceHosted ? 1 : 2 }
+  #endif
   if #available(macOS 15.0, iOS 18.0, *) { return 1 }
   #endif
   return 0
@@ -151,7 +157,7 @@ public func solopdf_translate(
     }
   }
 
-  #if canImport(Translation)
+  #if canImport(Translation) && compiler(>=6.0)
   if #available(macOS 15.0, iOS 18.0, *) {
     let box = Box()
     let src = source, tgt = target
@@ -175,7 +181,7 @@ public func solopdf_translate_prepare(
   if source.isEmpty || target.isEmpty {
     return jsonCString(["error": "source and target are required", "code": "failed"])
   }
-  #if canImport(Translation)
+  #if canImport(Translation) && compiler(>=6.0)
   if #available(macOS 15.0, iOS 18.0, *) {
     let box = Box()
     Task.detached {
@@ -188,7 +194,7 @@ public func solopdf_translate_prepare(
   return jsonCString(["error": "on-device translation needs macOS 15 / iOS 18", "code": "unavailable"])
 }
 
-#if canImport(Translation)
+#if canImport(Translation) && compiler(>=6.0)
 
 @available(macOS 15.0, iOS 18.0, *)
 private func translateAny(_ text: String, source: String, target: String) async -> [String: String] {
@@ -210,6 +216,7 @@ private func translateAny(_ text: String, source: String, target: String) async 
   @unknown default:
     break
   }
+  #if compiler(>=6.2)
   if #available(macOS 26.0, iOS 26.0, *), !forceHosted {
     do {
       let session = TranslationSession(installedSource: src, target: tgt)
@@ -220,13 +227,23 @@ private func translateAny(_ text: String, source: String, target: String) async 
       return describe(error, into: base)
     }
   }
+  #endif
   return await hosted(source: source, target: target, text: text)
+}
+
+/// TranslationError.notInstalled only exists in the macOS 26 / iOS 26 SDK
+@available(macOS 15.0, iOS 18.0, *)
+private func isNotInstalled(_ error: Error) -> Bool {
+  #if compiler(>=6.2)
+  if #available(macOS 26.0, iOS 26.0, *) { return TranslationError.notInstalled ~= error }
+  #endif
+  return false
 }
 
 @available(macOS 15.0, iOS 18.0, *)
 private func describe(_ error: Error, into base: [String: String]) -> [String: String] {
   var out = base
-  if #available(macOS 26.0, iOS 26.0, *), TranslationError.notInstalled ~= error {
+  if isNotInstalled(error) {
     out["code"] = "notInstalled"
     out["error"] = "language not downloaded"
   } else if TranslationError.unsupportedLanguagePairing ~= error
