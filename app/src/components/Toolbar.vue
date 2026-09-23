@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { store, controllers } from '../store'
 import { isMobile, isTauri } from '../platform'
 import { t } from '../i18n'
+import { navState, jump, goBack, goForward } from '../nav'
 
 defineProps<{ bookmarked?: boolean; tool?: 'none' | 'note' | 'region'; speaking?: boolean }>()
 defineEmits<{
@@ -12,12 +13,15 @@ defineEmits<{
 
 const tab = computed(() => store.activeTab)
 const ctrl = computed(() => { void store.docTick; return tab.value ? controllers.get(tab.value.id) : undefined })
+const nav = computed(() => (tab.value ? navState[tab.value.id] : undefined))
 const pageInput = ref('1')
 watch(() => tab.value?.currentPage, (p) => { if (p) pageInput.value = String(p) })
 
 function gotoPage(): void {
   const n = parseInt(pageInput.value, 10)
-  if (tab.value && ctrl.value && n >= 1 && n <= tab.value.numPages) ctrl.value.scrollToPage(n)
+  const c = ctrl.value
+  if (!tab.value || !c || !(n >= 1 && n <= tab.value.numPages) || n === tab.value.currentPage) return
+  jump(tab.value.id, () => { c.scrollToPage(n); c.settle() })
 }
 function zoom(dir: 1 | -1): void {
   ctrl.value?.setZoom((ctrl.value.scale) * (dir > 0 ? 1.15 : 1 / 1.15))
@@ -28,6 +32,8 @@ function zoom(dir: 1 | -1): void {
   <div class="toolbar" v-if="tab">
     <button :title="t('tb.sidebar')" @click="store.settings.sidebarOpen = !store.settings.sidebarOpen">☰</button>
     <div class="sep" />
+    <button v-if="nav?.back" class="nav-back" :title="t('nav.backTip')" @click="goBack(tab.id)">↩</button>
+    <button v-if="nav?.fwd" class="nav-fwd" :title="t('nav.forwardTip')" @click="goForward(tab.id)">↪</button>
     <div class="page-nav">
       <button :title="t('tb.prev')" @click="ctrl?.scrollToPage(Math.max(1, tab.currentPage - 1))">‹</button>
       <input v-model="pageInput" @keydown.enter="gotoPage" @blur="gotoPage" />

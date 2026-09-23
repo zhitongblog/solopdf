@@ -1,0 +1,136 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [9 0 R 11 0 R 13 0 R 15 0 R] /Count 4 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Type /FontDescriptor /FontName /STSong-Light /Flags 6 /FontBBox [-25 -254 1000 880] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 880 /StemV 93 >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 4 >> /FontDescriptor 5 0 R /DW 1000 /W [1 95 500] >>
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light-UniGB-UCS2-H /Encoding /UniGB-UCS2-H /DescendantFonts [6 0 R] >>
+endobj
+8 0 obj
+<< /Length 1493 >>
+stream
+0 g BT /F3 18 Tf 72 730 Td (Smart References: A Test Paper) Tj ET
+0 g BT /F1 9 Tf 72 706 Td (SoloPDF test fixture - no link annotations anywhere in this file) Tj ET
+0 g BT /F3 13 Tf 72 670 Td (1  Introduction) Tj ET
+0 g BT /F1 11 Tf 72 646 Td (Our processing pipeline is shown in Figure 1 and the numbers are in Table 1.) Tj ET
+0 g BT /F1 11 Tf 72 630 Td (The loss is defined in Eq. \(2\); substituting \(1\) into \(2\) gives the bound.) Tj ET
+0 g BT /F1 11 Tf 72 614 Td (Prior work [2] and later studies [1, 3] looked at the same problem;) Tj ET
+0 g BT /F1 11 Tf 72 598 Td (the overall architecture is sketched in Fig. 2 and surveyed in [5].) Tj ET
+0 g BT /F1 11 Tf 72 582 Td (A dangling mention of Figure 9 must not produce any preview.) Tj ET
+0 g BT /F1 11 Tf 72 550 Td (The classic identity we build on is) Tj ET
+0 g BT /F1 11 Tf 250 522 Td (E = m c^2) Tj ET
+0 g BT /F1 11 Tf 520 522 Td (\(1\)) Tj ET
+0 g BT /F1 11 Tf 72 494 Td (which holds in every inertial frame.) Tj ET
+0 g BT /F2 13 Tf 72 460 Td <0032002000204e2d65876bb5843d> Tj ET
+0 g BT /F2 11 Tf 72 436 Td <598256fe0020003300206240793aff0c7cfb7edf75314e0990e852067ec46210ff1b5b9e9a8c7ed3679c89c1886800200031ff0c> Tj ET
+0 g BT /F2 11 Tf 72 418 Td <635f593151fd657089c1516c5f0f0020002800320029ff0c76f851735de54f5c89c10020005b0034005d3002> Tj ET
+0 g BT /F1 11 Tf 72 380 Td (Nothing below this line refers to anything.) Tj ET
+0 g BT /F1 11 Tf 72 364 Td (The interval [0, 1] is not a citation and \(7\) alone is not an equation.) Tj ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R /Resources << /Font << /F1 3 0 R /F2 7 0 R /F3 4 0 R >> >> >>
+endobj
+10 0 obj
+<< /Length 1466 >>
+stream
+0 g BT /F1 11 Tf 72 740 Td (Figure 1 shows how documents flow from parsing to rendering.) Tj ET
+0.85 0.9 1 rg 110 560 110 70 re f 250 560 110 70 re f 390 560 110 70 re f
+0.2 0.35 0.75 RG 2 w 110 560 110 70 re S 250 560 110 70 re S 390 560 110 70 re S
+220 595 m 250 595 l S 360 595 m 390 595 l S
+0 g BT /F1 12 Tf 140 590 Td (Parse) Tj ET
+0 g BT /F1 12 Tf 275 590 Td (Layout) Tj ET
+0 g BT /F1 12 Tf 420 590 Td (Render) Tj ET
+0.95 0.7 0.3 rg 150 660 m 460 660 l 460 690 l 150 690 l f
+0 g BT /F1 11 Tf 250 671 Td (document pipeline) Tj ET
+0 g BT /F1 10 Tf 72 530 Td (Figure 1: The processing pipeline, from parsing to rendering.) Tj ET
+0 g BT /F1 10 Tf 72 470 Td (Table 1: Results on the benchmark \(higher is better\).) Tj ET
+0 0 0 RG 0.8 w 110 360 380 90 re S 110 420 m 490 420 l S 110 390 m 490 390 l S 250 360 m 250 450 l S 370 360 m 370 450 l S
+0 g BT /F1 10 Tf 120 430 Td (Method) Tj ET
+0 g BT /F1 10 Tf 260 430 Td (Accuracy) Tj ET
+0 g BT /F1 10 Tf 380 430 Td (Speed) Tj ET
+0 g BT /F1 10 Tf 120 400 Td (Baseline) Tj ET
+0 g BT /F1 10 Tf 260 400 Td (71.2) Tj ET
+0 g BT /F1 10 Tf 380 400 Td (1.0x) Tj ET
+0 g BT /F1 10 Tf 120 370 Td (Ours) Tj ET
+0 g BT /F1 10 Tf 260 370 Td (84.9) Tj ET
+0 g BT /F1 10 Tf 380 370 Td (3.2x) Tj ET
+0 g BT /F1 11 Tf 72 320 Td (We minimise the squared error) Tj ET
+0 g BT /F1 11 Tf 220 290 Td (L = sum_i \( y_i - f\(x_i\) \)^2) Tj ET
+0 g BT /F1 11 Tf 520 290 Td (\(2\)) Tj ET
+0 g BT /F1 11 Tf 72 262 Td (over the whole training set.) Tj ET
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 10 0 R /Resources << /Font << /F1 3 0 R /F2 7 0 R /F3 4 0 R >> >> >>
+endobj
+12 0 obj
+<< /Length 671 >>
+stream
+0 g BT /F3 13 Tf 72 740 Td (3  Architecture) Tj ET
+0.9 0.95 0.9 rg 120 520 360 180 re f 0.2 0.55 0.3 RG 2 w 120 520 360 180 re S
+0.2 0.55 0.3 rg 180 580 60 60 re f 270 580 60 60 re f 360 580 60 60 re f
+0 g BT /F1 11 Tf 200 660 Td (encoder) Tj ET
+0 g BT /F1 11 Tf 290 660 Td (core) Tj ET
+0 g BT /F1 11 Tf 370 660 Td (decoder) Tj ET
+0 g BT /F1 10 Tf 72 495 Td (Fig. 2. Architecture overview: encoder, core and decoder.) Tj ET
+1 0.93 0.85 rg 120 250 360 170 re f 0.8 0.45 0.1 RG 2 w 120 250 360 170 re S
+0.8 0.45 0.1 RG 200 300 m 300 380 l 400 300 l h S
+0 g BT /F2 10 Tf 72 225 Td <56fe0020003300207cfb7edf7ed36784793a610fff1a4e0990e852064e4b95f476846570636e6d413002> Tj ET
+endstream
+endobj
+13 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 12 0 R /Resources << /Font << /F1 3 0 R /F2 7 0 R /F3 4 0 R >> >> >>
+endobj
+14 0 obj
+<< /Length 640 >>
+stream
+0 g BT /F3 13 Tf 72 730 Td (References) Tj ET
+0 g BT /F1 10 Tf 72 704 Td ([1] A. Author and B. Author. Reading documents at scale. In Proc. DocEng, 2021.) Tj ET
+0 g BT /F1 10 Tf 72 686 Td ([2] C. Writer. A survey of PDF viewers. Journal of Tools, 12\(3\):1-20, 2019.) Tj ET
+0 g BT /F1 10 Tf 72 668 Td ([3] D. Reader. Hyperlinks considered helpful. Tech. report, 2020.) Tj ET
+0 g BT /F2 10 Tf 72 650 Td <005b0034005d00205f204e09ff0c674e56db30024e2d6587658768637684667a80fd5f15752830028ba17b97673a5b6662a5ff0c00320030003200323002> Tj ET
+0 g BT /F1 10 Tf 72 632 Td ([5] E. Scholar. Smart references in practice. arXiv:2101.00001, 2021.) Tj ET
+endstream
+endobj
+15 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 14 0 R /Resources << /Font << /F1 3 0 R /F2 7 0 R /F3 4 0 R >> >> >>
+endobj
+xref
+0 16
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000142 00000 n 
+0000000239 00000 n 
+0000000341 00000 n 
+0000000513 00000 n 
+0000000707 00000 n 
+0000000842 00000 n 
+0000002386 00000 n 
+0000002532 00000 n 
+0000004050 00000 n 
+0000004198 00000 n 
+0000004920 00000 n 
+0000005068 00000 n 
+0000005759 00000 n 
+trailer
+<< /Size 16 /Root 1 0 R /Info << /Title (Smart references test paper) /Producer (SoloPDF gen-smartref-fixture) >> >>
+startxref
+5907
+%%EOF

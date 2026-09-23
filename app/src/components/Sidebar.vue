@@ -1,7 +1,10 @@
 <script setup lang="ts">
 /**
  * Sidebar: outline / thumbnails / bookmarks / annotations.
- * Outline: full tree from doc.getOutline(), lazy dest->page resolution.
+ * Outline: full tree from doc.getOutline(); each entry's destination is
+ * resolved through the same core resolver as in-page links, so a click lands
+ * on the exact /XYZ spot (not just the page top) and is recorded in the
+ * back/forward history.
  * Thumbnails: IntersectionObserver-driven lazy render at 0.18 scale.
  * Bookmarks: user-placed, from the store (never the sidecar — see store.ts).
  * Annotations: filterable by kind, colour, #tag and free text; sortable.
@@ -13,7 +16,9 @@ import {
   bookmarksFor, removeBookmark, renameBookmark, type Bookmark,
 } from '../store'
 import { t } from '../i18n'
-import type { Annotation, AnnotationKind } from '@solopdf/core'
+import { jump } from '../nav'
+import { openExternal } from '../platform'
+import { resolveDestination, safeExternalUrl, type Annotation, type AnnotationKind, type LinkDest } from '@solopdf/core'
 
 const emit = defineEmits<{ goto: [page: number, block?: number] }>()
 
@@ -27,6 +32,10 @@ const mgr = computed(() => { void store.docTick; return tab.value ? annotManager
 interface OutlineNode {
   title: string
   page: number | null
+  /** exact destination (page + coordinates), when the entry has one */
+  dest: LinkDest | null
+  /** entries that point at a web page instead */
+  url: string | null
   children: OutlineNode[]
   open: boolean
   depth: number
@@ -40,14 +49,11 @@ async function loadOutline(d: PDFDocumentProxy): Promise<void> {
   const build = async (items: any[], depth: number): Promise<OutlineNode[]> => {
     const out: OutlineNode[] = []
     for (const it of items) {
-      let page: number | null = null
-      try {
-        let dest = it.dest
-        if (typeof dest === 'string') dest = await d.getDestination(dest)
-        if (Array.isArray(dest) && dest[0]) page = (await d.getPageIndex(dest[0])) + 1
-      } catch { /* unresolvable dest → title-only node */ }
+      // unresolvable dest → title-only node
+      const dest = it.dest != null ? await resolveDestination(d, it.dest) : null
       out.push({
-        title: it.title ?? '', page,
+        title: it.title ?? '', page: dest?.page ?? null, dest,
+        url: dest ? null : safeExternalUrl(it.url ?? it.unsafeUrl),
         children: it.items?.length ? await build(it.items, depth + 1) : [],
         open: depth < 1,
         depth,
@@ -208,9 +214,23 @@ const KINDS: (AnnotationKind | 'all')[] = ['all', 'highlight', 'underline', 'str
 function closeIfNarrow(): void {
   if (window.innerWidth < 700) store.settings.sidebarOpen = false
 }
+/** every sidebar jump goes through the tab's back/forward history */
+function jumpPage(p: number): void {
+  const c = ctrl.value
+  if (tab.value && c) jump(tab.value.id, () => { c.scrollToPage(p); c.settle() })
+  closeIfNarrow()
+}
+function followOutline(n: OutlineNode): void {
+  if (n.url) { void openExternal(n.url); return }
+  if (n.dest) ctrl.value?.goToDest(n.dest)
+  else if (n.page) { jumpPage(n.page); return }
+  else return
+  closeIfNarrow()
+}
 function jumpTo(a: Annotation): void {
   if (a.orphan) return
-  ctrl.value?.flashAnnotation(a.id)
+  const c = ctrl.value
+  if (tab.value && c) jump(tab.value.id, () => c.flashAnnotation(a.id))
   closeIfNarrow()
 }
 function startEdit(a: Annotation): void {
@@ -256,7 +276,7 @@ onBeforeUnmount(() => observer?.disconnect())
           class="outline-toggle"
           @click.stop="n.open = !n.open"
         >{{ n.children.length ? (n.open ? '▾' : '▸') : '' }}</span>
-        <span class="ol-title" :title="n.title" @click="n.page && (ctrl?.scrollToPage(n.page), closeIfNarrow())">{{ n.title }}</span>
+        <span class="ol-title" :title="n.url ?? n.title" @click="followOutline(n)">{{ n.title }}</span>
         <span class="ol-page" v-if="n.page">{{ n.page }}</span>
       </div>
     </div>
@@ -268,7 +288,7 @@ onBeforeUnmount(() => observer?.disconnect())
         class="thumb"
         :class="{ current: p === tab.currentPage }"
         :data-page="p"
-        @click="ctrl?.scrollToPage(p); closeIfNarrow()"
+        @click="jumpPage(p)"
       >
         <div class="thumb-ph" style="width: 110px; height: 150px"></div>
         <div class="thumb-num">{{ p }}</div>

@@ -8,6 +8,7 @@
  *           │           ├── canvas            (rendered when visible ±BUFFER)
  *           │           ├── .pv-textlayer     (pdf.js TextLayer, selectable)
  *           │           ├── .annotationLayer  (AcroForm widgets)
+ *           │           ├── .pv-link-layer    (hyperlinks: click / hover preview)
  *           │           └── .pv-hl-layer      (annotation marks)
  *           ├── .pv-page[data-page=2] ...
  *
@@ -29,11 +30,15 @@
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 import { TextLayer, OPS, AnnotationLayer, AnnotationMode } from 'pdfjs-dist'
 import { SimpleLinkService } from 'pdfjs-dist/web/pdf_viewer.mjs'
-import { buildPageIndex, matchOnPage, type PageTextIndex } from '@solopdf/core'
+import {
+  buildPageIndex, matchOnPage, linkTargetOf, annotRect, resolveLinkTarget,
+  type PageTextIndex, type RawLinkTarget, type LinkDest, type RefKind,
+} from '@solopdf/core'
+import { SmartRefIndex, refUnderPoint, type RefHit } from './refs'
 import { splitSentences } from '../tts'
 import type { Annotation, Quad } from '@solopdf/core'
 import {
-  NO_CROP, cropOffset, displaySize, normRotation, pdfRectToView, rotatedSize, viewToPdf,
+  NO_CROP, cropOffset, displaySize, normRotation, pdfRectToView, pdfToView, rotatedSize, viewToPdf,
   type CropRect, type PageBox,
 } from './geometry'
 
@@ -58,6 +63,35 @@ export interface SelectionInfo {
   clientRect: DOMRect
 }
 
+/**
+ * What the hover/long-press preview should show. `region` is PDF user space
+ * on `page`; external links carry only `url`.
+ */
+export interface PreviewRequest {
+  kind: 'link' | 'url' | RefKind
+  /** "p. 12", "Figure 3", or the URL */
+  label: string
+  page?: number
+  region?: Quad
+  dest?: LinkDest
+  url?: string
+  /** client rect of the thing hovered, for placement */
+  anchor: DOMRect
+  /** opened by long-press / tap: stays until dismissed */
+  touch: boolean
+}
+
+/** a Link annotation as found on a page, target not yet resolved */
+interface PageLink {
+  rect: [number, number, number, number]
+  raw: RawLinkTarget
+}
+
+/** hover delay before a preview appears (mouse) */
+const HOVER_MS = 300
+/** touch hold before a link preview appears instead of following it */
+const LONG_PRESS_MS = 450
+
 interface PageSlot {
   el: HTMLDivElement
   inner: HTMLDivElement
@@ -75,6 +109,8 @@ interface PageSlot {
   hasImages: boolean | null
   textIndex: PageTextIndex | null
   textItems: TextItemGeom[] | null
+  /** Link annotations, read once per page (null = not read yet) */
+  links: PageLink[] | null
   /** placement, recomputed by relayout() */
   left: number
   top: number
@@ -134,6 +170,22 @@ export class PdfViewerController {
   onSelection: (sel: SelectionInfo | null) => void = () => {}
   onFormsDirty: () => void = () => {}
   onAutoScrollEnd: () => void = () => {}
+  /** a jump is about to happen: returns the commit that records history */
+  onBeforeJump: () => () => void = () => () => {}
+  /** follow an external link (system browser — never this webview) */
+  onExternalLink: (url: string) => void = () => {}
+  /** show a link / smart-reference preview; null = pointer left it */
+  onPreview: (req: PreviewRequest | null) => void = () => {}
+
+  private refIndex: SmartRefIndex | null = null
+  private hoverTimer = 0
+  private hoverKey = ''
+  private hoverRaf = 0
+  private pressTimer = 0
+  private pressStart: { x: number; y: number } | null = null
+  private suppressClick = false
+  private pointerType = 'mouse'
+  private refMarks: HTMLElement[] = []
 
   constructor(
     public doc: PDFDocumentProxy,
@@ -146,6 +198,14 @@ export class PdfViewerController {
     scroll.appendChild(this.area)
     scroll.addEventListener('scroll', this.onScroll)
     document.addEventListener('selectionchange', this.onSelChange)
+    scroll.addEventListener('click', this.onLinkClick)
+    scroll.addEventListener('pointerover', this.onPointerOver)
+    scroll.addEventListener('pointerout', this.onPointerOut)
+    scroll.addEventListener('pointermove', this.onPointerMove)
+    scroll.addEventListener('pointerdown', this.onPointerDown)
+    scroll.addEventListener('pointerup', this.onPointerEnd)
+    scroll.addEventListener('pointercancel', this.onPointerEnd)
+    scroll.addEventListener('contextmenu', this.onContextMenu)
   }
 
   async init(): Promise<void> {
@@ -197,7 +257,7 @@ export class PdfViewerController {
         page: i === 0 ? p1 : null,
         rendered: false, rendering: false, renderTask: null,
         renderedScale: 1, renderedRotation: 0,
-        hasImages: null, textIndex: null, textItems: null,
+        hasImages: null, textIndex: null, textItems: null, links: null,
         left: 0, top: 0,
       })
     }
@@ -649,9 +709,14 @@ export class PdfViewerController {
       s.el.dataset.hasText = hasText ? '1' : '0'
       if (hasText) {
         const tl = document.createElement('div')
-        tl.className = 'pv-textlayer'
-        // pdf.js TextLayer sizes itself via --scale-factor
+        // `textLayer` pulls in pdf.js's own span sizing rules; pdf.js 5 sizes
+        // glyph spans from --total-scale-factor (the older --scale-factor is
+        // kept for anything still reading it). Without both, every span kept
+        // its unscaled 13px font — text hit-testing (selection, smart
+        // references) then missed the glyphs it was drawn over.
+        tl.className = 'pv-textlayer textLayer'
         tl.style.setProperty('--scale-factor', String(this.scale))
+        tl.style.setProperty('--total-scale-factor', String(this.scale))
         s.inner.appendChild(tl)
         const layer = new TextLayer({
           textContentSource: textContent,
@@ -662,8 +727,13 @@ export class PdfViewerController {
         s.textLayerDiv = tl
       }
 
+      // one getAnnotations() feeds both the form widgets and the links
+      const annots = await s.page.getAnnotations({ intent: 'display' }).catch(() => [] as unknown[])
+      if (this.destroyed) return
       // interactive form widgets (text inputs / checkboxes / dropdowns)
-      await this.renderFormLayer(s, vp)
+      await this.renderFormLayer(s, vp, annots)
+      // hyperlinks
+      this.renderLinkLayer(s, i, annots)
 
       // highlight layer
       const hl = document.createElement('div')
@@ -684,10 +754,12 @@ export class PdfViewerController {
 
   /** pdf.js AnnotationLayer with renderForms — fillable AcroForm widgets.
    *  Values live in doc.annotationStorage; saveDocument() bakes them out. */
-  private async renderFormLayer(s: PageSlot, vp: ReturnType<PDFPageProxy['getViewport']>): Promise<void> {
+  private async renderFormLayer(s: PageSlot, vp: ReturnType<PDFPageProxy['getViewport']>, all: unknown[]): Promise<void> {
     try {
-      const annots = await s.page!.getAnnotations({ intent: 'display' })
-      if (!annots.some((a: { subtype?: string }) => a.subtype === 'Widget')) return
+      // links are ours (renderLinkLayer): pdf.js would add dead duplicates
+      // wired to the no-op link service on top of them
+      const annots = (all as { subtype?: string }[]).filter((a) => a.subtype !== 'Link')
+      if (!annots.some((a) => a.subtype === 'Widget')) return
       const div = document.createElement('div')
       div.className = 'annotationLayer'
       div.style.setProperty('--scale-factor', String(this.scale))
@@ -727,6 +799,360 @@ export class PdfViewerController {
       this.formsDirty = true
       this.onFormsDirty()
     }
+  }
+
+  // ── links ────────────────────────────────────────────────────────────────
+
+  /**
+   * One transparent hit box per Link annotation, positioned with the same
+   * geometry helpers as highlights — so rotation, crop and zoom need nothing
+   * special. Sits above the text layer (like pdf.js's own viewer): a link
+   * area is for clicking; selection still works everywhere else and can be
+   * dragged across a link.
+   */
+  private renderLinkLayer(s: PageSlot, i: number, annots: unknown[]): void {
+    if (!s.links) {
+      s.links = []
+      for (const a of annots) {
+        const raw = linkTargetOf(a)
+        const rect = raw && annotRect(a)
+        if (raw && rect) s.links.push({ rect, raw })
+      }
+    }
+    if (!s.links.length) return
+    const layer = document.createElement('div')
+    layer.className = 'pv-link-layer'
+    const box = this.boxes[i]
+    const rot = this.rotationOf(i)
+    s.links.forEach((l, k) => {
+      const v = pdfRectToView({ x1: l.rect[0], y1: l.rect[1], x2: l.rect[2], y2: l.rect[3] }, box, rot, this.scale)
+      // hairline links (a 0.2pt-wide box in the ISO spec) still get a target
+      const w = Math.max(v.width, 6)
+      const h = Math.max(v.height, 6)
+      const a = document.createElement('a')
+      a.className = 'pv-link'
+      a.dataset.link = String(k)
+      a.draggable = false
+      if (l.raw.kind === 'external') {
+        a.title = l.raw.url
+        a.dataset.external = '1'
+      }
+      a.setAttribute('role', 'link')
+      a.style.cssText = `left:${v.left - (w - v.width) / 2}px;top:${v.top - (h - v.height) / 2}px;width:${w}px;height:${h}px`
+      layer.appendChild(a)
+    })
+    s.inner.appendChild(layer)
+  }
+
+  /** does this page carry in-document links? (then smart refs stay off) */
+  private hasInternalLinks(i: number): boolean {
+    return !!this.slots[i]?.links?.some((l) => l.raw.kind !== 'external')
+  }
+
+  private async resolveLinkEl(el: HTMLElement): Promise<{ page: number; target: Awaited<ReturnType<typeof resolveLinkTarget>> } | null> {
+    const pageEl = el.closest('.pv-page') as HTMLElement | null
+    const page = pageEl ? parseInt(pageEl.dataset.page!, 10) : 0
+    const link = this.slots[page - 1]?.links?.[parseInt(el.dataset.link ?? '-1', 10)]
+    if (!link) return null
+    return { page, target: await resolveLinkTarget(this.doc, link.raw, page) }
+  }
+
+  /** follow a link element: jump inside the doc, or hand a URL outward */
+  private async followLinkEl(el: HTMLElement): Promise<void> {
+    const r = await this.resolveLinkEl(el)
+    if (!r?.target || this.destroyed) return
+    if (r.target.kind === 'external') this.onExternalLink(r.target.url)
+    else this.goToDest(r.target.dest)
+  }
+
+  /** jump to a destination, recording history (links, outline, previews) */
+  goToDest(dest: LinkDest): void {
+    const commit = this.onBeforeJump()
+    this.scrollToDest(dest)
+    commit()
+  }
+
+  /**
+   * Scroll so a destination's top-left lands at the top of the viewport —
+   * the exact spot, not just the page top — and flash a marker there.
+   * x/y null fall back to the page's top/left.
+   */
+  scrollToDest(dest: LinkDest): void {
+    const page = Math.min(Math.max(dest.page, 1), this.numPages)
+    const i = page - 1
+    const s = this.slots[i]
+    this.scrollToPage(page)
+    if (s && (dest.x != null || dest.y != null)) {
+      const box = this.boxes[i]
+      const rot = this.rotationOf(i)
+      const px = dest.x ?? box.x0
+      const py = Math.min(dest.y ?? box.y0 + box.h, box.y0 + box.h)
+      const v = pdfToView(px, py, box, rot, this.scale)
+      const off = cropOffset(box, rot, this.crop, this.scale)
+      const base = this.scrollMode === 'paged' ? 0 : s.top
+      this.scroll.scrollTop = Math.max(0, base + v.y - off.y - 8)
+      // only when zoomed past the viewport width is there anything to aim at
+      if (dest.x != null && this.scroll.scrollWidth > this.scroll.clientWidth + 4) {
+        this.scroll.scrollLeft = Math.max(0, s.left + v.x - off.x - 16)
+      }
+      this.flashDest(i, v.y - off.y)
+    }
+    this.settle()
+  }
+
+  /** a short-lived bar where a jump landed, so the eye finds the spot */
+  private flashDest(i: number, yInPage: number): void {
+    const s = this.slots[i]
+    if (!s) return
+    s.el.querySelectorAll('.pv-dest-flash').forEach((e) => e.remove())
+    const bar = document.createElement('div')
+    bar.className = 'pv-dest-flash'
+    bar.style.top = `${Math.max(0, yInPage)}px`
+    // on the clip box, not the inner page: a page that renders after the
+    // jump wipes its inner layers, and the marker must survive that
+    s.el.appendChild(bar)
+    setTimeout(() => bar.remove(), 1600)
+  }
+
+  /** render + report after a programmatic scroll (paged mode may not emit
+   *  a scroll event when scrollTop happens to stay the same) */
+  settle(): void {
+    this.update()
+    this.onVisiblePage(this.currentPage())
+  }
+
+  /**
+   * On-screen size of a region preview that fits in maxW × maxH. Rotation
+   * matters: a 90°-turned page makes a wide strip tall, and the popup must
+   * know that before it has rendered anything, to place itself.
+   */
+  regionSize(pageNum: number, region: Quad, maxW: number, maxH: number): { w: number; h: number } {
+    const i = pageNum - 1
+    const v1 = pdfRectToView(region, this.boxes[i], this.rotationOf(i), 1)
+    const css = Math.min(maxW / Math.max(1, v1.width), maxH / Math.max(1, v1.height))
+    return { w: v1.width * css, h: v1.height * css }
+  }
+
+  /**
+   * Render one PDF-space region of a page into a canvas fitting maxW × maxH —
+   * the link / reference preview. Honours user rotation; dark-invert
+   * follows the reader's setting so the popup matches the page.
+   */
+  async renderRegion(pageNum: number, region: Quad, maxW: number, maxH = Infinity): Promise<HTMLCanvasElement> {
+    const page = await this.doc.getPage(pageNum)
+    const box = boxOf(page)
+    const rot = normRotation(box.rotate + this.userRotationOf(pageNum - 1))
+    const v1 = pdfRectToView(region, box, rot, 1)
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR)
+    const css = Math.min(maxW / Math.max(1, v1.width), maxH / Math.max(1, v1.height))
+    const scale = css * dpr
+    const canvas = await this.renderToCanvas(pageNum, scale, {
+      x: v1.left * scale, y: v1.top * scale, w: v1.width * scale, h: v1.height * scale,
+    })
+    canvas.style.width = `${v1.width * css}px`
+    canvas.style.height = `${v1.height * css}px`
+    if (this.theme() === 'dark' && this.darkPdf === 'smart') {
+      const s = this.slots[pageNum - 1]
+      if (s.hasImages === null) s.hasImages = await this.pageHasImages(page)
+      canvas.classList.toggle('pv-inverted', !s.hasImages)
+    }
+    return canvas
+  }
+
+  /** what a link's preview shows: the destination's neighbourhood */
+  private async regionForDest(dest: LinkDest): Promise<Quad> {
+    const box = boxOf(await this.doc.getPage(dest.page))
+    const top = box.y0 + box.h
+    if (dest.rect) {
+      const [x1, y1, x2, y2] = dest.rect
+      return { x1: Math.max(box.x0, x1 - 12), y1: Math.max(box.y0, y1 - 12), x2: Math.min(box.x0 + box.w, x2 + 12), y2: Math.min(top, y2 + 12) }
+    }
+    const tall = Math.min(260, box.h * 0.4)
+    // a destination near the bottom still gets a full-height window
+    const y2 = Math.max(Math.min(top, (dest.y ?? top) + 12), box.y0 + tall)
+    return { x1: box.x0, x2: box.x0 + box.w, y1: y2 - tall, y2 }
+  }
+
+  private async previewLinkEl(el: HTMLElement, touch: boolean): Promise<void> {
+    const r = await this.resolveLinkEl(el)
+    if (!r?.target || this.destroyed) return
+    const anchor = el.getBoundingClientRect()
+    if (r.target.kind === 'external') {
+      // a mouse already sees the URL as a tooltip; touch has no hover
+      if (touch) this.onPreview({ kind: 'url', label: r.target.url, url: r.target.url, anchor, touch })
+      return
+    }
+    const dest = r.target.dest
+    this.onPreview({
+      kind: 'link', label: `p. ${dest.page}`, page: dest.page,
+      region: await this.regionForDest(dest), dest, anchor, touch,
+    })
+  }
+
+  private async previewRef(hit: RefHit, page: number, touch: boolean): Promise<boolean> {
+    this.refIndex ??= new SmartRefIndex(this.doc)
+    const target = await this.refIndex.resolve(hit.ref, page)
+    if (!target || this.destroyed) return false
+    // hovering the caption itself: nothing to preview
+    if (target.page === page) {
+      const s = this.slots[page - 1]
+      const inner = s.inner.getBoundingClientRect()
+      const v = pdfRectToView(target.line, this.boxes[page - 1], this.rotationOf(page - 1), this.scale)
+      const r = hit.rects[0]
+      const cx = (r.left + r.right) / 2 - inner.left
+      const cy = (r.top + r.bottom) / 2 - inner.top
+      if (cx >= v.left - 2 && cx <= v.left + v.width + 2 && cy >= v.top - 2 && cy <= v.top + v.height + 2) return false
+    }
+    const a = hit.rects[0]
+    const b = hit.rects[hit.rects.length - 1]
+    this.onPreview({
+      kind: hit.ref.kind,
+      label: `${hit.text} · p. ${target.page}`,
+      page: target.page,
+      region: target.region,
+      dest: { page: target.page, x: null, y: target.jumpY, fit: 'XYZ' },
+      anchor: new DOMRect(a.left, a.top, Math.max(b.right, a.right) - a.left, Math.max(b.bottom, a.bottom) - a.top),
+      touch,
+    })
+    return true
+  }
+
+  /** underline the hovered reference so it reads as clickable */
+  private markRef(hit: RefHit | null, page: number): void {
+    for (const m of this.refMarks) m.remove()
+    this.refMarks = []
+    const s = hit && this.slots[page - 1]
+    if (!hit || !s) return
+    const inner = s.inner.getBoundingClientRect()
+    for (const r of hit.rects) {
+      const m = document.createElement('div')
+      m.className = 'pv-ref-mark'
+      m.style.cssText = `left:${r.left - inner.left}px;top:${r.top - inner.top}px;width:${r.width}px;height:${r.height}px`
+      s.inner.appendChild(m)
+      this.refMarks.push(m)
+    }
+  }
+
+  /** smart-ref hit under a point, only on pages that have no real links */
+  private refHitAt(target: EventTarget | null, x: number, y: number): { hit: RefHit; page: number } | null {
+    const pageEl = (target as HTMLElement | null)?.closest?.('.pv-page') as HTMLElement | null
+    if (!pageEl) return null
+    const page = parseInt(pageEl.dataset.page!, 10)
+    if (this.hasInternalLinks(page - 1)) return null
+    const hit = refUnderPoint(target, x, y)
+    return hit ? { hit, page } : null
+  }
+
+  private clearHover(): void {
+    clearTimeout(this.hoverTimer)
+    this.hoverTimer = 0
+    if (this.hoverKey) {
+      this.hoverKey = ''
+      this.markRef(null, 0)
+      this.onPreview(null)
+    }
+  }
+
+  private onPointerOver = (e: PointerEvent): void => {
+    if (e.pointerType !== 'mouse' || e.buttons) return
+    const el = (e.target as HTMLElement).closest?.('.pv-link') as HTMLElement | null
+    if (!el) return
+    const key = `link:${(el.closest('.pv-page') as HTMLElement)?.dataset.page}:${el.dataset.link}`
+    if (key === this.hoverKey) return
+    this.clearHover()
+    this.hoverKey = key
+    this.hoverTimer = window.setTimeout(() => {
+      if (this.hoverKey === key) void this.previewLinkEl(el, false)
+    }, HOVER_MS)
+  }
+
+  private onPointerOut = (e: PointerEvent): void => {
+    if (e.pointerType !== 'mouse') return
+    const el = (e.target as HTMLElement).closest?.('.pv-link')
+    if (el && !(e.relatedTarget instanceof Node && el.contains(e.relatedTarget))) this.clearHover()
+  }
+
+  private onPointerMove = (e: PointerEvent): void => {
+    if (this.pressStart && Math.hypot(e.clientX - this.pressStart.x, e.clientY - this.pressStart.y) > 8) {
+      clearTimeout(this.pressTimer)
+      this.pressStart = null
+    }
+    if (e.pointerType !== 'mouse' || this.hoverRaf) return
+    const { target, clientX, clientY, buttons } = e
+    // a short timer rather than rAF: hit-testing needs no paint, and rAF
+    // stalls entirely in a throttled (backgrounded) webview
+    this.hoverRaf = window.setTimeout(() => {
+      this.hoverRaf = 0
+      if (this.destroyed || this.hoverKey.startsWith('link:')) return
+      // dragging a selection is not hovering
+      const found = buttons ? null : this.refHitAt(target, clientX, clientY)
+      if (!found) {
+        if (this.hoverKey) this.clearHover()
+        return
+      }
+      if (found.hit.key === this.hoverKey) return
+      this.clearHover()
+      const key = found.hit.key
+      this.hoverKey = key
+      this.hoverTimer = window.setTimeout(() => {
+        if (this.hoverKey !== key) return
+        void this.previewRef(found.hit, found.page, false).then((ok) => {
+          if (ok && this.hoverKey === key) this.markRef(found.hit, found.page)
+        })
+      }, HOVER_MS)
+    }, 30)
+  }
+
+  private onPointerDown = (e: PointerEvent): void => {
+    this.pointerType = e.pointerType
+    this.suppressClick = false
+    if (e.pointerType === 'mouse') { this.clearHover(); return }
+    const el = (e.target as HTMLElement).closest?.('.pv-link') as HTMLElement | null
+    if (!el) return
+    this.pressStart = { x: e.clientX, y: e.clientY }
+    clearTimeout(this.pressTimer)
+    this.pressTimer = window.setTimeout(() => {
+      this.pressStart = null
+      // the finger is still down: this was a long-press, not a tap
+      this.suppressClick = true
+      void this.previewLinkEl(el, true)
+    }, LONG_PRESS_MS)
+  }
+
+  private onPointerEnd = (): void => {
+    clearTimeout(this.pressTimer)
+    this.pressStart = null
+  }
+
+  private onContextMenu = (e: MouseEvent): void => {
+    // iOS/Android long-press menu on a link would fight the preview
+    if (this.pointerType !== 'mouse' && (e.target as HTMLElement).closest?.('.pv-link')) e.preventDefault()
+  }
+
+  private onLinkClick = (e: MouseEvent): void => {
+    const el = (e.target as HTMLElement).closest?.('.pv-link') as HTMLElement | null
+    if (el) {
+      e.preventDefault()
+      if (this.suppressClick) { this.suppressClick = false; return }
+      this.clearHover()
+      void this.followLinkEl(el)
+      return
+    }
+    // touch has no hover: a tap on a smart reference opens its preview
+    if (this.pointerType === 'mouse') return
+    const sel = window.getSelection()
+    if (sel && !sel.isCollapsed) return
+    const found = this.refHitAt(e.target, e.clientX, e.clientY)
+    if (found) void this.previewRef(found.hit, found.page, true)
+  }
+
+  /** E2E hook: preview the reference / link at a client point right now */
+  async previewAt(x: number, y: number): Promise<boolean> {
+    const target = document.elementFromPoint(x, y)
+    const el = (target as HTMLElement | null)?.closest?.('.pv-link') as HTMLElement | null
+    if (el) { await this.previewLinkEl(el, false); return true }
+    const found = this.refHitAt(target, x, y)
+    return found ? this.previewRef(found.hit, found.page, false) : false
   }
 
   /** serialize the document WITH filled form values */
@@ -1121,6 +1547,17 @@ export class PdfViewerController {
     this.stopAutoScroll()
     this.scroll.removeEventListener('scroll', this.onScroll)
     document.removeEventListener('selectionchange', this.onSelChange)
+    this.scroll.removeEventListener('click', this.onLinkClick)
+    this.scroll.removeEventListener('pointerover', this.onPointerOver)
+    this.scroll.removeEventListener('pointerout', this.onPointerOut)
+    this.scroll.removeEventListener('pointermove', this.onPointerMove)
+    this.scroll.removeEventListener('pointerdown', this.onPointerDown)
+    this.scroll.removeEventListener('pointerup', this.onPointerEnd)
+    this.scroll.removeEventListener('pointercancel', this.onPointerEnd)
+    this.scroll.removeEventListener('contextmenu', this.onContextMenu)
+    clearTimeout(this.hoverTimer)
+    clearTimeout(this.pressTimer)
+    clearTimeout(this.hoverRaf)
     for (const s of this.slots) this.releasePage(s)
     this.area.remove()
     void this.doc.destroy()

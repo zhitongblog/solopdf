@@ -1063,3 +1063,66 @@ h4.bk-block { font-size: 1.15em; }
 .st-cache-btns { display: flex; gap: 6px; }
 .st-shell.phone .settings-row { min-height: 48px; }
 .st-shell.phone .st-body input[type='checkbox'] { width: 22px; height: 22px; }
+
+/* ── hyperlinks ── */
+/* above the text layer (a link area is for clicking); the layer itself lets
+   everything through, only the hit boxes take the pointer */
+.pv-link-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+.pv-link {
+  position: absolute; pointer-events: auto; cursor: pointer; border-radius: 2px;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+.pv-link:hover { background: rgba(58, 109, 240, 0.12); box-shadow: 0 1px 0 rgba(58, 109, 240, 0.6); }
+/* hovered smart reference ("Figure 3", "[12]") */
+.pv-ref-mark {
+  position: absolute; z-index: 3; pointer-events: none; border-radius: 2px;
+  background: rgba(58, 109, 240, 0.1); box-shadow: 0 1.5px 0 rgba(58, 109, 240, 0.7);
+}
+/* where a jump landed */
+.pv-dest-flash {
+  position: absolute; left: 0; right: 0; height: 0; z-index: 6; pointer-events: none;
+  border-top: 2px solid var(--accent); animation: destflash 1.5s ease forwards;
+}
+@keyframes destflash {
+  0%, 50% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* link / reference preview */
+.lp-pop {
+  position: fixed; z-index: 60; display: flex; flex-direction: column;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: var(--shadow); overflow: hidden;
+}
+.lp-head {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px;
+  color: var(--fg-dim); border-bottom: 1px solid var(--border);
+}
+.lp-kind { color: var(--accent); font-weight: 600; flex: none; }
+.lp-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.lp-close { margin-left: auto; padding: 2px 8px; flex: none; }
+.lp-body { position: relative; padding: 8px; cursor: pointer; max-height: 60vh; overflow: hidden; }
+.lp-canvas canvas { display: block; margin: 0 auto; border-radius: 4px; background: #fff; }
+.lp-canvas canvas.pv-inverted { filter: invert(0.93) hue-rotate(180deg); }
+.lp-status {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--fg-dim); font-size: 13px; min-height: 60px;
+}
+.lp-open { margin: 10px; min-height: 36px; }
+.lp-pop.phone {
+  left: 50% !important; transform: translateX(-50%); top: auto !important;
+  bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+}
+.lp-pop.touch .lp-open, .lp-pop.phone .lp-close { min-height: 40px; min-width: 40px; }
+
+/* back pill: phones (no toolbar room) and touch screens */
+.nav-pill {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 45;
+  padding: 8px 18px; min-height: 40px; border-radius: 20px;
+  background: var(--bg-panel); color: var(--fg); border: 1px solid var(--border);
+  box-shadow: var(--shadow); font-size: 14px;
+}
+@media (min-width: 700px) and (pointer: fine) {
+  .nav-pill { display: none; }
+}

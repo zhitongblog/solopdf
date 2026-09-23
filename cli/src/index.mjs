@@ -5,6 +5,7 @@
  *
  *   solopdf info <file.pdf> [--password pw]
  *   solopdf extract-text <file.pdf> [--pages 1-5] [--password pw]
+ *   solopdf links <file.pdf> [--pages 1-5]      # hyperlinks → JSON
  *   solopdf export-annotations <file.pdf>       # sidecar -> JSON
  *   solopdf selftest <fixtures-dir>             # acceptance run over fixtures
  *   solopdf annotate <file.pdf> [--out x.pdf]   # sidecar -> real PDF annots
@@ -21,7 +22,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync, readFileSync as require$readFileSync } from 'node:fs'
 import path from 'node:path'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
-import { parse, orderLinesForReading } from '@solopdf/core'
+import { parse, orderLinesForReading, pageLinks } from '@solopdf/core'
 
 // piping into `head` etc. closes stdout early — exit quietly instead of crashing
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0) })
@@ -57,7 +58,10 @@ async function open(file) {
     disableFontFace: true,
     verbosity: 0,
     wasmUrl: `file://${root}/wasm/`,
-    cMapUrl: `file://${root}/cmaps/`,
+    cMapUrl: `${root}/cmaps/`,
+    // the bundled cmaps are the packed .bcmap files — without this, every
+    // non-embedded CJK font (UniGB-UCS2-H …) silently extracts as nothing
+    cMapPacked: true,
     standardFontDataUrl: `file://${root}/standard_fonts/`,
   })
   try {
@@ -113,6 +117,34 @@ async function cmdExtract(file) {
     process.stdout.write(await pageText(doc, p))
     process.stdout.write('\n\f\n')
   }
+}
+
+/** every Link annotation, resolved the same way the viewer resolves a click */
+async function cmdLinks(file) {
+  const doc = await open(file)
+  const [a, b] = parsePages(flag('pages'), doc.numPages)
+  const links = []
+  for (let p = a; p <= b; p++) {
+    for (const l of await pageLinks(doc, p)) {
+      const r = l.rect.map((n) => Math.round(n * 100) / 100)
+      links.push(l.target.kind === 'external'
+        ? { page: p, rect: r, url: l.target.url }
+        : {
+            page: p, rect: r, target: l.target.dest.page,
+            fit: l.target.dest.fit,
+            x: l.target.dest.x, y: l.target.dest.y,
+          })
+    }
+  }
+  const internal = links.filter((l) => l.target != null).length
+  console.log(JSON.stringify({
+    file: path.resolve(file),
+    pages: [a, b],
+    count: links.length,
+    internal,
+    external: links.length - internal,
+    links,
+  }, null, 2))
 }
 
 async function cmdExportAnnotations(file) {
@@ -507,6 +539,7 @@ const file = args[1]
 switch (cmd) {
   case 'info': await cmdInfo(file ?? die('用法: solopdf info <file.pdf>')); break
   case 'extract-text': await cmdExtract(file ?? die('用法: solopdf extract-text <file.pdf>')); break
+  case 'links': await cmdLinks(file ?? die('用法: solopdf links <file.pdf> [--pages A-B]')); break
   case 'export-annotations': await cmdExportAnnotations(file ?? die('用法: solopdf export-annotations <file.pdf>')); break
   case 'form-fields': await cmdFormFields(file ?? die('用法: solopdf form-fields <file.pdf>')); break
   case 'export-md': await cmdExportMd(file ?? die('用法: solopdf export-md <file.pdf>')); break
@@ -523,6 +556,7 @@ switch (cmd) {
 用法:
   solopdf info <file.pdf> [--password pw]          文档信息（页数/书签/元数据）
   solopdf extract-text <file.pdf> [--pages A-B]    提取文字
+  solopdf links <file.pdf> [--pages A-B]           超链接列表（页、区域、内部目标页或 URL）→ JSON
   solopdf export-annotations <file.pdf>            批注伴生文件 → JSON
   solopdf form-fields <file.pdf>                   AcroForm 表单域与当前值 → JSON
   solopdf export-md <file.pdf>                     全文导出为 Markdown（stdout）

@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { store, controllers } from '../store'
 import { SearchSession, type SearchHit } from '../viewer/search'
 import { t } from '../i18n'
+import { jump as navJump } from '../nav'
 
 const emit = defineEmits<{ close: [] }>()
 const input = ref<HTMLInputElement>()
@@ -34,8 +35,15 @@ function run(): void {
 function jump(i: number): void {
   const h = hits.value[i]
   if (!h) return
+  const first = currentIdx.value < 0
   currentIdx.value = i
-  ctrl.value?.scrollToPage(h.page)
+  const c = ctrl.value
+  const tab = store.activeTab
+  if (!c || !tab) return
+  // only the first hit of a search is a history jump — Back then returns to
+  // where the reader was before searching, not to the previous hit
+  if (first) navJump(tab.id, () => { c.scrollToPage(h.page); c.settle() })
+  else { c.scrollToPage(h.page); c.settle() }
 }
 function next(dir: 1 | -1): void {
   if (!hits.value.length) return
