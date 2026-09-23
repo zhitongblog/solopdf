@@ -4,14 +4,16 @@
  *
  * The flat list worked when there were four switches. There are now enough
  * that the grouping IS the documentation: reading, marks, speech, dictionary,
- * privacy. Anything that belongs to one document (rotation, crop) or to one
+ * translation, privacy. Anything that belongs to one document (rotation, crop) or to one
  * view (book typography, comic direction) deliberately stays where you use
  * it, not here.
  */
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { TRANSLATE_LANGS } from '@solopdf/core'
 import { store } from '../store'
 import { isMobile, isTauri } from '../platform'
-import { t, LOCALES } from '../i18n'
+import { t, LOCALES, currentLocale } from '../i18n'
+import { nativeEngine } from '../translate'
 
 const emit = defineEmits<{ close: []; stats: [] }>()
 
@@ -19,6 +21,23 @@ const phone = computed(() => isMobile() || window.innerWidth < 700)
 const clearing = ref('')
 
 const COLORS = ['yellow', 'green', 'blue', 'pink'] as const
+
+const trEngine = ref('none')
+onMounted(async () => { trEngine.value = await nativeEngine() })
+const trEngineLabel = computed(() => {
+  if (trEngine.value === 'apple') return t('st.trNativeApple')
+  if (trEngine.value === 'apple-hosted') return t('st.trNativeHosted')
+  if (trEngine.value === 'stub') return t('tr.engStub')
+  return t('st.trNativeNone')
+})
+const tr = computed(() => store.settings.translate)
+function langName(tag: string): string {
+  try {
+    return new Intl.DisplayNames([currentLocale.value], { type: 'language' }).of(tag) ?? tag
+  } catch {
+    return tag
+  }
+}
 
 async function clearCache(kind: 'textindex' | 'covers'): Promise<void> {
   clearing.value = kind
@@ -150,6 +169,66 @@ async function clearCache(kind: 'textindex' | 'covers'): Promise<void> {
           <input class="st-wide" v-model="store.settings.webLookupUrl" placeholder="https://…%s" />
         </div>
         <p class="sr-sub st-note" v-if="isTauri()">{{ t('st.userDicts') }}</p>
+
+        <h4>{{ t('st.g.translate') }}</h4>
+        <div class="settings-row">
+          <div>
+            <div class="sr-label">{{ t('st.trTarget') }}</div>
+            <div class="sr-sub">{{ t('st.trTargetSub') }}</div>
+          </div>
+          <select v-model="tr.target" data-testid="tr-target">
+            <option value="">{{ t('tr.auto') }}</option>
+            <option v-for="l in TRANSLATE_LANGS" :key="l" :value="l">{{ langName(l) }}</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="sr-label">{{ t('st.trNative') }}</div>
+            <div class="sr-sub">{{ trEngineLabel }}</div>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="sr-label">{{ t('st.trProvider') }}</div>
+            <div class="sr-sub st-warn">{{ t('st.trProviderSub') }}</div>
+          </div>
+          <select v-model="tr.provider.kind" data-testid="tr-provider">
+            <option value="off">{{ t('st.trOff') }}</option>
+            <option value="deepl">{{ t('st.trDeepl') }}</option>
+            <option value="openai">{{ t('st.trOpenai') }}</option>
+          </select>
+        </div>
+        <template v-if="tr.provider.kind === 'deepl'">
+          <div class="settings-row">
+            <input
+              class="st-wide" type="password" autocomplete="off" spellcheck="false"
+              v-model.trim="tr.provider.deeplKey" :placeholder="t('st.trDeeplKey')"
+            />
+          </div>
+        </template>
+        <template v-else-if="tr.provider.kind === 'openai'">
+          <div class="settings-row">
+            <input
+              class="st-wide" autocomplete="off" spellcheck="false"
+              v-model.trim="tr.provider.baseUrl" :placeholder="t('st.trBaseUrl') + ' — https://…/v1'"
+            />
+          </div>
+          <div class="settings-row">
+            <input
+              class="st-wide" type="password" autocomplete="off" spellcheck="false"
+              v-model.trim="tr.provider.apiKey" :placeholder="t('st.trApiKey')"
+            />
+          </div>
+          <div class="settings-row">
+            <input
+              class="st-wide" autocomplete="off" spellcheck="false"
+              v-model.trim="tr.provider.model" :placeholder="t('st.trModel') + ' — gpt-4o-mini, deepseek-chat, qwen2.5…'"
+            />
+          </div>
+        </template>
+        <p v-if="tr.provider.kind !== 'off' && trEngine !== 'none'" class="sr-sub st-note">
+          {{ t('st.trOnlineOnlyFallback') }}
+        </p>
 
         <h4>{{ t('st.g.privacy') }}</h4>
         <div class="settings-row">

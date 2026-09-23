@@ -108,6 +108,17 @@ export interface Settings {
   /** where the dictionary's explicit "search the web" button goes; %s = word.
    *  Never used automatically — SoloPDF makes no network request on its own. */
   webLookupUrl: string
+  /** selection translation */
+  translate: TranslateSettings
+}
+
+export interface TranslateSettings {
+  /** target language tag; '' = the UI language (English when the text is
+   *  already in it) */
+  target: string
+  /** the reader's own online provider — off by default, the key never
+   *  leaves this device except in the request to that provider */
+  provider: import('@solopdf/core').ProviderConfig
 }
 
 export interface ComicSettings {
@@ -164,6 +175,10 @@ export const DEFAULT_SETTINGS: Settings = {
   comic: { spread: MOBILE ? 1 : 2, rtl: false, fit: 'height' },
   defaultColor: 'yellow',
   webLookupUrl: 'https://www.google.com/search?q=define+%s',
+  translate: {
+    target: '',
+    provider: { kind: 'off', deeplKey: '', baseUrl: 'https://api.openai.com/v1', apiKey: '', model: '' },
+  },
 }
 
 export function applyLanguage(): void {
@@ -236,6 +251,11 @@ export async function initStore(): Promise<void> {
     store.settings.book = { ...DEFAULT_SETTINGS.book, ...(s.settings.book ?? {}) }
     store.settings.tts = { ...DEFAULT_SETTINGS.tts, ...(s.settings.tts ?? {}) }
     store.settings.comic = { ...DEFAULT_SETTINGS.comic, ...(s.settings.comic ?? {}) }
+    store.settings.translate = {
+      ...DEFAULT_SETTINGS.translate,
+      ...(s.settings.translate ?? {}),
+      provider: { ...DEFAULT_SETTINGS.translate.provider, ...(s.settings.translate?.provider ?? {}) },
+    }
   }
   if (s.recents) store.recents = s.recents
   if (s.positions) store.positions = s.positions

@@ -11,6 +11,7 @@ use tauri::{Emitter, Manager};
 pub mod ocr;
 pub mod pdfops;
 pub mod djvu;
+pub mod translate;
 #[cfg(target_os = "android")]
 pub mod android;
 
@@ -697,6 +698,49 @@ fn define_word(_word: String) -> &'static str {
     "unsupported"
 }
 
+// ── Translation ──────────────────────────────────────────────────────────
+
+/// On-device translation (Apple Translation framework). Always resolves —
+/// failures come back as {"error","code"} for the UI to explain.
+#[tauri::command]
+async fn translate_text(text: String, target: String, fallback: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || translate::translate(&text, &target, &fallback))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Ask the OS to download a language pair (shows the system's own sheet).
+#[tauri::command]
+async fn translate_prepare(source: String, target: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || translate::prepare(&source, &target))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// macOS: System Settings → Language & Region (download language packs).
+#[tauri::command]
+fn translate_open_settings() -> bool {
+    translate::open_settings()
+}
+
+/// "apple" | "apple-hosted" | "none"
+#[tauri::command]
+fn translate_engine() -> &'static str {
+    translate::engine_name()
+}
+
+/// Carry the user-configured provider's request (built in @solopdf/core).
+#[tauri::command]
+async fn translate_http(
+    url: String,
+    headers: Vec<(String, String)>,
+    body: String,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || translate::http_post(&url, &headers, &body))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 // ── DjVu ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -1269,6 +1313,11 @@ pub fn run() {
             pdf_set_password,
             pdf_remove_password,
             define_word,
+            translate_text,
+            translate_prepare,
+            translate_engine,
+            translate_open_settings,
+            translate_http,
             read_user_dicts,
             djvu_info,
             djvu_page,

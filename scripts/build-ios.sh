@@ -37,6 +37,25 @@ if 'PROVISIONING_PROFILE_SPECIFIER' not in s:
     open(p, 'w').write(s)
 print('signing config ok')
 PY
+echo "==> Linking the translation shim's frameworks (libapp.a is linked by Xcode)"
+# Translation / SwiftUI are weak so iOS 15–17 still launch (the shim reports
+# "unavailable" there); NaturalLanguage exists on every supported iOS.
+python3 - "$PROJECT_YML" << 'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "      - sdk: Vision.framework\n"
+assert anchor in s, 'Vision.framework dependency anchor not found'
+add = ""
+for fw, weak in (("NaturalLanguage", False), ("Translation", True), ("SwiftUI", True)):
+    if f"sdk: {fw}.framework" not in s:
+        add += f"      - sdk: {fw}.framework\n" + ("        weak: true\n" if weak else "")
+if add:
+    s = s.replace(anchor, anchor + add, 1)
+    open(p, 'w').write(s)
+print('translation frameworks ok')
+PY
+
 echo "==> Regenerating xcodeproj (tauri ios build does NOT re-run xcodegen)"
 (cd app/src-tauri/gen/apple && xcodegen generate >/dev/null)
 grep -q PROVISIONING_PROFILE_SPECIFIER app/src-tauri/gen/apple/solopdf.xcodeproj/project.pbxproj || { echo "ERROR: signing not in pbxproj" >&2; exit 1; }

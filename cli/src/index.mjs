@@ -11,6 +11,7 @@
  *   solopdf to-images <file.pdf> --out-dir d    # pages -> PNG/JPEG
  *   solopdf search <dir> <query>                # across a folder of documents
  *   solopdf dict <word>                         # bundled offline dictionary
+ *   solopdf translate "text" [--to zh-Hans]     # on-device translation (macOS)
  *   solopdf doc <…>                             # page ops, merge, compress, …
  *
  * Used by Claude/CI for self-testing (global rule #2) and by users for
@@ -21,7 +22,9 @@ import { readFile } from 'node:fs/promises'
 import { existsSync, readFileSync as require$readFileSync } from 'node:fs'
 import path from 'node:path'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
-import { parse, orderLinesForReading } from '@solopdf/core'
+import {
+  parse, orderLinesForReading, pickTarget, guessLang, providerReady, translateWithProvider,
+} from '@solopdf/core'
 
 // piping into `head` etc. closes stdout early — exit quietly instead of crashing
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0) })
@@ -447,6 +450,57 @@ async function cmdDict(word) {
   console.log(JSON.stringify({ query: word, matched: null, entries: [] }, null, 2))
 }
 
+/**
+ * Translate text. Engine order matches the app: Apple's on-device
+ * Translation (through the solopdf-ocr helper) first; then an online
+ * provider, only when one is configured by flags or environment:
+ *   --provider deepl  --key K            (or SOLOPDF_DEEPL_KEY)
+ *   --provider openai --base-url U --model M [--key K]
+ *                                        (or SOLOPDF_OPENAI_BASE_URL / _MODEL / _KEY)
+ * --to defaults to the system language (English when the text already is).
+ * --online skips the on-device engine. Prints JSON; exit 2 on failure.
+ */
+async function cmdTranslate(text) {
+  const { spawnSync } = await import('node:child_process')
+  if (text === '-') text = require$readFileSync(0, 'utf8')
+  const sysLang = Intl.DateTimeFormat().resolvedOptions().locale || 'en'
+  const { target, fallback } = pickTarget(flag('to') ?? '', sysLang, guessLang(text))
+  const fb = flag('fallback') ?? fallback
+  let native = null
+  if (!args.includes('--online') && (process.platform === 'darwin')) {
+    const r = spawnSync(ocrBin(), ['translate', '-', '--to', target, '--fallback', fb], {
+      input: text, encoding: 'utf8',
+    })
+    if (r.error) native = { error: `solopdf-ocr not found (${r.error.code}) — cargo build --bin solopdf-ocr`, code: 'unavailable' }
+    else {
+      try { native = { ...JSON.parse(r.stdout.trim()), engine: 'apple' } } catch { native = { error: (r.stderr || r.stdout).trim(), code: 'failed' } }
+    }
+    if (!native.error || !['unavailable', 'unsupported'].includes(native.code)) {
+      console.log(JSON.stringify(native, null, 2))
+      process.exit(native.error ? 2 : 0)
+    }
+  }
+  const kind = flag('provider') ?? (process.env.SOLOPDF_DEEPL_KEY ? 'deepl' : process.env.SOLOPDF_OPENAI_BASE_URL ? 'openai' : 'off')
+  const cfg = kind === 'deepl'
+    ? { kind, deeplKey: flag('key') ?? process.env.SOLOPDF_DEEPL_KEY }
+    : { kind, baseUrl: flag('base-url') ?? process.env.SOLOPDF_OPENAI_BASE_URL, model: flag('model') ?? process.env.SOLOPDF_OPENAI_MODEL, apiKey: flag('key') ?? process.env.SOLOPDF_OPENAI_KEY }
+  if (!providerReady(cfg)) {
+    const out = native ?? { error: 'no translation engine: on-device translation needs macOS 15+; or pass --provider deepl|openai', code: 'noEngine' }
+    console.log(JSON.stringify(out, null, 2))
+    process.exit(2)
+  }
+  const res = await translateWithProvider(cfg, text, target, fb, async (req) => {
+    const r = await fetch(req.url, {
+      method: 'POST',
+      headers: Object.fromEntries([...req.headers, ['Content-Type', 'application/json']]),
+      body: req.body,
+    })
+    return { status: r.status, body: await r.text() }
+  })
+  console.log(JSON.stringify(res, null, 2))
+  process.exit(res.error ? 2 : 0)
+}
+
 /** Everything the native document driver does, forwarded verbatim. */
 async function cmdDoc(rest) {
   const { spawnSync } = await import('node:child_process')
@@ -515,6 +569,7 @@ switch (cmd) {
   case 'to-images': await cmdToImages(file ?? die('用法: solopdf to-images <file.pdf> --out-dir <dir>')); break
   case 'search': await cmdSearch(file ?? die('用法: solopdf search <dir> <query>'), args[2]); break
   case 'dict': await cmdDict(file ?? die('用法: solopdf dict <词>')); break
+  case 'translate': await cmdTranslate(file ?? die('用法: solopdf translate "文字"|- [--to zh-Hans] [--online] [--provider deepl|openai …]')); break
   case 'doc': await cmdDoc(args.slice(1)); break
   case 'selftest': await cmdSelftest(file ?? die('用法: solopdf selftest <fixtures-dir>')); break
   default:
@@ -531,6 +586,7 @@ switch (cmd) {
   solopdf to-images <file.pdf> --out-dir <dir>     页面 → PNG/JPEG（--dpi 150 --pages A-B）
   solopdf search <dir> <query>                     跨文件搜索（批注优先，再正文）
   solopdf dict <词>                                内置离线词典（CC-CEDICT）
+  solopdf translate "文字" [--to zh-Hans]          翻译：macOS 用本机 Apple 翻译；可选 --provider deepl|openai
   solopdf doc <子命令> …                            页面/合并/拆分/压缩/加密（solopdf-doc）
   solopdf selftest <fixtures-dir>                  标准测试集验收
 

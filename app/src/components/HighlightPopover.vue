@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
- * Selection popover: colour, mark kind, copy, and "add a note".
+ * Selection popover: colour, mark kind, copy, look up, translate, and
+ * "add a note".
  *
  * The colour row is the fast path (one tap = a highlight in the last colour
  * you used); the kind row is one row down because underline/strike are the
@@ -20,6 +21,7 @@ const emit = defineEmits<{
   note: [color: string, kind: AnnotationKind]
   copy: []
   define: []
+  translate: []
 }>()
 
 const COLORS = ['yellow', 'green', 'blue', 'pink'] as const
@@ -39,7 +41,7 @@ const style = computed(() => {
   if (docked.value) return {}
   const r = props.selection.clientRect
   const top = Math.min(window.innerHeight - 96, r.bottom + 8)
-  const left = Math.min(window.innerWidth - 250, Math.max(8, r.left + r.width / 2 - 120))
+  const left = Math.min(window.innerWidth - 290, Math.max(8, r.left + r.width / 2 - 140))
   return { top: `${top}px`, left: `${left}px` }
 })
 </script>
@@ -61,10 +63,20 @@ const style = computed(() => {
         :title="t('hl.kind.' + k)"
         @click="kind = k; $emit('pick', color, k)"
       >{{ KIND_GLYPH[k] }}</button>
-      <span class="hl-sep" />
+      <template v-if="!docked">
+        <span class="hl-sep" />
+        <button class="hl-act" :title="t('hl.note')" @click="$emit('note', color, kind)">✎</button>
+        <button class="hl-act" :title="t('hl.copy')" @click="$emit('copy')">⧉</button>
+        <button class="hl-act" :title="t('hl.define')" @click="$emit('define')">📖</button>
+        <button class="hl-act hl-translate" :title="t('hl.translate')" @click="$emit('translate')">{{ t('hl.translateGlyph') }}</button>
+      </template>
+    </div>
+    <!-- phones: four 44px kinds + four actions don't fit one row at 375px -->
+    <div v-if="docked" class="hl-row">
       <button class="hl-act" :title="t('hl.note')" @click="$emit('note', color, kind)">✎</button>
       <button class="hl-act" :title="t('hl.copy')" @click="$emit('copy')">⧉</button>
       <button class="hl-act" :title="t('hl.define')" @click="$emit('define')">📖</button>
+      <button class="hl-act hl-translate" :title="t('hl.translate')" @click="$emit('translate')">{{ t('hl.translateGlyph') }}</button>
     </div>
   </div>
 </template>

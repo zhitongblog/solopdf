@@ -38,6 +38,7 @@ import AnnotToolLayer from './components/AnnotToolLayer.vue'
 import DocTools from './components/doctools/DocTools.vue'
 import ReadAloudBar from './components/ReadAloudBar.vue'
 import DictPopup from './components/DictPopup.vue'
+import TranslatePopup from './components/TranslatePopup.vue'
 import StatsPanel from './components/StatsPanel.vue'
 import LibraryView from './components/LibraryView.vue'
 import LibrarySearch from './components/LibrarySearch.vue'
@@ -57,6 +58,9 @@ const tool = ref<'none' | 'note' | 'region'>('none')
 const docToolsOpen = ref(false)
 const readAloud = ref(false)
 const dictWord = ref<{ word: string; anchor: DOMRect | null } | null>(null)
+/** translation panel; `sel` is a snapshot so "add as note" still has the
+ *  selection after clicks inside the panel collapse the live one */
+const translateReq = ref<{ text: string; anchor: DOMRect | null; sel: SelectionInfo | null; tabId: number } | null>(null)
 const statsOpen = ref(false)
 const librarySearchOpen = ref(false)
 const ocrOpen = ref(false)
@@ -345,8 +349,13 @@ function onCloseTab(id: number): void {
 }
 
 // ── highlight ──
-async function highlightSelection(color: string, kind: AnnotationKind = 'highlight', note = ''): Promise<void> {
-  const sel = selection.value
+async function highlightSelection(
+  color: string,
+  kind: AnnotationKind = 'highlight',
+  note = '',
+  selOverride?: SelectionInfo,
+): Promise<void> {
+  const sel = selOverride ?? selection.value
   const tab = store.activeTab
   if (!sel || !tab) return
   const mgr = annotManagers.get(tab.id)
@@ -386,6 +395,29 @@ function defineSelection(): void {
   const sel = selection.value
   if (!sel?.text.trim()) return
   dictWord.value = { word: sel.text.trim().slice(0, 40), anchor: sel.clientRect ?? null }
+}
+
+function translateSelection(): void {
+  const sel = selection.value
+  const tab = store.activeTab
+  if (!sel?.text.trim() || !tab) return
+  translateReq.value = {
+    text: sel.text.trim().slice(0, 5000),
+    anchor: sel.clientRect ?? null,
+    sel: { ...sel, quads: sel.quads.map((q) => ({ ...q })) },
+    tabId: tab.id,
+  }
+}
+
+/** translation panel → a highlight of the original with the translation as its note */
+async function addTranslationNote(translation: string): Promise<void> {
+  const req = translateReq.value
+  translateReq.value = null
+  if (!req?.sel || store.activeTabId !== req.tabId) {
+    showToast(t('tr.noSelection'))
+    return
+  }
+  await highlightSelection(store.settings.defaultColor, 'highlight', translation, req.sel)
 }
 
 async function copySelection(): Promise<void> {
@@ -460,7 +492,9 @@ function onKey(e: KeyboardEvent): void {
   else if (mod && e.key === ',') { e.preventDefault(); settingsOpen.value = !settingsOpen.value }
   else if (mod && e.key === 'b') { e.preventDefault(); store.settings.sidebarOpen = !store.settings.sidebarOpen }
   else if (mod && e.key === 'd') { e.preventDefault(); toggleBookmark() }
-  else if (!mod && e.key === 'Escape') { searchOpen.value = false; settingsOpen.value = false }
+  else if (!mod && e.key === 'Escape') {
+    searchOpen.value = false; settingsOpen.value = false; translateReq.value = null
+  }
   else if (!mod && tab && ctrl && !tab.bookMode && !isTyping(e)) {
     if (e.key === 'j' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); ctrl.turnPage(1) }
     else if (e.key === 'k' || e.key === 'PageUp') { e.preventDefault(); ctrl.turnPage(-1) }
@@ -660,6 +694,10 @@ onMounted(async () => {
     openDocTools: () => { docToolsOpen.value = true },
     setReadAloud: (on: boolean) => { readAloud.value = on },
     lookupWord: (w: string) => { dictWord.value = { word: w, anchor: null } },
+    translateSelection,
+    translateText: (text: string) => { translateReq.value = { text, anchor: null, sel: null, tabId: store.activeTabId } },
+    translateReq,
+    setTranslateStub: async (on: boolean) => (await import('./translate')).setTranslateStub(on),
     openStats: () => { statsOpen.value = true },
     openLibrarySearch: () => { librarySearchOpen.value = true },
     readAloudRef: readAloud,
@@ -812,12 +850,24 @@ watch(() => store.settings.theme, () => {
     </div>
 
     <HighlightPopover
-      v-if="selection && tool === 'none'"
+      v-if="selection && tool === 'none' && !translateReq"
       :selection="selection"
       @pick="highlightSelection"
       @note="askNoteForSelection"
       @copy="copySelection"
       @define="defineSelection"
+      @translate="translateSelection"
+    />
+
+    <TranslatePopup
+      v-if="translateReq"
+      :text="translateReq.text"
+      :anchor="translateReq.anchor"
+      @close="translateReq = null"
+      @toast="showToast"
+      @add-note="addTranslationNote"
+      @define="(w) => { translateReq = null; dictWord = { word: w, anchor: null } }"
+      @settings="translateReq = null; settingsOpen = true"
     />
 
     <DictPopup

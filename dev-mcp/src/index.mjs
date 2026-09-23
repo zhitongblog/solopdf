@@ -12,13 +12,15 @@ import { readFile, writeFile, mkdtemp, rm, readdir, mkdir } from 'node:fs/promis
 import { existsSync } from 'node:fs'
 import os from 'node:os'
 import nodePath from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { gunzipSync } from 'fflate'
-import { parse, upsertAnnotation, genId, normalize } from '@solopdf/core'
+import {
+  parse, upsertAnnotation, genId, normalize, pickTarget, guessLang, providerReady, translateWithProvider,
+} from '@solopdf/core'
 
 const ALLOW_WRITE = process.argv.includes('--allow-write')
 
@@ -41,6 +43,18 @@ function docBin() {
   if (process.env.SOLOPDF_DOC_BIN) return process.env.SOLOPDF_DOC_BIN
   const here = nodePath.dirname(new URL(import.meta.url).pathname)
   const exe = process.platform === 'win32' ? 'solopdf-doc.exe' : 'solopdf-doc'
+  for (const rel of [`../../app/src-tauri/target/release/${exe}`, `../../app/src-tauri/target/debug/${exe}`]) {
+    const p = nodePath.resolve(here, rel)
+    if (existsSync(p)) return p
+  }
+  return exe // PATH
+}
+
+/** the native OCR/translation helper, same lookup rule as the CLI */
+function ocrBin() {
+  if (process.env.SOLOPDF_OCR_BIN) return process.env.SOLOPDF_OCR_BIN
+  const here = nodePath.dirname(new URL(import.meta.url).pathname)
+  const exe = process.platform === 'win32' ? 'solopdf-ocr.exe' : 'solopdf-ocr'
   for (const rel of [`../../app/src-tauri/target/release/${exe}`, `../../app/src-tauri/target/debug/${exe}`]) {
     const p = nodePath.resolve(here, rel)
     if (existsSync(p)) return p
@@ -216,6 +230,43 @@ server.tool(
     await writeFile(out, canvas.toBuffer('image/png'))
     await doc.destroy()
     return text({ written: out, width: canvas.width, height: canvas.height })
+  },
+)
+
+server.tool(
+  'solopdf_translate',
+  '翻译一段文字（只读）。macOS 15+ 用本机 Apple 翻译（离线）；否则仅当环境变量配置了服务时联网：' +
+    'SOLOPDF_DEEPL_KEY，或 SOLOPDF_OPENAI_BASE_URL + SOLOPDF_OPENAI_MODEL [+ SOLOPDF_OPENAI_KEY]。' +
+    'to 省略 = 系统语言（原文已是该语言时译成英文）',
+  { text: z.string(), to: z.string().optional(), fallback: z.string().optional() },
+  async ({ text: input, to, fallback }) => {
+    const sysLang = Intl.DateTimeFormat().resolvedOptions().locale || 'en'
+    const picked = pickTarget(to ?? '', sysLang, guessLang(input))
+    const fb = fallback ?? picked.fallback
+    let native = null
+    if (process.platform === 'darwin') {
+      const r = spawnSync(ocrBin(), ['translate', '-', '--to', picked.target, '--fallback', fb], {
+        input, encoding: 'utf8',
+      })
+      if (!r.error) {
+        try { native = { ...JSON.parse(r.stdout.trim()), engine: 'apple' } } catch { native = { error: (r.stderr || r.stdout).trim(), code: 'failed' } }
+        if (!native.error || !['unavailable', 'unsupported'].includes(native.code)) return text(native)
+      }
+    }
+    const cfg = process.env.SOLOPDF_DEEPL_KEY
+      ? { kind: 'deepl', deeplKey: process.env.SOLOPDF_DEEPL_KEY }
+      : { kind: 'openai', baseUrl: process.env.SOLOPDF_OPENAI_BASE_URL, model: process.env.SOLOPDF_OPENAI_MODEL, apiKey: process.env.SOLOPDF_OPENAI_KEY }
+    if (!providerReady(cfg)) {
+      return text(native ?? { error: 'no translation engine (needs macOS 15+, or a provider configured via env)', code: 'noEngine' })
+    }
+    return text(await translateWithProvider(cfg, input, picked.target, fb, async (req) => {
+      const r = await fetch(req.url, {
+        method: 'POST',
+        headers: Object.fromEntries([...req.headers, ['Content-Type', 'application/json']]),
+        body: req.body,
+      })
+      return { status: r.status, body: await r.text() }
+    }))
   },
 )
 

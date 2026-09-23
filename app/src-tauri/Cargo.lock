@@ -3873,6 +3873,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tiny_http",
  "twox-hash",
+ "ureq",
 ]
 
 [[package]]
