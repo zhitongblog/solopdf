@@ -121,7 +121,7 @@ export const reviewContact = {
   demoAccountRequired: false,
   notes: `SoloPDF is a fully local PDF reader. No account needed, no server component.
 
-FIX FOR THE PREVIOUS REJECTION (2.1a "error when open a PDF document"): the iOS file picker returned file:// URLs which our file layer treated as raw paths, so opening any picked document failed. We reproduced your exact flow (Open PDF > Files picker > select a PDF) on an iPad simulator, fixed the path normalization, and verified end-to-end that picked PDFs now open correctly (build 0.4.2).
+FIX FOR THE PREVIOUS REJECTION (2.1a, 0.7.0 crashed on launch on iPad Air 11-inch (M3), iPadOS 27.0): the attached crash logs show UIKit's launch-time check for apps that have not adopted the UIScene life cycle (EXC_BREAKPOINT in _UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption), which iOS 27 enforces for apps built with the iOS 27 SDK. Build 0.7.1 adopts the UIScene life cycle (UIApplicationSceneManifest + a UISceneDelegate). We reproduced the exact crash on iPadOS 27 / iOS 27 with the 0.7.0 code, and verified that 0.7.1 launches, opens PDFs from the Files picker and via "Open in SoloPDF", and survives backgrounding and rotation on both iPad and iPhone.
 
 SAMPLE PDF: https://solopdf.doaipm.com/sample.pdf — download in Safari, then in SoloPDF tap "Open PDF" and pick it from Files > Downloads (or use any of your own PDFs).
 
@@ -155,6 +155,6 @@ export const screenshots = {
 
 // Per-platform release plan: store version string must match the attached build's train.
 export const platforms = {
-  IOS:    { versionString: '0.7.0', buildVersion: '0.7.0' },
+  IOS:    { versionString: '0.7.1', buildVersion: '0.7.1' },
   MAC_OS: { versionString: '1.6.0', buildVersion: '1.6.0' },
 };

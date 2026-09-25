@@ -1,5 +1,5 @@
 // One-shot App Store Connect release for SoloPDF — BOTH platforms (iOS + macOS).
-//   node release.mjs [--no-submit] [--skip-screenshots]
+//   node release.mjs [--no-submit] [--skip-screenshots] [--platform=IOS|MAC_OS]
 // Idempotent: applies all metadata every run, patches version strings to match the
 // build trains in metadata.platforms, attaches builds, uploads screenshots into empty
 // sets, ensures free pricing + "Data Not Collected" privacy, then submits one review
@@ -9,6 +9,10 @@ import * as M from './metadata.mjs';
 
 const NO_SUBMIT = process.argv.includes('--no-submit');
 const SKIP_SHOTS = process.argv.includes('--skip-screenshots');
+// --platform=IOS resubmits one platform without touching the other (e.g. while it's in review)
+const ONLY = process.argv.find((a) => a.startsWith('--platform='))?.split('=')[1];
+const PLATFORMS = Object.fromEntries(Object.entries(M.platforms).filter(([p]) => !ONLY || p === ONLY));
+if (!Object.keys(PLATFORMS).length) throw new Error(`--platform=${ONLY}: not in metadata.platforms`);
 const APP = CONFIG.appId;
 const log = (...a) => console.log('•', ...a);
 
@@ -81,7 +85,7 @@ try {
 // ---------- per-platform ----------
 const allVers = (await api('GET', `/v1/apps/${APP}/appStoreVersions?limit=20`)).data;
 const verIds = {};
-for (const [platform, plan] of Object.entries(M.platforms)) {
+for (const [platform, plan] of Object.entries(PLATFORMS)) {
   const EDITABLE = ['PREPARE_FOR_SUBMISSION', 'REJECTED', 'DEVELOPER_REJECTED', 'METADATA_REJECTED', 'INVALID_BINARY'];
   let ver = allVers.find((v) => v.attributes.platform === platform && EDITABLE.includes(v.attributes.appStoreState));
   if (!ver) {
@@ -144,18 +148,32 @@ for (const [platform, plan] of Object.entries(M.platforms)) {
 
 // ---------- submit (one review submission per platform) ----------
 if (NO_SUBMIT) { log('--no-submit: everything staged but NOT submitted.'); process.exit(0); }
-for (const platform of Object.keys(M.platforms)) {
+for (const platform of Object.keys(PLATFORMS)) {
+  // a rejected submission can't take new items ("already submitted"): cancel it first
+  const stale = (await api('GET', `/v1/apps/${APP}/reviewSubmissions?filter[platform]=${platform}&filter[state]=UNRESOLVED_ISSUES&limit=5`)).data || [];
+  for (const old of stale) {
+    await api('PATCH', `/v1/reviewSubmissions/${old.id}`, { data: { type: 'reviewSubmissions', id: old.id, attributes: { canceled: true } } });
+    log(platform, 'canceled rejected submission', old.id);
+  }
   const subs = (await api('GET', `/v1/apps/${APP}/reviewSubmissions?filter[platform]=${platform}&filter[state]=READY_FOR_REVIEW&limit=1`)).data || [];
   let sub = subs[0] || (await api('POST', '/v1/reviewSubmissions', { data: { type: 'reviewSubmissions', attributes: { platform },
     relationships: { app: { data: { type: 'apps', id: APP } } } } })).data;
   const items = (await api('GET', `/v1/reviewSubmissions/${sub.id}/items`)).data || [];
-  if (!items.length) {
-    await api('POST', '/v1/reviewSubmissionItems', { data: { type: 'reviewSubmissionItems',
-      relationships: { reviewSubmission: { data: { type: 'reviewSubmissions', id: sub.id } },
-        appStoreVersion: { data: { type: 'appStoreVersions', id: verIds[platform] } } } } });
+  // right after a cancel the version can still be locked for a bit (409) — retry
+  for (let i = 0; !items.length; i++) {
+    try {
+      await api('POST', '/v1/reviewSubmissionItems', { data: { type: 'reviewSubmissionItems',
+        relationships: { reviewSubmission: { data: { type: 'reviewSubmissions', id: sub.id } },
+          appStoreVersion: { data: { type: 'appStoreVersions', id: verIds[platform] } } } } });
+      break;
+    } catch (e) {
+      if (i >= 11 || !String(e.message).includes('409')) throw e;
+      log(platform, 'item not accepted yet, retrying in 10s:', String(e.message).slice(0, 80));
+      await new Promise((r) => setTimeout(r, 10000));
+    }
   }
   await api('PATCH', `/v1/reviewSubmissions/${sub.id}`, { data: { type: 'reviewSubmissions', id: sub.id, attributes: { submitted: true } } });
   const after = (await api('GET', `/v1/reviewSubmissions/${sub.id}`)).data;
   log(platform, 'SUBMITTED —', sub.id, 'state:', after.attributes.state);
 }
-console.log('\n✅ Both platforms submitted for review. Auto-release after approval.');
+console.log(`\n✅ ${Object.keys(PLATFORMS).join(' + ')} submitted for review. Auto-release after approval.`);

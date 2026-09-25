@@ -93,3 +93,17 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
+
+# iPadOS 27 kills apps built with the iOS 27 SDK that haven't adopted the UIScene
+# lifecycle (App Review 2.1(a), v0.7.0). tao 0.35 only enters scene mode when the
+# Info.plist also enables multiple scenes; tao 0.37 fixed this, but no Tauri release
+# depends on it yet. vendor/tao is tao 0.35.3 with the four iOS files
+# (platform_impl/ios/{app_state,mod,scene,view}.rs) taken from tao 0.37.0.
+# Drop this once tauri-runtime-wry depends on tao >= 0.37.
+#
+# vendor/swift-rs is swift-rs 1.0.7 building Swift packages with
+# `--build-system native`: Xcode 27's default swiftbuild backend overrides the iOS
+# -sdk/-target with macOS ones, so any clean iOS build (device or simulator) fails.
+[patch.crates-io]
+tao = { path = "vendor/tao" }
+swift-rs = { path = "vendor/swift-rs" }

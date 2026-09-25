@@ -73,6 +73,24 @@ IOS_PLIST=app/src-tauri/gen/apple/solopdf_iOS/Info.plist
 /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$IOS_PLIST" 2>/dev/null ||
   /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$IOS_PLIST"
 
+# UIScene lifecycle: iOS 27 traps at launch (EXC_BREAKPOINT in
+# _UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption) for apps built
+# with the iOS 27 SDK that don't adopt it — App Review 2.1(a) on 0.7.0. The
+# manifest puts tao (vendor/tao, 0.37 iOS backend) in scene mode; one scene only.
+# It goes into project.yml, not Info.plist: the xcodegen run below rewrites
+# Info.plist and would drop a PlistBuddy-added dict.
+python3 - "$PROJECT_YML" << 'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+if 'UIApplicationSceneManifest' not in s:
+    anchor = "        LSRequiresIPhoneOS: true\n"
+    assert anchor in s, 'info.properties anchor not found'
+    s = s.replace(anchor, anchor + "        UIApplicationSceneManifest:\n          UIApplicationSupportsMultipleScenes: false\n", 1)
+    open(p, 'w').write(s)
+print('scene manifest ok')
+PY
+
 echo "==> Writing ExportOptions.plist"
 cat > "$EXPORT_PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -120,4 +138,7 @@ unset APPLE_SIGNING_IDENTITY
 pnpm tauri ios build --export-method app-store-connect
 IPA=$(ls src-tauri/gen/apple/build/arm64/*.ipa 2>/dev/null | head -1)
 [ -n "$IPA" ] || { echo "ERROR: no ipa produced" >&2; exit 1; }
+# without the scene manifest the app crashes on launch on iOS 27 (2.1(a) rejection of 0.7.0)
+unzip -p "$IPA" 'Payload/*.app/Info.plist' | plutil -extract UIApplicationSceneManifest xml1 -o - - >/dev/null 2>&1 ||
+  { echo "ERROR: $IPA has no UIApplicationSceneManifest — iOS 27 would kill it at launch" >&2; exit 1; }
 echo "==> Done: app/$IPA"
