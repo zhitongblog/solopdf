@@ -21,6 +21,10 @@
 | `layers-sample.pdf` | 图层（OCG）：Base map（锁定）/ Labels / Theme 组下 Day·Night 单选组（Night 默认关） | 2 页 / 2KB | 同上脚本；/PageMode /UseOC |
 | `compare-contract-v1.pdf` / `compare-contract-v2.pdf` | 文档比较（合同两版：改一句、删一段、插入整页、中文逐字插入、改一个词；页脚页码在插页后整体错位） | 4 页 / 5 页，各 ~6KB | `node scripts/gen-compare-fixture.mjs` 手写 PDF 对象生成，可复现；中文用非嵌入 STSong-Light |
 
+| `fb2-cyrillic-1251.fb2` | FB2 图书（windows-1251 编码、嵌套章节→目录、封面与内嵌图片、诗歌/题记/表格/脚注） | 29KB / 8 章 | `python3 scripts/gen-format-fixtures.py` 生成；正文为普希金诗句（公有领域）+ 自写测试句 |
+| `fb2-chinese.fbz` | 压缩 FB2（zip 内一个 UTF-8 .fb2，中文、全角缩进） | 11KB / 2 章 | 同上脚本生成 |
+| `tiff-mixed-3p.tiff` | 多页 TIFF，三种压缩混排：CCITT G4 1-bit 传真页 / LZW RGB / Deflate 灰度横版页 | 66KB / 3 页 | 同上脚本（Pillow 逐页生成 + libtiff `tiffcp` 拼接） |
+
 ## 验收要点对照（来自设计蓝图 Success Criteria）
 
 - `large-britannica-v1.pdf`：冷启动到首页渲染 <2s（M 系列）；滚动全程内存不爆（虚拟滚动 ±2 页）
@@ -38,5 +42,10 @@
 - 其他无附件/无图层的样本：两个页签都不出现
 - `compare-contract-v1.pdf` → `compare-contract-v2.pdf`：`solopdf compare` 恰好报 6 处——p.2 修改「thirty (30」→「fifteen (15」、p.2 删除 2.3 整段、新增第 3 页（Schedule C）、p.3→p.4 新增「严格」「任何」、p.4→p.5「Zurich」→「Geneva」；页对齐 1-1 / 2-2 / —-3 / 3-4 / 4-5；页脚页码不算差异。应用里两版并排、两边高亮、同步滚动按对齐跳页
 - `encrypted-password-solopdf.pdf`：密码框（记住本次会话）；高亮时弹一次明文保存提示
+- `fb2-cyrillic-1251.fb2`：西里尔文正常显示（非乱码）；目录 7 条（两级）；第 3 章有柱状图；搜索「журавль」命中第 7 章；
+  高亮写入 `fb2-cyrillic-1251.annotations.md`；`solopdf info` 报 `encoding: windows-1251`
+- `fb2-chinese.fbz`：直接打开 zip 包；段首全角缩进保留；`solopdf extract-text` 输出「床前明月光」
+- `tiff-mixed-3p.tiff`：3 页全部解码（第 3 页 Deflate 依赖 pako）；`solopdf info` 列出 G4/LZW/Deflate；旋转、缩放、翻页；
+  桌面版底栏「识别文字」对当前页 OCR
 
 注：`*.pdf` 均来自公有领域/官方公开渠道，可安全入库；如嫌 157MB 太大可 git-lfs 或 .gitignore。

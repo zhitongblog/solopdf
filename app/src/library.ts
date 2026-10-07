@@ -20,7 +20,7 @@ import { isTauri } from './platform'
 export interface LibraryItem {
   path: string
   name: string
-  kind: 'pdf' | 'epub' | 'txt' | 'comic' | 'mobi' | 'djvu' | 'other'
+  kind: 'pdf' | 'epub' | 'txt' | 'comic' | 'mobi' | 'djvu' | 'fb2' | 'tiff' | 'other'
   addedAt: number
   lastOpenedAt: number
   favorite?: boolean
@@ -34,10 +34,12 @@ export interface LibraryItem {
 
 export function kindOf(path: string): LibraryItem['kind'] {
   const ext = path.toLowerCase().split('.').pop() ?? ''
+  if (/\.fb2\.zip$/i.test(path) || ext === 'fb2' || ext === 'fbz') return 'fb2'
+  if (ext === 'tif' || ext === 'tiff') return 'tiff'
   if (ext === 'pdf') return 'pdf'
   if (ext === 'epub') return 'epub'
   if (ext === 'txt') return 'txt'
-  if (ext === 'cbz' || ext === 'cbr') return 'comic'
+  if (ext === 'cbz' || ext === 'cbr' || ext === 'zip') return 'comic'
   if (ext === 'mobi' || ext === 'azw3' || ext === 'azw' || ext === 'prc') return 'mobi'
   if (ext === 'djvu' || ext === 'djv') return 'djvu'
   return 'other'

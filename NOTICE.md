@@ -28,8 +28,18 @@ https://github.com/tesseract-ocr/tesseract
 ## PP-OCRv4 / v6 models — Apache-2.0
 Bundled OCR models on Windows and Linux. https://github.com/PaddlePaddle/PaddleOCR
 
+## UTIF.js (utif2) — MIT
+Pure-JS TIFF decoding (CCITT G3/G4 fax, LZW, PackBits, Deflate, JPEG) for
+`.tif` / `.tiff` pages, in the app and in the CLI's `to-images`.
+Copyright (c) 2017 Photopea. https://github.com/photopea/UTIF.js
+
+## pako — MIT (+ zlib license)
+Deflate decompression used by UTIF.js for Deflate-compressed TIFF strips.
+https://github.com/nodeca/pako
+
 ## fflate — MIT
-ZIP/gzip handling for EPUB, CBZ and the dictionary shards.
+ZIP/gzip handling for EPUB, CBZ, zipped FB2 (.fbz / .fb2.zip) and the
+dictionary shards.
 https://github.com/101arrowz/fflate
 
 ## lopdf — MIT

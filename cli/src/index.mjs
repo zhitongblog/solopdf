@@ -3,8 +3,8 @@
  * solopdf CLI — same pdf.js engine as the app, so text extraction matches
  * what the viewer sees (single-engine rule from the design doc).
  *
- *   solopdf info <file.pdf> [--password pw]
- *   solopdf extract-text <file.pdf> [--pages 1-5] [--password pw]
+ *   solopdf info <file.pdf|.fb2|.fbz|.tif> [--password pw]
+ *   solopdf extract-text <file.pdf|.fb2|.fbz> [--pages 1-5] [--password pw]
  *   solopdf links <file.pdf> [--pages 1-5]      # hyperlinks → JSON
  *   solopdf attachments <file.pdf> [--extract d] # embedded files → JSON / disk
  *   solopdf layers <file.pdf>                   # optional content (OCG) → JSON
@@ -36,6 +36,7 @@ import {
   readCitationInput, extractCitation, formatCitation, fetchDoiMetadata, CITE_FORMATS, pageDeepLink,
   compareDocuments,
 } from '@solopdf/core'
+import { formatOf, loadFb2, fb2InfoJson, tiffInfoJson, tiffPages } from './formats.mjs'
 
 // piping into `head` etc. closes stdout early — exit quietly instead of crashing
 process.stdout.on('error', (e) => { if (e.code === 'EPIPE') process.exit(0) })
@@ -60,7 +61,7 @@ function pdfjsRoot() {
   return path.dirname(pkg)
 }
 
-async function open(file, password = flag('password')) {
+async function open(file, password = flag('password'), { soft = false } = {}) {
   if (!existsSync(file)) die(`文件不存在: ${file}`)
   const data = new Uint8Array(await readFile(file))
   const root = pdfjsRoot()
@@ -80,7 +81,7 @@ async function open(file, password = flag('password')) {
   try {
     return await task.promise
   } catch (e) {
-    if (String(e?.name) === 'PasswordException') {
+    if (!soft && String(e?.name) === 'PasswordException') {
       die(`该 PDF 受密码保护（用 --password 提供密码）: ${e.message}`)
     }
     throw e
@@ -106,7 +107,16 @@ async function pageText(doc, p) {
   return out
 }
 
+/** sidecar beside a document: same stem rule as the app (Rust file_stem) */
+function sidecarOf(file) {
+  return file.replace(/\.[^./\\]+$/, '') + '.annotations.md'
+}
+
 async function cmdInfo(file) {
+  if (!existsSync(file)) die(`文件不存在: ${file}`)
+  const fmt = formatOf(file)
+  if (fmt === 'fb2') { console.log(JSON.stringify(await fb2InfoJson(file), null, 2)); return }
+  if (fmt === 'tiff') { console.log(JSON.stringify(await tiffInfoJson(file), null, 2)); return }
   const doc = await open(file)
   const meta = await doc.getMetadata().catch(() => null)
   const outline = await doc.getOutline().catch(() => null)
@@ -128,6 +138,19 @@ async function cmdInfo(file) {
 }
 
 async function cmdExtract(file) {
+  if (!existsSync(file)) die(`文件不存在: ${file}`)
+  const fmt = formatOf(file)
+  if (fmt === 'tiff') die('TIFF 是图像，没有文字层——用 solopdf ocr 识别')
+  if (fmt === 'fb2') {
+    // FB2 has no pages: --pages counts chapters, same unit the reader uses
+    const { book } = await loadFb2(file)
+    const [a, b] = parsePages(flag('pages'), book.chapters.length)
+    for (let c = a; c <= b; c++) {
+      process.stdout.write(book.chapters[c - 1].text)
+      process.stdout.write('\n\f\n')
+    }
+    return
+  }
   const doc = await open(file)
   const [a, b] = parsePages(flag('pages'), doc.numPages)
   for (let p = a; p <= b; p++) {
@@ -165,7 +188,7 @@ async function cmdLinks(file) {
 }
 
 async function cmdExportAnnotations(file) {
-  const sidecar = file.replace(/\.pdf$/i, '') + '.annotations.md'
+  const sidecar = sidecarOf(file)
   if (!existsSync(sidecar)) die(`没有伴生批注文件: ${sidecar}`)
   const text = await readFile(sidecar, 'utf-8')
   const sc = parse(text)
@@ -369,7 +392,7 @@ async function cmdAnnotate(file) {
   const { execFileSync } = await import('node:child_process')
   const { writeFile, mkdtemp, rm } = await import('node:fs/promises')
   const os = await import('node:os')
-  const sidecar = file.replace(/\.pdf$/i, '') + '.annotations.md'
+  const sidecar = sidecarOf(file)
   if (!existsSync(sidecar)) die(`没有伴生批注文件: ${sidecar}`)
   const sc = parse(await readFile(sidecar, 'utf-8'))
   const specs = []
@@ -399,6 +422,23 @@ async function cmdToImages(file) {
   const dpi = Number(flag('dpi') ?? 150)
   const fmt = (flag('format') ?? 'png').toLowerCase()
   await mkdir(dir, { recursive: true })
+  if (formatOf(file) === 'tiff') {
+    const tif = await tiffPages(file)
+    const [a, b] = parsePages(flag('pages'), tif.pages.length)
+    const stem = path.basename(file).replace(/\.tiff?$/i, '')
+    for (let p = a; p <= b; p++) {
+      const img = tif.rgba(tif.pages[p - 1])
+      const canvas = createCanvas(img.width, img.height)
+      const ctx = canvas.getContext('2d')
+      const id = ctx.createImageData(img.width, img.height)
+      id.data.set(img.data)
+      ctx.putImageData(id, 0, 0)
+      const name = path.join(dir, `${stem}-${String(p).padStart(3, '0')}.${fmt === 'jpeg' ? 'jpg' : 'png'}`)
+      await writeFile(name, canvas.toBuffer(fmt === 'jpeg' ? 'image/jpeg' : 'image/png'))
+      console.error(`✓ ${name}`)
+    }
+    return
+  }
   const doc = await open(file)
   const [a, b] = parsePages(flag('pages'), doc.numPages)
   const stem = path.basename(file).replace(/\.pdf$/i, '')
@@ -427,11 +467,13 @@ async function cmdSearch(dir, query) {
   const q = normalize(query)
   const lower = query.toLowerCase()
   const entries = await readdir(dir, { withFileTypes: true })
-  const pdfs = entries.filter((e) => e.isFile() && /\.pdf$/i.test(e.name)).map((e) => path.join(dir, e.name))
+  const pdfs = entries
+    .filter((e) => e.isFile() && (/\.pdf$/i.test(e.name) || formatOf(e.name) === 'fb2'))
+    .map((e) => path.join(dir, e.name))
   const hits = []
 
   for (const file of pdfs) {
-    const sidecar = file.replace(/\.pdf$/i, '') + '.annotations.md'
+    const sidecar = sidecarOf(file)
     if (!existsSync(sidecar)) continue
     for (const a of parse(await readFile(sidecar, 'utf-8')).annotations) {
       const hay = `${a.excerpt}\n${a.note}`
@@ -441,8 +483,23 @@ async function cmdSearch(dir, query) {
     }
   }
   for (const file of pdfs) {
+    if (formatOf(file) === 'fb2') {
+      // chapters stand in for pages, as in the reader
+      let book
+      try { ({ book } = await loadFb2(file)) } catch { continue }
+      book.chapters.forEach((ch, i) => {
+        const text = normalize(ch.text)
+        let at = text.indexOf(q)
+        while (at >= 0 && hits.length <= 500) {
+          hits.push({ file: path.basename(file), page: i + 1, where: 'text', text: text.slice(Math.max(0, at - 30), at + q.length + 30) })
+          at = text.indexOf(q, at + Math.max(1, q.length))
+        }
+      })
+      if (hits.length > 500) break
+      continue
+    }
     let doc
-    try { doc = await open(file) } catch { continue }
+    try { doc = await open(file, undefined, { soft: true }) } catch { continue } // e.g. encrypted: skip, do not abort the sweep
     for (let p = 1; p <= doc.numPages; p++) {
       const text = normalize(await pageText(doc, p))
       let at = text.indexOf(q)
@@ -723,6 +780,9 @@ async function cmdSelftest(dir) {
     { f: 'form-irs-w9.pdf', minPages: 6 },
     { f: 'encrypted-password-solopdf.pdf', minPages: 20, password: 'solopdf' },
     { f: 'large-britannica-v1.pdf', minPages: 1000, optional: true },
+    { f: 'fb2-cyrillic-1251.fb2', minChapters: 6, expectText: 'Я помню чудное мгновенье' },
+    { f: 'fb2-chinese.fbz', minChapters: 2, expectText: '床前明月光' },
+    { f: 'tiff-mixed-3p.tiff', minPages: 3 },
   ]
   let pass = 0, fail = 0, skip = 0
   for (const c of cases) {
@@ -732,6 +792,27 @@ async function cmdSelftest(dir) {
       console.log(`FAIL ${c.f}: 文件不存在`); fail++; continue
     }
     try {
+      if (formatOf(file) === 'fb2') {
+        const { book } = await loadFb2(file)
+        const problems = []
+        if (book.chapters.length < c.minChapters) problems.push(`章节 ${book.chapters.length} < ${c.minChapters}`)
+        if (!book.chapters.some((ch) => ch.text.includes(c.expectText))) problems.push(`未找到「${c.expectText}」`)
+        if (problems.length) { console.log(`FAIL ${c.f}: ${problems.join('; ')}`); fail++ }
+        else { console.log(`PASS ${c.f} (${book.chapters.length} 章, ${book.encoding})`); pass++ }
+        continue
+      }
+      if (formatOf(file) === 'tiff') {
+        const tif = await tiffPages(file)
+        const problems = []
+        if (tif.pages.length < c.minPages) problems.push(`页数 ${tif.pages.length} < ${c.minPages}`)
+        for (const [i, ifd] of tif.pages.entries()) {
+          const img = tif.rgba(ifd)
+          if (img.data.length !== img.width * img.height * 4) problems.push(`第 ${i + 1} 页解码失败`)
+        }
+        if (problems.length) { console.log(`FAIL ${c.f}: ${problems.join('; ')}`); fail++ }
+        else { console.log(`PASS ${c.f} (${tif.pages.length} 页，全部解码)`); pass++ }
+        continue
+      }
       const data = new Uint8Array(await readFile(file))
       const doc = await getDocument({ data, password: c.password, disableFontFace: true, verbosity: 0 }).promise
       const problems = []
@@ -788,7 +869,8 @@ switch (cmd) {
 
 用法:
   solopdf info <file.pdf> [--password pw]          文档信息（页数/书签/页码标签/元数据）
-  solopdf extract-text <file.pdf> [--pages A-B]    提取文字
+                                                   也支持 .fb2/.fbz/.fb2.zip（章节/目录/编码）与 .tif/.tiff（页数/尺寸/压缩）
+  solopdf extract-text <file.pdf> [--pages A-B]    提取文字（FB2：--pages 按章节）
   solopdf links <file.pdf> [--pages A-B]           超链接列表（页、区域、内部目标页或 URL）→ JSON
   solopdf attachments <file.pdf> [--extract dir]   嵌入附件（文档级 + 回形针注释）→ JSON；--extract 导出到目录
   solopdf layers <file.pdf>                        图层（可选内容 OCG）：默认可见性、锁定、单选组 → JSON
@@ -798,7 +880,7 @@ switch (cmd) {
   solopdf export-md <file.pdf>                     全文导出为 Markdown（stdout）
   solopdf ocr <file.pdf|img> [--out x.pdf|x.md]    本地 OCR：扫描件 → 可搜索 PDF / Markdown
   solopdf annotate <file.pdf> [--out x.pdf]        伴生批注 → 标准 PDF 注释（副本）
-  solopdf to-images <file.pdf> --out-dir <dir>     页面 → PNG/JPEG（--dpi 150 --pages A-B）
+  solopdf to-images <file.pdf> --out-dir <dir>     页面 → PNG/JPEG（--dpi 150 --pages A-B；TIFF 按原尺寸）
   solopdf search <dir> <query>                     跨文件搜索（批注优先，再正文）
   solopdf dict <词>                                内置离线词典（CC-CEDICT）
   solopdf translate "文字" [--to zh-Hans]          翻译：macOS 用本机 Apple 翻译；可选 --provider deepl|openai

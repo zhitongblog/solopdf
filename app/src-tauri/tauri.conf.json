@@ -100,6 +100,26 @@
         "description": "DjVu scanned document",
         "role": "Viewer",
         "mimeType": "image/vnd.djvu"
+      },
+      {
+        "ext": [
+          "fb2",
+          "fbz"
+        ],
+        "name": "FictionBook",
+        "description": "FictionBook 2 e-book",
+        "role": "Viewer",
+        "mimeType": "application/x-fictionbook+xml"
+      },
+      {
+        "ext": [
+          "tif",
+          "tiff"
+        ],
+        "name": "TIFF Image",
+        "description": "TIFF image (single or multi-page)",
+        "role": "Viewer",
+        "mimeType": "image/tiff"
       }
     ],
     "iOS": {

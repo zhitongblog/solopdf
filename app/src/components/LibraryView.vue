@@ -99,7 +99,9 @@ function saveTags(it: LibraryItem): void {
   editingTags.value = null
 }
 
-const KIND_GLYPH: Record<string, string> = { pdf: 'PDF', epub: 'EPUB', txt: 'TXT', other: '·' }
+const KIND_GLYPH: Record<string, string> = {
+  pdf: 'PDF', epub: 'EPUB', txt: 'TXT', mobi: 'MOBI', comic: 'CBZ', djvu: 'DJVU', fb2: 'FB2', tiff: 'TIFF', other: '·',
+}
 </script>
 
 <template>

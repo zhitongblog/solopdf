@@ -27,6 +27,8 @@ import {
   compareDocuments,
 } from '@solopdf/core'
 import { inflateSync } from 'node:zlib'
+// FB2 / TIFF go through the CLI's format module (same core parser as the app)
+import { formatOf, loadFb2, fb2InfoJson, tiffInfoJson } from '../../cli/src/formats.mjs'
 
 const ALLOW_WRITE = process.argv.includes('--allow-write')
 
@@ -46,8 +48,9 @@ async function open(path, password) {
   }).promise
 }
 
-function sidecarPath(pdfPath) {
-  return pdfPath.replace(/\.pdf$/i, '') + '.annotations.md'
+/** sidecar beside a document — same stem rule as the app (Rust file_stem) */
+function sidecarPath(docPath) {
+  return docPath.replace(/\.[^./\\]+$/, '') + '.annotations.md'
 }
 
 const text = (s) => ({ content: [{ type: 'text', text: typeof s === 'string' ? s : JSON.stringify(s, null, 2) }] })
@@ -83,9 +86,13 @@ async function canvasBackend() {
 
 server.tool(
   'solopdf_info',
-  '读取 PDF 文档信息：页数、书签数、元数据、页码标签（印刷页码，如罗马数字前言；按物理页区间压缩给出，null=无标签）',
+  '读取文档信息：PDF 页数、书签数、元数据、页码标签（印刷页码，如罗马数字前言；按物理页区间压缩给出，null=无标签）；' +
+    'FB2/.fbz/.fb2.zip 返回书名/作者/编码/章节数/目录；TIFF 返回页数与每页尺寸/压缩方式',
   { path: z.string(), password: z.string().optional() },
   async ({ path, password }) => {
+    if (!existsSync(path)) throw new Error(`文件不存在: ${path}`)
+    if (formatOf(path) === 'fb2') return text(await fb2InfoJson(path))
+    if (formatOf(path) === 'tiff') return text(await tiffInfoJson(path))
     const doc = await open(path, password)
     const meta = await doc.getMetadata().catch(() => null)
     const outline = await doc.getOutline().catch(() => null)
@@ -107,9 +114,18 @@ server.tool(
 
 server.tool(
   'solopdf_extract_text',
-  '提取 PDF 指定页文字（与应用同引擎，NFKC 归一化前的原始文本）',
+  '提取 PDF 指定页文字（与应用同引擎，NFKC 归一化前的原始文本）；FB2 时 from/to 按章节计',
   { path: z.string(), from: z.number().int().min(1).default(1), to: z.number().int().min(1).default(1), password: z.string().optional() },
   async ({ path, from, to, password }) => {
+    if (!existsSync(path)) throw new Error(`文件不存在: ${path}`)
+    if (formatOf(path) === 'tiff') throw new Error('TIFF 是图像，没有文字层')
+    if (formatOf(path) === 'fb2') {
+      const { book } = await loadFb2(path)
+      const hi = Math.min(to, book.chapters.length)
+      let out = ''
+      for (let c = Math.min(from, hi); c <= hi; c++) out += `--- ch.${c} ${book.chapters[c - 1].title} ---\n${book.chapters[c - 1].text}\n`
+      return text(out)
+    }
     const doc = await open(path, password)
     let out = ''
     const hi = Math.min(to, doc.numPages)

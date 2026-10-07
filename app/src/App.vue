@@ -153,6 +153,32 @@ function restoreBookByHash(tab: TabState, hadPos: boolean): void {
   }).catch(() => {})
 }
 
+/** whole file, in pieces: one read_chunk call is capped at 64MB natively */
+async function readWhole(path: string): Promise<Uint8Array> {
+  const { size } = await platform().fileMeta(path)
+  const STEP = 32 * 1024 * 1024
+  if (size <= STEP) return await platform().readChunk(path, 0, size)
+  const out = new Uint8Array(size)
+  for (let off = 0; off < size; off += STEP) {
+    out.set(await platform().readChunk(path, off, Math.min(STEP, size - off)), off)
+  }
+  return out
+}
+
+/** shelf cover from an image (FB2 cover binary) — scaled like PDF covers */
+async function coverFromImage(path: string, bytes: Uint8Array, type: string): Promise<void> {
+  try {
+    const bmp = await createImageBitmap(new Blob([bytes as BlobPart], { type }))
+    const k = Math.min(1, 320 / bmp.width)
+    const c = document.createElement('canvas')
+    c.width = Math.max(1, Math.round(bmp.width * k))
+    c.height = Math.max(1, Math.round(bmp.height * k))
+    c.getContext('2d')!.drawImage(bmp, 0, 0, c.width, c.height)
+    bmp.close()
+    await captureCover(path, c)
+  } catch { /* a missing cover is cosmetic */ }
+}
+
 // ── open/close ──
 async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string }): Promise<void> {
   // Phones hand us a throwaway path (picker temp dir, or a fresh Inbox copy
@@ -194,6 +220,32 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
     } catch (err) {
       const raw = String((err as Error)?.message ?? err)
       const msg = raw.startsWith('djvu') ? t('dj.' + raw) : raw
+      tab.loadError = msg
+      showToast(t('app.openFail', { msg }))
+    }
+    return
+  }
+
+  // ── TIFF:UTIF 纯 JS 解码(G4 传真/LZW/Deflate/JPEG),和漫画/DjVu 同一个图片页视图 ──
+  if (tab.kind === 'tiff') {
+    try {
+      const bytes = await readWhole(path)
+      const { TiffBook } = await import('./book/tiff')
+      const bk = new TiffBook()
+      await bk.load(bytes)
+      comicBooks.set(tab.id, bk)
+      tab.numPages = bk.pages.length
+      const pos = store.positions[path]
+      tab.currentPage = Math.min(jumpTo?.page ?? pos?.page ?? 1, bk.pages.length)
+      restoreBookByHash(tab, !!(jumpTo || pos))
+      store.docTick++
+      addRecent(path)
+      noteOpened(tab)
+      // shelf cover after the first page is on screen
+      if (isTauri()) setTimeout(() => { try { void captureCover(path, bk.coverCanvas()) } catch { /* cosmetic */ } }, 400)
+    } catch (err) {
+      const raw = String((err as Error)?.message ?? err)
+      const msg = raw.startsWith('tiff') ? t('tf.' + raw) : raw
       tab.loadError = msg
       showToast(t('app.openFail', { msg }))
     }
@@ -261,13 +313,19 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
     return
   }
 
-  // ── EPUB / MOBI / AZW3:只有图书视图,无 pdf.js 管线 ──
-  if (tab.kind === 'epub' || tab.kind === 'mobi') {
+  // ── EPUB / MOBI / AZW3 / FB2:只有图书视图,无 pdf.js 管线 ──
+  if (tab.kind === 'epub' || tab.kind === 'mobi' || tab.kind === 'fb2') {
     try {
-      const meta = await platform().fileMeta(path)
-      const bytes = await platform().readChunk(path, 0, meta.size)
-      let bk: import('./book/epub').EpubBook | import('./book/mobi').MobiBook
-      if (tab.kind === 'mobi') {
+      const bytes = await readWhole(path)
+      let bk: import('./book/epub').EpubBook | import('./book/mobi').MobiBook | import('./book/fb2').Fb2Book
+      if (tab.kind === 'fb2') {
+        const { Fb2Book } = await import('./book/fb2')
+        const f = new Fb2Book()
+        f.load(bytes)
+        bk = f
+        const cover = f.coverBytes()
+        if (cover && isTauri()) void coverFromImage(path, cover.bytes, cover.type)
+      } else if (tab.kind === 'mobi') {
         const { MobiBook } = await import('./book/mobi')
         const m = new MobiBook()
         m.load(bytes)
@@ -280,6 +338,9 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
       }
       epubBooks.set(tab.id, bk)
       if (bk.title) tab.name = bk.title
+      // chapters are the page unit for these books — the shelf's progress
+      // bar needs the count before BookView mounts
+      tab.numPages = bk.chapters.length
       const mgr = new AnnotationManager(path, tab.name, false)
       annotManagers.set(tab.id, mgr)
       mgr.onChange = () => { store.docTick++ }
@@ -294,8 +355,8 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
       noteOpened(tab)
     } catch (err) {
       const raw = String((err as Error)?.message ?? err)
-      // the MOBI reader speaks in codes so the message can be translated
-      const msg = raw.startsWith('mobi') ? t('mb.' + raw) : raw
+      // the MOBI/FB2 readers speak in codes so the message can be translated
+      const msg = raw.startsWith('mobi') ? t('mb.' + raw) : raw.startsWith('fb2') ? t('fb.' + raw) : raw
       tab.loadError = msg
       showToast(t('app.openFail', { msg }))
     }
@@ -1407,18 +1468,20 @@ watch(() => store.settings.sidebarOpen, () => {
             </div>
           </div>
           <ComicView
-            v-if="tab.kind === 'comic' || tab.kind === 'djvu'"
+            v-if="tab.kind === 'comic' || tab.kind === 'djvu' || tab.kind === 'tiff'"
             v-show="tab.id === store.activeTabId"
             :tab-id="tab.id"
             @chrome="chromeReveal = !chromeReveal"
+            @ocr="(bytes: Uint8Array, name: string) => { imageOcrBytes = { bytes, name } }"
           />
           <BookView
             v-else-if="tab.bookMode"
             v-show="tab.id === store.activeTabId"
             :tab-id="tab.id"
-            :source="tab.kind === 'mobi' ? 'epub' : tab.kind"
+            :source="tab.kind === 'mobi' || tab.kind === 'fb2' ? 'epub' : tab.kind"
             @selection="(s) => { selection = s; selOwner = null }"
             @ocr="ocrOpen = true"
+            @search="searchOpen = true"
             @chrome="chromeReveal = !chromeReveal"
             @undo="undoAnnot('undo')"
             @redo="undoAnnot('redo')"

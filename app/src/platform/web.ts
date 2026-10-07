@@ -53,8 +53,9 @@ export class WebBackend implements PlatformBackend {
     return new Uint8Array(await res.arrayBuffer())
   }
 
+  /** same stem rule as the native side (Rust file_stem): book.fb2 → book.annotations.md */
   private sidecarPath(pdfPath: string): string {
-    return pdfPath.replace(/\.pdf$/i, '') + '.annotations.md'
+    return pdfPath.replace(/\.[^./]+$/, '') + '.annotations.md'
   }
 
   async readSidecar(pdfPath: string) {

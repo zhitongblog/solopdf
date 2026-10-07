@@ -10,14 +10,18 @@
  *
  * Phones flick; desktops arrow-key and click the page edges. Both get the
  * same double-page option, defaulting on only where there is width for it.
+ *
+ * Also the reader for scanned page images (DjVu, TIFF): those add zoom (a
+ * fax page at fit-height is unreadable on a laptop) and, for TIFF, OCR of
+ * the page on screen.
  */
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { store, comicBooks, docPrefsFor, saveDocPrefs } from '../store'
-import { isMobile } from '../platform'
+import { isMobile, isTauri } from '../platform'
 import { t } from '../i18n'
 
 const props = defineProps<{ tabId: number }>()
-const emit = defineEmits<{ chrome: [] }>()
+const emit = defineEmits<{ chrome: []; ocr: [bytes: Uint8Array, name: string] }>()
 
 const book = computed(() => { void store.docTick; return comicBooks.get(props.tabId) })
 const tab = computed(() => store.tabs.find((x) => x.id === props.tabId))
@@ -78,8 +82,40 @@ function resetRotation(): void {
   if (tab.value) saveDocPrefs(tab.value.path, { rotation: undefined, pageRotations: undefined })
 }
 
+// ── zoom: 1 = the fit mode; above that the page grows and the view pans ──
+const ZOOMS = [1, 1.25, 1.5, 2, 3, 4]
+const zoom = ref(1)
+function zoomBy(dir: 1 | -1): void {
+  const i = ZOOMS.findIndex((z) => z >= zoom.value - 1e-6)
+  zoom.value = ZOOMS[Math.min(Math.max((i < 0 ? 0 : i) + dir, 0), ZOOMS.length - 1)]
+}
+function zoomReset(): void { zoom.value = 1 }
+const zoomed = computed(() => zoom.value > 1)
+function onWheel(e: WheelEvent): void {
+  // trackpad pinch arrives as ctrl+wheel in every desktop engine
+  if (!e.ctrlKey && !e.metaKey) return
+  e.preventDefault()
+  zoomBy(e.deltaY < 0 ? 1 : -1)
+}
+
+// ── OCR of the page on screen (TIFF; engines are native) ──
+const canOcr = computed(() => tab.value?.kind === 'tiff' && isTauri())
+const ocrBusy = ref(false)
+async function ocrPage(): Promise<void> {
+  const b = book.value as { pageJpeg?: (i: number) => Promise<Uint8Array> } | undefined
+  if (!b?.pageJpeg || ocrBusy.value) return
+  ocrBusy.value = true
+  try {
+    const bytes = await b.pageJpeg(index.value)
+    const stem = (tab.value?.name ?? 'page').replace(/\.[^.]+$/, '')
+    emit('ocr', bytes, `${stem}-p${index.value + 1}.jpg`)
+  } finally {
+    ocrBusy.value = false
+  }
+}
+
 // A quarter-turned page swaps its width and height, which CSS fit rules can't
-// see through a transform — so rotated pages are laid out here instead.
+// see through a transform — so rotated (or zoomed) pages are laid out here.
 const natural = reactive(new Map<number, [number, number]>())
 const hostW = ref(0)
 const hostH = ref(0)
@@ -92,7 +128,7 @@ watch(book, () => natural.clear())
 
 function rotatedStyle(i: number): { box: Record<string, string>; img: Record<string, string> } | null {
   const deg = rotationOf(i)
-  if (!deg) return null
+  if (!deg && zoom.value === 1) return null
   const nat = natural.get(i)
   if (!nat || !hostW.value) {
     return { box: { width: '0px', height: '0px' }, img: { visibility: 'hidden' } }
@@ -104,9 +140,9 @@ function rotatedStyle(i: number): { box: Record<string, string>; img: Record<str
   // two-up shares the width, minus the 2px .cm-stage gap
   const slotW = urls.value.length > 1 ? (hostW.value - 2) / 2 : hostW.value
   const fit = s.value.fit
-  const scale = fit === 'width'
+  const scale = zoom.value * (fit === 'width'
     ? slotW / ew
-    : Math.min(fit === 'contain' ? 1 : Infinity, hostH.value / eh, slotW / ew)
+    : Math.min(fit === 'contain' ? 1 : Infinity, hostH.value / eh, slotW / ew))
   return {
     box: { width: `${ew * scale}px`, height: `${eh * scale}px` },
     img: {
@@ -132,6 +168,7 @@ function edgeTurn(fraction: number): void {
 
 function onClick(e: MouseEvent): void {
   if (settingsOpen.value) { settingsOpen.value = false; return }
+  if (zoomed.value) return // a zoomed page is being panned, not turned
   const rect = host.value?.getBoundingClientRect()
   if (!rect) return
   edgeTurn((e.clientX - rect.left) / rect.width)
@@ -144,6 +181,7 @@ function onTouchStart(e: TouchEvent): void {
   touchY = e.touches[0].clientY
 }
 function onTouchEnd(e: TouchEvent): void {
+  if (zoomed.value) return
   const dx = e.changedTouches[0].clientX - touchX
   const dy = e.changedTouches[0].clientY - touchY
   if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.4) {
@@ -163,12 +201,17 @@ function onKey(e: KeyboardEvent): void {
   else if (e.key === 'Home') { eat(); index.value = 0 }
   else if (e.key === 'End') { eat(); index.value = Math.max(0, total.value - 1) }
   else if (e.key === 'r' || e.key === 'R') { eat(); rotate(e.key === 'R' ? -90 : 90) }
+  else if (e.key === '+' || e.key === '=') { eat(); zoomBy(1) }
+  else if (e.key === '-' || e.key === '_') { eat(); zoomBy(-1) }
+  else if (e.key === '0') { eat(); zoomReset() }
 }
 
 // memory budget: keep a small window of decoded pages around the reader
 watch([index, () => s.value.spread], () => {
   book.value?.trim(index.value - 2, index.value + 3)
-})
+  // a new page starts at its top-left when zoomed in
+  if (zoomed.value && host.value) host.value.scrollTo({ top: 0, left: 0 })
+}, { immediate: true })
 
 onMounted(() => {
   window.addEventListener('keydown', onKey, { capture: true })
@@ -188,8 +231,10 @@ onBeforeUnmount(() => {
   <div
     ref="host"
     class="cm-view"
-    :class="[`cm-fit-${s.fit}`, { rtl: s.rtl }]"
+    :class="[`cm-fit-${s.fit}`, { rtl: s.rtl, 'cm-zoomed': zoomed }]"
+    data-testid="comic-view"
     @click="onClick"
+    @wheel="onWheel"
     @touchstart="onTouchStart"
     @touchend="onTouchEnd"
   >
@@ -212,6 +257,12 @@ onBeforeUnmount(() => {
         class="cm-slider" type="range" min="0" :max="Math.max(0, total - 1)"
         :value="index" @input="index = Number(($event.target as HTMLInputElement).value)"
       />
+      <span class="cm-zoom">
+        <button :title="t('cm.zoomOut')" :disabled="zoom <= 1" @click="zoomBy(-1)">−</button>
+        <button class="cm-zoom-val" :title="t('cm.zoomReset')" @click="zoomReset()">{{ Math.round(zoom * 100) }}%</button>
+        <button :title="t('cm.zoomIn')" :disabled="zoom >= 4" @click="zoomBy(1)">+</button>
+      </span>
+      <button v-if="canOcr" class="cm-ocr-btn" :title="t('cm.ocrPage')" :disabled="ocrBusy" @click="ocrPage()">{{ ocrBusy ? '…' : t('cm.ocr') }}</button>
       <button class="cm-rot-btn" :title="t('tb.rotate')" @click="rotate(90)"><svg class="rot-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.46-3.54" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12.5 1.5v3.5H9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </div>
 

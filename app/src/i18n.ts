@@ -474,6 +474,11 @@ const zhCN: Dict = {
   'cm.empty': '这个压缩包里没有图片',
   'cm.noImages': '压缩包里没有找到图片（CBZ/CBR 应当是图片的打包）',
   'cm.rendering': '正在渲染…',
+  'cm.zoomIn': '放大（+）',
+  'cm.zoomOut': '缩小（-）',
+  'cm.zoomReset': '恢复适应大小（0）',
+  'cm.ocr': '识别文字',
+  'cm.ocrPage': '识别本页文字（本地 OCR）',
   'dj.djvuDesktopOnly': 'DjVu 需要桌面版（渲染在本地进行）',
   'dj.djvuEmpty': '这个 DjVu 文件没有页面',
   // mobi / azw3
@@ -481,6 +486,13 @@ const zhCN: Dict = {
   'mb.mobiDrm': '这本书有 DRM 保护，SoloPDF 无法打开（也不会尝试破解）',
   'mb.mobiCompression': '这本书用了旧的 HUFF/CDIC 压缩，暂不支持——用 Calibre 转成 EPUB 即可',
   'mb.mobiEmpty': '没有解析出正文内容',
+  // fb2
+  'fb.fb2Bad': '这不是一个可读的 FB2（FictionBook）文件',
+  'fb.fb2Empty': '这本 FB2 没有正文',
+  'fb.fb2NoBook': '压缩包里没有 .fb2 文件',
+  // tiff
+  'tf.tiffBad': '这不是一个可读的 TIFF 文件',
+  'tf.tiffEmpty': '这个 TIFF 没有页面',
   // sidebar
   'sb.outline': '目录',
   'sb.thumbs': '缩略图',
@@ -524,6 +536,8 @@ const zhCN: Dict = {
   'se.progress': '搜索中… {done}/{total} 页，{n} 个结果',
   'se.results': '{n} 个结果',
   'se.capped': '（已达上限）',
+  'se.progressCh': '搜索中… {done}/{total} 章，{n} 个结果',
+  'se.chapter': '第 {n} 章',
   // password
   'pw.retry': '密码错误，请重试',
   'pw.title': '该 PDF 受密码保护',
@@ -634,6 +648,7 @@ const zhCN: Dict = {
   'bk.layout.paged': '翻页(宽屏双页)',
   'bk.layout.scroll': '滚动',
   'bk.toc': '目录',
+  'bk.search': '搜索全书',
   'bk.chrome': '显示/隐藏标签栏与工具栏',
   'bk.fullscreen': '全屏',
   // reading aids (ruler / loupe / citation)
@@ -1144,6 +1159,11 @@ const zhTW: Dict = {
   'cm.empty': '這個壓縮檔裡沒有圖片',
   'cm.noImages': '壓縮檔裡找不到圖片（CBZ/CBR 應該是圖片的打包）',
   'cm.rendering': '正在算繪…',
+  'cm.zoomIn': '放大（+）',
+  'cm.zoomOut': '縮小（-）',
+  'cm.zoomReset': '恢復適應大小（0）',
+  'cm.ocr': '辨識文字',
+  'cm.ocrPage': '辨識本頁文字（本機 OCR）',
   'dj.djvuDesktopOnly': 'DjVu 需要桌面版（算繪在本機進行）',
   'dj.djvuEmpty': '這個 DjVu 檔案沒有頁面',
   // mobi / azw3
@@ -1151,6 +1171,13 @@ const zhTW: Dict = {
   'mb.mobiDrm': '這本書有 DRM 保護，SoloPDF 無法開啟（也不會嘗試破解）',
   'mb.mobiCompression': '這本書用了舊的 HUFF/CDIC 壓縮，暫不支援——用 Calibre 轉成 EPUB 即可',
   'mb.mobiEmpty': '沒有解析出正文內容',
+  // fb2
+  'fb.fb2Bad': '這不是一個可讀的 FB2（FictionBook）檔案',
+  'fb.fb2Empty': '這本 FB2 沒有正文',
+  'fb.fb2NoBook': '壓縮檔裡沒有 .fb2 檔案',
+  // tiff
+  'tf.tiffBad': '這不是一個可讀的 TIFF 檔案',
+  'tf.tiffEmpty': '這個 TIFF 沒有頁面',
   'sb.outline': '目錄',
   'sb.thumbs': '縮圖',
   'sb.annots': '批註',
@@ -1192,6 +1219,8 @@ const zhTW: Dict = {
   'se.progress': '搜尋中… {done}/{total} 頁，{n} 個結果',
   'se.results': '{n} 個結果',
   'se.capped': '（已達上限）',
+  'se.progressCh': '搜尋中… {done}/{total} 章，{n} 個結果',
+  'se.chapter': '第 {n} 章',
   'pw.retry': '密碼錯誤，請重試',
   'pw.title': '此 PDF 受密碼保護',
   'pw.note': '密碼僅用於本次開啟，工作階段內記住，不會寫入磁碟。',
@@ -1292,6 +1321,7 @@ const zhTW: Dict = {
   'bk.layout.paged': '翻頁(寬螢幕雙頁)',
   'bk.layout.scroll': '捲動',
   'bk.toc': '目錄',
+  'bk.search': '搜尋全書',
   'bk.chrome': '顯示/隱藏分頁列與工具列',
   'bk.fullscreen': '全螢幕',
   // reading aids (ruler / loupe / citation)
@@ -1802,6 +1832,11 @@ const en: Dict = {
   'cm.empty': 'No images in this archive',
   'cm.noImages': 'No images found — a CBZ/CBR should be a bundle of page images',
   'cm.rendering': 'Rendering…',
+  'cm.zoomIn': 'Zoom in (+)',
+  'cm.zoomOut': 'Zoom out (-)',
+  'cm.zoomReset': 'Back to fit (0)',
+  'cm.ocr': 'OCR',
+  'cm.ocrPage': 'Recognize text on this page (local OCR)',
   'dj.djvuDesktopOnly': 'DjVu needs the desktop app (pages are rendered locally)',
   'dj.djvuEmpty': 'This DjVu file has no pages',
   // mobi / azw3
@@ -1809,6 +1844,13 @@ const en: Dict = {
   'mb.mobiDrm': 'This book is DRM-protected. SoloPDF cannot open it, and does not try to break it',
   'mb.mobiCompression': 'This book uses the old HUFF/CDIC compression, which is not supported — convert it to EPUB with Calibre',
   'mb.mobiEmpty': 'No readable text was found',
+  // fb2
+  'fb.fb2Bad': "That isn't a readable FB2 (FictionBook) file",
+  'fb.fb2Empty': 'This FB2 book has no text',
+  'fb.fb2NoBook': 'The archive has no .fb2 file inside',
+  // tiff
+  'tf.tiffBad': "That isn't a readable TIFF file",
+  'tf.tiffEmpty': 'This TIFF has no pages',
   'sb.outline': 'Outline',
   'sb.thumbs': 'Pages',
   'sb.annots': 'Notes',
@@ -1850,6 +1892,8 @@ const en: Dict = {
   'se.progress': 'Searching… {done}/{total} pages, {n} hits',
   'se.results': '{n} results',
   'se.capped': ' (capped)',
+  'se.progressCh': 'Searching… {done}/{total} chapters, {n} results',
+  'se.chapter': 'Ch. {n}',
   'pw.retry': 'Wrong password, try again',
   'pw.title': 'This PDF is password-protected',
   'pw.note': 'Used only to open this file; remembered for this session, never written to disk.',
@@ -1950,6 +1994,7 @@ const en: Dict = {
   'bk.layout.paged': 'Paged (two-up on wide screens)',
   'bk.layout.scroll': 'Scroll',
   'bk.toc': 'Contents',
+  'bk.search': 'Search the book',
   'bk.chrome': 'Show/hide tabs and toolbar',
   'bk.fullscreen': 'Fullscreen',
   // reading aids (ruler / loupe / citation)
@@ -2460,6 +2505,11 @@ const ja: Dict = {
   'cm.empty': 'このアーカイブに画像がありません',
   'cm.noImages': '画像が見つかりません（CBZ/CBR はページ画像の束です）',
   'cm.rendering': 'レンダリング中…',
+  'cm.zoomIn': '拡大（+）',
+  'cm.zoomOut': '縮小（-）',
+  'cm.zoomReset': 'フィットに戻す（0）',
+  'cm.ocr': '文字認識',
+  'cm.ocrPage': 'このページの文字を認識（ローカル OCR）',
   'dj.djvuDesktopOnly': 'DjVu はデスクトップ版が必要です（ページはローカルで描画します）',
   'dj.djvuEmpty': 'この DjVu にはページがありません',
   // mobi / azw3
@@ -2467,6 +2517,13 @@ const ja: Dict = {
   'mb.mobiDrm': 'この本には DRM があり、SoloPDF では開けません（解除も行いません）',
   'mb.mobiCompression': '旧式の HUFF/CDIC 圧縮のため未対応です — Calibre で EPUB に変換してください',
   'mb.mobiEmpty': '本文を取り出せませんでした',
+  // fb2
+  'fb.fb2Bad': '読み取れる FB2（FictionBook）ファイルではありません',
+  'fb.fb2Empty': 'この FB2 には本文がありません',
+  'fb.fb2NoBook': 'アーカイブに .fb2 ファイルがありません',
+  // tiff
+  'tf.tiffBad': '読み取れる TIFF ファイルではありません',
+  'tf.tiffEmpty': 'この TIFF にはページがありません',
   'sb.outline': '目次',
   'sb.thumbs': 'ページ',
   'sb.annots': 'ノート',
@@ -2508,6 +2565,8 @@ const ja: Dict = {
   'se.progress': '検索中… {done}/{total} ページ、{n} 件',
   'se.results': '{n} 件',
   'se.capped': '（上限に達しました）',
+  'se.progressCh': '検索中… {done}/{total} 章、{n} 件',
+  'se.chapter': '第 {n} 章',
   'pw.retry': 'パスワードが違います。再入力してください',
   'pw.title': 'この PDF はパスワードで保護されています',
   'pw.note': 'パスワードは今回の表示のみに使用され、セッション内で記憶されます。ディスクには保存されません。',
@@ -2608,6 +2667,7 @@ const ja: Dict = {
   'bk.layout.paged': 'ページめくり(ワイドは見開き)',
   'bk.layout.scroll': 'スクロール',
   'bk.toc': '目次',
+  'bk.search': '本の中を検索',
   'bk.chrome': 'タブとツールバーを表示/隠す',
   'bk.fullscreen': 'フルスクリーン',
   // reading aids (ruler / loupe / citation)
