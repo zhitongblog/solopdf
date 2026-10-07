@@ -14,6 +14,7 @@
  *     is literally the one it always was (splitControllers is simply empty).
  *   - Document-level view state (rotation, crop, scroll mode, spread) is
  *     mirrored between the two controllers through `peer` (controller.ts);
+ *     layer visibility is one shared OptionalContentConfig (layers.ts);
  *     scroll position and zoom stay per-pane.
  *   - Each pane virtualizes on its own, so memory is bounded by two live
  *     windows of pages, never the whole document.
@@ -134,6 +135,8 @@ export async function openSplit(
   c.rotation = main.rotation
   c.setPageRotations(main.pageRotations())
   c.crop = main.crop
+  // the SAME layer config object: a toggle repaints both panes alike
+  c.ocConfig = main.ocConfig
   c.fitMode = main.fitMode
   c.scale = main.scale
   wire(c)

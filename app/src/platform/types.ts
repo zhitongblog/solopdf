@@ -55,4 +55,19 @@ export interface PlatformBackend {
   importDocument(path: string): Promise<string>
   /** documents already imported (mobile shelf recovery) */
   listImported(): Promise<string[]>
+  /**
+   * Put bytes extracted from a document (an embedded attachment) where the
+   * rest of the app can open them by path: an app-cache folder keyed by
+   * content hash, so reopening the same attachment lands on the same path
+   * (and keeps its reading position). `name` must be a safe bare file name.
+   */
+  stageFile(name: string, bytes: Uint8Array): Promise<string>
+  /** hand a STAGED file to the OS default application (desktop only) */
+  openStagedExternally(path: string): Promise<void>
+  /**
+   * "Save as…" for arbitrary bytes. Desktop: save dialog; phones: the app
+   * Documents folder; web: a browser download. Returns where it went (a
+   * file name for web downloads), or null when the user cancelled.
+   */
+  saveBytes(suggestedName: string, bytes: Uint8Array): Promise<string | null>
 }

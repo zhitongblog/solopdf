@@ -7,6 +7,24 @@ import type { FileMeta, PlatformBackend } from './types'
 
 const STATE_KEY = 'solopdf-state'
 
+/** web stand-in for the app cache: attachments opened from a PDF live in
+ *  memory under a /__staged/… pseudo-path for the life of the page */
+const STAGED = new Map<string, Uint8Array>()
+const STAGED_SIDECARS = new Map<string, string>()
+const isStaged = (path: string): boolean => path.startsWith('/__staged/')
+
+/** E2E seam: every browser download saveBytes() started, newest last */
+export const webDownloads: { name: string; size: number }[] = []
+
+function mimeFor(name: string): string {
+  const ext = name.toLowerCase().split('.').pop() ?? ''
+  const map: Record<string, string> = {
+    pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    webp: 'image/webp', txt: 'text/plain', csv: 'text/csv', epub: 'application/epub+zip',
+  }
+  return map[ext] ?? 'application/octet-stream'
+}
+
 export class WebBackend implements PlatformBackend {
   readonly kind = 'web' as const
 
@@ -16,6 +34,8 @@ export class WebBackend implements PlatformBackend {
   }
 
   async fileMeta(path: string): Promise<FileMeta> {
+    const staged = STAGED.get(path)
+    if (staged) return { path, name: path.split('/').pop()!, size: staged.length }
     const res = await fetch(this.fixtureUrl(path), { method: 'GET', headers: { range: 'bytes=0-0' } })
     if (!res.ok && res.status !== 206) throw new Error(`无法打开文件: ${path} (${res.status})`)
     const cr = res.headers.get('content-range')
@@ -24,6 +44,8 @@ export class WebBackend implements PlatformBackend {
   }
 
   async readChunk(path: string, offset: number, length: number): Promise<Uint8Array> {
+    const staged = STAGED.get(path)
+    if (staged) return staged.slice(offset, offset + length)
     const res = await fetch(this.fixtureUrl(path), {
       headers: { range: `bytes=${offset}-${offset + length - 1}` },
     })
@@ -37,12 +59,14 @@ export class WebBackend implements PlatformBackend {
 
   async readSidecar(pdfPath: string) {
     const loc = this.sidecarPath(pdfPath)
+    if (isStaged(pdfPath)) return { text: STAGED_SIDECARS.get(loc) ?? '', location: loc }
     const res = await fetch(`/__sidecar?p=${encodeURIComponent(loc)}`)
     return { text: res.ok ? await res.text() : '', location: loc }
   }
 
   async writeSidecar(pdfPath: string, text: string): Promise<string> {
     const loc = this.sidecarPath(pdfPath)
+    if (isStaged(pdfPath)) { STAGED_SIDECARS.set(loc, text); return loc }
     const res = await fetch(`/__sidecar?p=${encodeURIComponent(loc)}`, { method: 'PUT', body: text })
     if (!res.ok) throw new Error(`伴生文件写入失败: ${res.status}`)
     return loc
@@ -112,6 +136,37 @@ export class WebBackend implements PlatformBackend {
 
   async listImported(): Promise<string[]> {
     return []
+  }
+
+  async stageFile(name: string, bytes: Uint8Array): Promise<string> {
+    const digest = await crypto.subtle.digest('SHA-256', bytes as BufferSource)
+    const key = [...new Uint8Array(digest)].slice(0, 8).map((b) => b.toString(16).padStart(2, '0')).join('')
+    const path = `/__staged/${key}/${name}`
+    STAGED.set(path, bytes.slice())
+    return path
+  }
+
+  async openStagedExternally(path: string): Promise<void> {
+    const bytes = STAGED.get(path)
+    if (!bytes) throw new Error(`not staged: ${path}`)
+    const name = path.split('/').pop()!
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mimeFor(name) }))
+    window.open(url, '_blank', 'noopener')
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  }
+
+  async saveBytes(suggestedName: string, bytes: Uint8Array): Promise<string | null> {
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mimeFor(suggestedName) }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = suggestedName
+    a.style.display = 'none'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    webDownloads.push({ name: suggestedName, size: bytes.length })
+    return suggestedName
   }
 
   async saveText(suggestedName: string, text: string): Promise<string | null> {

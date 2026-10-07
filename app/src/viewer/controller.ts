@@ -9,6 +9,7 @@
  *           │           ├── .pv-textlayer     (pdf.js TextLayer, selectable)
  *           │           ├── .annotationLayer  (AcroForm widgets)
  *           │           ├── .pv-link-layer    (hyperlinks: click / hover preview)
+ *           │           ├── .pv-attach-layer  (FileAttachment paperclips: click = open)
  *           │           ├── .pv-hl-layer      (annotation marks)
  *           │           └── .pv-draw-layer    (ink / shapes / text boxes)
  *           ├── .pv-page[data-page=2] ...
@@ -33,7 +34,8 @@ import { TextLayer, OPS, AnnotationLayer, AnnotationMode } from 'pdfjs-dist'
 import { SimpleLinkService } from 'pdfjs-dist/web/pdf_viewer.mjs'
 import {
   buildPageIndex, matchOnPage, isDrawn, linkTargetOf, annotRect, resolveLinkTarget, importedRefs,
-  type PageTextIndex, type RawLinkTarget, type LinkDest, type RefKind,
+  annotationAttachments, humanSize,
+  type PageTextIndex, type RawLinkTarget, type LinkDest, type RefKind, type AttachmentData,
 } from '@solopdf/core'
 import { SmartRefIndex, refUnderPoint, type RefHit } from './refs'
 import { splitSentences } from '../tts'
@@ -116,6 +118,8 @@ interface PageSlot {
   textItems: TextItemGeom[] | null
   /** Link annotations, read once per page (null = not read yet) */
   links: PageLink[] | null
+  /** FileAttachment annotations (paperclips), read once per page */
+  files: { data: AttachmentData; drawn: boolean }[] | null
   /** placement, recomputed by relayout() */
   left: number
   top: number
@@ -184,6 +188,15 @@ export class PdfViewerController {
   onExternalLink: (url: string) => void = () => {}
   /** show a link / smart-reference preview; null = pointer left it */
   onPreview: (req: PreviewRequest | null) => void = () => {}
+  /** a paperclip (FileAttachment annotation) was clicked */
+  onAttachment: (a: AttachmentData) => void = () => {}
+
+  /**
+   * Optional content (layers): the tab's ONE config object, shared with the
+   * split peer, thumbnails and print (see layers.ts). null = the document
+   * has none and pdf.js uses its own default.
+   */
+  ocConfig: Awaited<ReturnType<PDFDocumentProxy['getOptionalContentConfig']>> | null = null
 
   private refIndex: SmartRefIndex | null = null
   private hoverTimer = 0
@@ -273,7 +286,7 @@ export class PdfViewerController {
         page: i === 0 ? p1 : null,
         rendered: false, rendering: false, renderTask: null,
         renderedScale: 1, renderedRotation: 0,
-        hasImages: null, textIndex: null, textItems: null, links: null,
+        hasImages: null, textIndex: null, textItems: null, links: null, files: null,
         left: 0, top: 0,
       })
     }
@@ -469,6 +482,18 @@ export class PdfViewerController {
     this.scrollToPage(anchor)
     this.update()
     this.onVisiblePage(this.currentPage())
+  }
+
+  /** pdf.js render option carrying the current layer visibility */
+  private ocOption(): { optionalContentConfigPromise?: Promise<NonNullable<PdfViewerController['ocConfig']>> } {
+    return this.ocConfig ? { optionalContentConfigPromise: Promise.resolve(this.ocConfig) } : {}
+  }
+
+  /** layer visibility changed: repaint every live page (old canvases stay
+   *  up, CSS-scaled, until their replacements are ready — no flash) */
+  refreshContent(): void {
+    this.invalidateRendered()
+    this.update()
   }
 
   setDarkPdf(mode: DarkPdfMode): void {
@@ -708,6 +733,7 @@ export class PdfViewerController {
         // forms render as live DOM widgets (AnnotationLayer below), not
         // baked pixels — this is what makes填写/打勾 interactive
         annotationMode: AnnotationMode.ENABLE_FORMS,
+        ...this.ocOption(),
       } as Parameters<PDFPageProxy['render']>[0]))
       s.renderTask = task
       await task.promise
@@ -776,6 +802,8 @@ export class PdfViewerController {
       await this.renderFormLayer(s, vp, annots.filter((a) => !hidden.has((a as { id?: string }).id ?? '')))
       // hyperlinks
       this.renderLinkLayer(s, i, annots)
+      // embedded-file paperclips
+      this.renderAttachLayer(s, i, annots)
 
       // highlight layer
       const hl = document.createElement('div')
@@ -804,7 +832,8 @@ export class PdfViewerController {
     try {
       // links are ours (renderLinkLayer): pdf.js would add dead duplicates
       // wired to the no-op link service on top of them
-      const annots = (all as { subtype?: string }[]).filter((a) => a.subtype !== 'Link')
+      // (paperclips too — renderAttachLayer owns those)
+      const annots = (all as { subtype?: string }[]).filter((a) => a.subtype !== 'Link' && a.subtype !== 'FileAttachment')
       if (!annots.some((a) => a.subtype === 'Widget')) return
       const div = document.createElement('div')
       div.className = 'annotationLayer'
@@ -886,6 +915,42 @@ export class PdfViewerController {
       a.setAttribute('role', 'link')
       a.style.cssText = `left:${v.left - (w - v.width) / 2}px;top:${v.top - (h - v.height) / 2}px;width:${w}px;height:${h}px`
       layer.appendChild(a)
+    })
+    s.inner.appendChild(layer)
+  }
+
+  /**
+   * One button per FileAttachment annotation. pdf.js paints the author's
+   * appearance stream (if any) into the canvas; when there is none we draw
+   * our own paperclip so the attachment is not invisible. Click → open.
+   */
+  private renderAttachLayer(s: PageSlot, i: number, annots: unknown[]): void {
+    if (!s.files) {
+      const shown = (annots as { subtype?: string; file?: unknown; hasAppearance?: boolean }[])
+        .filter((a) => a?.subtype === 'FileAttachment' && a.file)
+      s.files = annotationAttachments(i + 1, annots).map((data, k) => ({ data, drawn: !!shown[k]?.hasAppearance }))
+    }
+    if (!s.files.length) return
+    const layer = document.createElement('div')
+    layer.className = 'pv-attach-layer'
+    const box = this.boxes[i]
+    const rot = this.rotationOf(i)
+    s.files.forEach((f, k) => {
+      const r = f.data.info.rect
+      if (!r) return
+      const v = pdfRectToView({ x1: r[0], y1: r[1], x2: r[2], y2: r[3] }, box, rot, this.scale)
+      const w = Math.max(v.width, 16)
+      const h = Math.max(v.height, 16)
+      const b = document.createElement('button')
+      b.className = 'pv-attach' + (f.drawn ? '' : ' pv-attach-icon')
+      b.dataset.attach = String(k)
+      b.type = 'button'
+      const info = f.data.info
+      b.title = `📎 ${info.name} · ${humanSize(info.size)}${info.description ? `\n${info.description}` : ''}`
+      b.setAttribute('aria-label', info.name)
+      if (!f.drawn) b.textContent = '📎'
+      b.style.cssText = `left:${v.left - (w - v.width) / 2}px;top:${v.top - (h - v.height) / 2}px;width:${w}px;height:${h}px;font-size:${Math.min(w, h) * 0.8}px`
+      layer.appendChild(b)
     })
     s.inner.appendChild(layer)
   }
@@ -1176,6 +1241,14 @@ export class PdfViewerController {
   }
 
   private onLinkClick = (e: MouseEvent): void => {
+    const clip = (e.target as HTMLElement).closest?.('.pv-attach') as HTMLElement | null
+    if (clip) {
+      e.preventDefault()
+      const page = parseInt((clip.closest('.pv-page') as HTMLElement)?.dataset.page ?? '0', 10)
+      const f = this.slots[page - 1]?.files?.[parseInt(clip.dataset.attach ?? '-1', 10)]
+      if (f) this.onAttachment(f.data)
+      return
+    }
     const el = (e.target as HTMLElement).closest?.('.pv-link') as HTMLElement | null
     if (el) {
       e.preventDefault()
@@ -1258,7 +1331,7 @@ export class PdfViewerController {
       for (const id of hide) hidden.add(id)
     }
     await renderHiding(this.doc, hidden, () =>
-      page.render({ canvasContext: ctx, viewport: vp } as Parameters<typeof page.render>[0])).promise
+      page.render({ canvasContext: ctx, viewport: vp, ...this.ocOption() } as Parameters<typeof page.render>[0])).promise
     return canvas
   }
 

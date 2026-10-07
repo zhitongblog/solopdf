@@ -102,6 +102,32 @@ export class TauriBackend implements PlatformBackend {
     return await invoke<string[]>('list_imported')
   }
 
+  async stageFile(name: string, bytes: Uint8Array): Promise<string> {
+    return await invoke<string>('stage_attachment', bytes, {
+      headers: { 'x-name': encodeURIComponent(name) },
+    })
+  }
+
+  async openStagedExternally(path: string): Promise<void> {
+    await invoke('open_staged_file', { path })
+  }
+
+  async saveBytes(suggestedName: string, bytes: Uint8Array): Promise<string | null> {
+    if (/iPhone|iPad|Android/i.test(navigator.userAgent)) {
+      return await invoke<string>('save_bytes_to_documents', bytes, {
+        headers: { 'x-name': encodeURIComponent(suggestedName) },
+      })
+    }
+    const ext = /\.([^./\\]+)$/.exec(suggestedName)?.[1]
+    const dest = await save({
+      defaultPath: suggestedName,
+      filters: ext ? [{ name: ext.toUpperCase(), extensions: [ext] }] : undefined,
+    })
+    if (!dest) return null
+    await invoke('save_pdf_bytes', bytes, { headers: { 'x-dest': encodeURIComponent(dest) } })
+    return dest
+  }
+
   async saveText(suggestedName: string, text: string): Promise<string | null> {
     if (/iPhone|iPad|Android/i.test(navigator.userAgent)) {
       // no save dialogs on mobile — write to the app Documents folder,

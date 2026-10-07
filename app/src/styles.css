@@ -118,8 +118,22 @@ input:focus { border-color: var(--accent); }
   width: 260px; min-width: 260px; background: var(--bg-panel);
   border-right: 1px solid var(--border); display: flex; flex-direction: column;
 }
-.sidebar-tabs { display: flex; border-bottom: 1px solid var(--border); }
-.sidebar-tabs button { flex: 1; border-radius: 0; padding: 8px 0; font-size: 12px; color: var(--fg-dim); }
+/* up to six tabs (Files / Layers only when the document has them): they
+   share the width while they fit, and the strip scrolls sideways when the
+   labels are longer than the sidebar (English, narrow phone sheet) */
+.sidebar-tabs {
+  display: flex; border-bottom: 1px solid var(--border);
+  overflow-x: auto; scrollbar-width: none; flex-shrink: 0;
+}
+.sidebar-tabs::-webkit-scrollbar { display: none; }
+.sidebar-tabs button {
+  flex: 1 0 auto; border-radius: 0; padding: 8px 6px; font-size: 12px; color: var(--fg-dim);
+  white-space: nowrap;
+}
+.sidebar-tabs .sb-count {
+  display: inline-block; min-width: 14px; padding: 0 4px; border-radius: 7px; margin-left: 2px;
+  background: var(--accent-soft); color: var(--accent); font-size: 10px; line-height: 14px;
+}
 .sidebar-tabs button.active { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
 .sidebar-body { flex: 1; overflow: auto; padding: 8px; }
 
@@ -157,6 +171,50 @@ input:focus { border-color: var(--accent); }
 }
 .annot-empty { color: var(--fg-dim); font-size: 12px; text-align: center; padding: 24px 8px; }
 
+/* attachments tab */
+.att-item {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 8px; margin-bottom: 8px; background: var(--bg);
+}
+.att-head { display: flex; gap: 6px; align-items: center; }
+.att-icon { flex: none; }
+.att-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 500; }
+.att-desc { font-size: 11.5px; color: var(--fg-dim); margin-top: 3px; }
+.att-meta { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-size: 11px; color: var(--fg-dim); }
+.att-meta button { font-size: 11px; padding: 2px 6px; }
+.att-page { color: var(--accent); }
+.att-btn { border: 1px solid var(--border); }
+.att-warn { margin-top: 5px; font-size: 11px; color: #c0392b; }
+.att-scan { color: var(--fg-dim); font-size: 11px; text-align: center; padding: 6px; }
+
+/* layers tab */
+.ly-bar { display: flex; gap: 6px; align-items: flex-start; margin-bottom: 6px; }
+.ly-hint { flex: 1; font-size: 11px; color: var(--fg-dim); }
+.ly-reset { font-size: 11px; padding: 2px 6px; border: 1px solid var(--border); flex: none; }
+.ly-heading { font-size: 11.5px; font-weight: 600; color: var(--fg-dim); padding: 6px 4px 2px; }
+.ly-row {
+  display: flex; gap: 8px; align-items: center; padding: 4px; border-radius: 5px;
+  cursor: pointer; font-size: 12.5px; user-select: none;
+}
+.ly-row:hover { background: var(--accent-soft); }
+.ly-row.off .ly-name { color: var(--fg-dim); }
+.ly-row.locked { cursor: not-allowed; }
+.ly-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ly-lock { font-size: 11px; }
+/* square = independent layer, round = member of a radio group */
+.ly-check {
+  appearance: none; -webkit-appearance: none; flex: none; margin: 0;
+  width: 15px; height: 15px; border: 1.5px solid var(--fg-dim); border-radius: 3px;
+  display: grid; place-items: center; cursor: inherit; background: var(--bg);
+}
+.ly-check.radio { border-radius: 50%; }
+.ly-check:checked { border-color: var(--accent); background: var(--accent); }
+.ly-check:checked::after {
+  content: ''; width: 7px; height: 7px; background: #fff; border-radius: 1px;
+}
+.ly-check.radio:checked::after { border-radius: 50%; }
+.ly-check:disabled { opacity: 0.55; }
+
 /* narrow screens (phones): sidebar becomes an overlay, not a squeeze */
 .sidebar-backdrop { display: none; }
 @media (max-width: 700px) {
@@ -171,6 +229,11 @@ input:focus { border-color: var(--accent); }
     background: rgba(0,0,0,.3);
   }
   .toolbar { overflow-x: auto; }
+  /* finger-sized tabs and rows in the phone sheet */
+  .sidebar-tabs button { min-height: 44px; padding: 8px 12px; font-size: 13px; }
+  .ly-row { min-height: 40px; }
+  .ly-check { width: 20px; height: 20px; }
+  .att-meta button { min-height: 34px; padding: 4px 10px; font-size: 12px; }
 }
 
 /* ── viewer ── */
@@ -1150,6 +1213,16 @@ html.dark .st-warn { color: #e0a64a; }
   -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
 }
 .pv-link:hover { background: rgba(58, 109, 240, 0.12); box-shadow: 0 1px 0 rgba(58, 109, 240, 0.6); }
+/* FileAttachment paperclips: a hit box over the author's icon, or our own
+   icon when the annotation has no appearance stream */
+.pv-attach-layer { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+.pv-attach {
+  position: absolute; pointer-events: auto; cursor: pointer; padding: 0; margin: 0;
+  background: transparent; border: none; border-radius: 3px; line-height: 1;
+  display: grid; place-items: center; -webkit-user-select: none; user-select: none;
+}
+.pv-attach-icon { background: rgba(255, 214, 10, 0.35); box-shadow: 0 0 0 1px rgba(160, 120, 0, 0.5); }
+.pv-attach:hover { background: rgba(58, 109, 240, 0.18); }
 /* hovered smart reference ("Figure 3", "[12]") */
 .pv-ref-mark {
   position: absolute; z-index: 3; pointer-events: none; border-radius: 2px;

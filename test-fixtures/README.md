@@ -15,6 +15,8 @@
 | `encrypted-password-solopdf.pdf` | 加密 PDF（密码输入框 + 明文批注提示） | 28 页 / AES-256 | 由中文样本加密生成，**密码：`solopdf`** |
 | `page-labels-roman.pdf` | 页码标签（/PageLabels：封面 Cover、罗马数字前言 i–iv、正文从 1 重新起、附录 A-1–A-3） | 24 页 / 4KB | `node scripts/gen-page-labels-fixture.mjs` 手写 PDF 对象生成，可复现；每页印着“Physical page N - printed label X”，另有灰/蓝色块用于纸张颜色/反色检查 |
 | `annotated-by-other-apps.pdf` | 导入其他应用的注释（Highlight×3 含跨行与中文、Underline、StrikeOut、Squiggly、Text 便签+回复、FreeText、Ink、Square、Circle、带箭头的“\”斜线 Line、Line、Polygon；另有 Stamp（不支持→跳过）与 Hidden 高亮（不导入）） | 3 页 / 8KB | `node scripts/gen-annotated-fixture.mjs` 手写 PDF 对象生成，可复现；Courier/STSong 等宽排版，quadpoints 精确落在已知词上 |
+| `attachments-sample.pdf` | 嵌入附件：4 个文档级附件（inner-report.pdf / data.csv / install.bat / photo.png）+ 第 1 页一个无外观流的回形针注释（annexe.pdf） | 2 页 / 11KB | `node scripts/gen-attach-layers-fixtures.mjs` 手写生成，可复现；/PageMode /UseAttachments |
+| `layers-sample.pdf` | 图层（OCG）：Base map（锁定）/ Labels / Theme 组下 Day·Night 单选组（Night 默认关） | 2 页 / 2KB | 同上脚本；/PageMode /UseOC |
 
 ## 验收要点对照（来自设计蓝图 Success Criteria）
 
@@ -28,6 +30,9 @@
 - `smart-refs-paper.pdf`：p1 悬停 Figure 1 / Table 1 / Eq. (2) / (1) / [2] / [1, 3] / Fig. 2 / 图 3 / 表 1 / 公式 (2) / [4] 均弹出目标区域预览；Figure 9、[0, 1]、“(7) alone” 不弹
 - `page-labels-roman.pdf`：工具栏页码框显示印刷页码（ii (3 / 24)），输入 `iii` / `3` / `#3` 分别跳物理第 4 / 8 / 3 页；伴生文件锚点仍写物理页；`solopdf info` 输出 `1: Cover; 2-5: i–iv; 6-21: 1–16; 22-24: A-1–A-3`
 - `annotated-by-other-apps.pdf`：打开即提示“此 PDF 含 14 条其他应用留下的注释”；导入后侧栏 14 条（作者/日期/原文摘录齐全，回复并入便签），页面上原注释不再由 pdf.js 重复绘制；⌘Z 一步撤销整次导入；再次导入为 0；`solopdf import-annotations … --dry-run` 输出 found 14 / replies 1 / unsupported Stamp@p.2
+- `attachments-sample.pdf`：侧栏出现「附件 5」（打开即切到该页签）；inner-report.pdf / annexe.pdf 在新标签打开，photo.png 以图片视图打开，data.csv 交给系统，install.bat 只有「另存为」；点页面上的回形针打开 annexe.pdf；`solopdf attachments … --extract d` 写出 5 个文件
+- `layers-sample.pdf`：侧栏出现「图层」；Base map 锁定不可切换；打开 Night 自动关闭 Day（单选组）；关 Labels 后 LABEL TEXT 消失；分屏两侧、缩略图、打印同步；重开文档保持上次的选择，「恢复默认」清除；`solopdf layers` 输出 4 个图层、1 个单选组、Base map locked
+- 其他无附件/无图层的样本：两个页签都不出现
 - `encrypted-password-solopdf.pdf`：密码框（记住本次会话）；高亮时弹一次明文保存提示
 
 注：`*.pdf` 均来自公有领域/官方公开渠道，可安全入库；如嫌 157MB 太大可 git-lfs 或 .gitignore。

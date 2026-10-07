@@ -53,6 +53,11 @@ SoloPDF：秒开、零广告、零遥测（更新检查可完全关闭）、永�
   也支持直接打开图片转文字（iOS 上可拍照识别）。
   引擎:macOS/iOS 用系统 Vision(零体积),Windows/Linux 内置 PP-OCRv4 ONNX(离线模型)
 - **表单填写**：AcroForm 文本框/勾选/下拉直接填写，"保存已填表单"导出副本（原文件永不改动）
+- **嵌入附件**：文档级附件与页面上的回形针（FileAttachment 注释）都列在「附件」侧栏
+  （仅当文档有附件时出现）；PDF/EPUB/图片直接在新标签页打开，其他类型交给系统默认应用，
+  可执行文件/脚本只允许另存、绝不打开
+- **图层（可选内容 OCG）**：「图层」侧栏显示/隐藏图层，遵守单选组与锁定图层；
+  分屏两侧、缩略图、打印都跟随当前可见性，每个文档单独记忆
 - 打印（分批渲染，500 页不爆内存）
 - **格式**：PDF · EPUB · TXT · MOBI/AZW3 · CBZ/CBR 漫画 · DjVu
 
@@ -72,6 +77,8 @@ test-fixtures/  标准测试集（7 个真实样本，见其 README）
 node cli/src/index.mjs info <file.pdf> [--password pw]      # 页数/书签/元数据
 node cli/src/index.mjs extract-text <file.pdf> [--pages A-B]
 node cli/src/index.mjs links <file.pdf> [--pages A-B]       # 超链接 → JSON
+node cli/src/index.mjs attachments <file.pdf> [--extract d] # 嵌入附件 → JSON / 导出到目录
+node cli/src/index.mjs layers <file.pdf>                    # 图层（OCG）→ JSON
 node cli/src/index.mjs translate "text" [--to zh-Hans]      # 本机翻译（macOS）
 node cli/src/index.mjs export-annotations <file.pdf>        # 伴生批注 → JSON
 node cli/src/index.mjs import-annotations <file.pdf> [--dry-run]  # PDF 内其他应用的注释 → 伴生文件（不重复导入）
@@ -112,10 +119,12 @@ claude mcp add solopdf -- node /path/to/pdf/dev-mcp/src/index.mjs --allow-write
 只读工具：`solopdf_info` / `solopdf_extract_text` / `solopdf_search` /
 `solopdf_search_library`（跨文件夹）/ `solopdf_read_annotations` /
 `solopdf_page_image` / `solopdf_define`（离线词典）/ `solopdf_links` /
-`solopdf_translate` / `solopdf_pdf_annotations`（PDF 内其他应用留下的注释及导入状态）。
+`solopdf_translate` / `solopdf_pdf_annotations`（PDF 内其他应用留下的注释及导入状态）/
+`solopdf_attachments`（嵌入附件）/ `solopdf_layers`（图层）。
 
 写门控（`--allow-write`）：`solopdf_add_annotation` /
-`solopdf_export_annotated_pdf` / `solopdf_import_annotations` / `solopdf_pages` / `solopdf_merge`。
+`solopdf_export_annotated_pdf` / `solopdf_import_annotations` / `solopdf_pages` / `solopdf_merge` /
+`solopdf_extract_attachment`（把附件写到目录）。
 
 ## 开发
 

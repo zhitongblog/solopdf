@@ -1,0 +1,70 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R /PageMode /UseOC /OCProperties << /OCGs [4 0 R 5 0 R 6 0 R 7 0 R] /D << /Name (Default) /BaseState /ON /OFF [7 0 R] /Locked [4 0 R] /RBGroups [[6 0 R 7 0 R]] /Order [4 0 R 5 0 R [(Theme) 6 0 R 7 0 R]] >> >> >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [9 0 R 11 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /OCG /Name (Base map) >>
+endobj
+5 0 obj
+<< /Type /OCG /Name (Labels) >>
+endobj
+6 0 obj
+<< /Type /OCG /Name (Day) >>
+endobj
+7 0 obj
+<< /Type /OCG /Name (Night) >>
+endobj
+8 0 obj
+<<  /Length 347 >>
+stream
+BT /F1 22 Tf 72 730 Td (Layers test - page 1) Tj ET
+BT /F1 11 Tf 72 712 Td (Always visible. Toggle layers in the sidebar.) Tj ET
+/OC /oc1 BDC 0.6 g 72 420 468 260 re f EMC
+/OC /oc3 BDC 1 0.85 0.1 rg 110 460 180 180 re f EMC
+/OC /oc4 BDC 0.1 0.15 0.45 rg 320 460 180 180 re f EMC
+/OC /oc2 BDC 0 0 0 rg BT /F1 28 Tf 120 380 Td (LABEL TEXT) Tj ET EMC
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> /Properties << /oc1 4 0 R /oc2 5 0 R /oc3 6 0 R /oc4 7 0 R >> >> /Contents 8 0 R >>
+endobj
+10 0 obj
+<<  /Length 347 >>
+stream
+BT /F1 22 Tf 72 730 Td (Layers test - page 2) Tj ET
+BT /F1 11 Tf 72 712 Td (Always visible. Toggle layers in the sidebar.) Tj ET
+/OC /oc1 BDC 0.6 g 72 420 468 260 re f EMC
+/OC /oc3 BDC 1 0.85 0.1 rg 110 460 180 180 re f EMC
+/OC /oc4 BDC 0.1 0.15 0.45 rg 320 460 180 180 re f EMC
+/OC /oc2 BDC 0 0 0 rg BT /F1 28 Tf 120 380 Td (LABEL TEXT) Tj ET EMC
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> /Properties << /oc1 4 0 R /oc2 5 0 R /oc3 6 0 R /oc4 7 0 R >> >> /Contents 10 0 R >>
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000015 00000 n 
+0000000271 00000 n 
+0000000335 00000 n 
+0000000405 00000 n 
+0000000454 00000 n 
+0000000501 00000 n 
+0000000545 00000 n 
+0000000591 00000 n 
+0000000990 00000 n 
+0000001178 00000 n 
+0000001578 00000 n 
+trailer
+<< /Size 12 /Root 1 0 R >>
+startxref
+1768
+%%EOF

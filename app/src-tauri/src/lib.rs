@@ -307,6 +307,90 @@ fn save_pdf_bytes(request: tauri::ipc::Request) -> Result<(), String> {
     }
 }
 
+/// Where attachments extracted from a PDF are staged so they can be opened
+/// by path: `<app cache>/attachments/<content hash>/<name>`. Disposable.
+fn attachments_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("attachments");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// A bare file name from the webview: no separators, not hidden, not `..`.
+fn bare_file_name(name: &str) -> Result<String, String> {
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0')
+        || name.starts_with('.')
+        || name.len() > 255
+    {
+        return Err("非法的文件名".into());
+    }
+    Ok(name.to_string())
+}
+
+/// Extensions the OS would execute (or run script from) on open — never
+/// handed to the OS from an attachment, whatever the webview asks. Mirrors
+/// core/src/attachments.ts RISKY_EXT.
+const RISKY_EXT: &[&str] = &[
+    "exe", "msi", "msp", "bat", "cmd", "com", "scr", "pif", "cpl", "msc", "hta", "reg", "lnk", "url", "scf",
+    "vbs", "vbe", "js", "jse", "mjs", "wsf", "wsh", "ps1", "psm1", "jar", "appref-ms", "application",
+    "sh", "bash", "zsh", "csh", "command", "tool", "app", "pkg", "mpkg", "dmg", "workflow", "scpt", "applescript",
+    "run", "bin", "appimage", "deb", "rpm", "desktop", "apk", "ipa",
+    "html", "htm", "xhtml", "svg", "shtml", "mht", "mhtml",
+    "docm", "xlsm", "pptm", "dotm", "xltm", "potm",
+];
+
+/// Stage an embedded attachment (raw body, name in `x-name`) in the app
+/// cache, keyed by content hash so the same file always gets the same path.
+#[tauri::command]
+fn stage_attachment(app: tauri::AppHandle, request: tauri::ipc::Request) -> Result<String, String> {
+    use std::hash::Hasher as _;
+    let raw = request
+        .headers()
+        .get("x-name")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| "缺少名称".to_string())?;
+    let name = bare_file_name(&urlencoding_decode(raw)?)?;
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes,
+        _ => return Err("expected raw body".into()),
+    };
+    let mut hasher = twox_hash::XxHash3_64::new();
+    hasher.write(bytes);
+    let dir = attachments_dir(&app)?.join(format!("{:016x}", hasher.finish()));
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let dest = dir.join(name);
+    fs::write(&dest, bytes).map_err(|e| format!("附件写入失败: {e}"))?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
+/// Open a staged attachment with the OS default app. Only files inside the
+/// staging folder, and never anything executable.
+#[cfg(desktop)]
+#[tauri::command]
+fn open_staged_file(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let dir = attachments_dir(&app)?.canonicalize().map_err(|e| e.to_string())?;
+    let p = PathBuf::from(&path).canonicalize().map_err(|e| e.to_string())?;
+    if !p.starts_with(&dir) || !p.is_file() {
+        return Err("只能打开已暂存的附件".into());
+    }
+    let ext = p
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if RISKY_EXT.contains(&ext.as_str()) {
+        return Err("出于安全考虑，可执行文件不会被直接打开".into());
+    }
+    tauri_plugin_opener::open_path(&p, None::<&str>).map_err(|e| e.to_string())
+}
+
+#[cfg(mobile)]
+#[tauri::command]
+fn open_staged_file(_app: tauri::AppHandle, _path: String) -> Result<(), String> {
+    Err("unsupported".into())
+}
+
 /// minimal percent-decoding (avoid a full urlencoding crate for one call)
 fn urlencoding_decode(s: &str) -> Result<String, String> {
     let mut out = Vec::with_capacity(s.len());
@@ -1345,6 +1429,8 @@ pub fn run() {
             save_pdf_bytes,
             save_to_documents,
             save_bytes_to_documents,
+            stage_attachment,
+            open_staged_file,
             startup_files,
             ocr_image,
             ocr_engine,

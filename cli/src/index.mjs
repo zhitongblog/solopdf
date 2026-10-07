@@ -6,6 +6,8 @@
  *   solopdf info <file.pdf> [--password pw]
  *   solopdf extract-text <file.pdf> [--pages 1-5] [--password pw]
  *   solopdf links <file.pdf> [--pages 1-5]      # hyperlinks → JSON
+ *   solopdf attachments <file.pdf> [--extract d] # embedded files → JSON / disk
+ *   solopdf layers <file.pdf>                   # optional content (OCG) → JSON
  *   solopdf export-annotations <file.pdf>       # sidecar -> JSON
  *   solopdf import-annotations <file.pdf> [--dry-run]  # PDF's own annots -> sidecar
  *   solopdf selftest <fixtures-dir>             # acceptance run over fixtures
@@ -28,6 +30,7 @@ import {
   parse, orderLinesForReading, pageLinks, normalizePageLabels, formatPageLabelRanges, exportSpec,
   pickTarget, guessLang, providerReady, translateWithProvider,
   genId, scanPdfAnnotations, buildImports, spliceImports, importSummary, needsLineFix, fixLineDirections,
+  collectAttachments, uniqueNames, layerRows, findLockedOcgs, radioGroups,
 } from '@solopdf/core'
 
 // piping into `head` etc. closes stdout early — exit quietly instead of crashing
@@ -556,6 +559,53 @@ async function cmdTranslate(text) {
   process.exit(res.error ? 2 : 0)
 }
 
+/**
+ * Embedded files: document-level attachments + FileAttachment annotations,
+ * listed exactly as the app's Attachments tab shows them. --extract writes
+ * them (safe bare names, deduplicated) into a folder; the input is never
+ * touched and nothing is ever executed.
+ */
+async function cmdAttachments(file) {
+  const doc = await open(file)
+  const all = await collectAttachments(doc)
+  const out = flag('extract')
+  let written = null
+  if (out) {
+    const { mkdir, writeFile } = await import('node:fs/promises')
+    await mkdir(out, { recursive: true })
+    const names = uniqueNames(all.map((a) => a.info.name))
+    written = []
+    for (let i = 0; i < all.length; i++) {
+      const dest = path.join(out, names[i])
+      await writeFile(dest, all[i].content)
+      written.push(path.resolve(dest))
+    }
+  }
+  console.log(JSON.stringify({
+    file: path.resolve(file),
+    count: all.length,
+    attachments: all.map((a, i) => ({ ...a.info, ...(written ? { written: written[i] } : {}) })),
+  }, null, 2))
+}
+
+/** Optional content groups ("layers"): default visibility, locks, radio sets. */
+async function cmdLayers(file) {
+  const doc = await open(file)
+  const config = await doc.getOptionalContentConfig()
+  const has = config.getOrder() !== null
+  const { inflateSync } = await import('node:zlib')
+  const locked = has
+    ? findLockedOcgs(new Uint8Array(await readFile(file)), (b) => new Uint8Array(inflateSync(b)))
+    : []
+  const rows = has ? layerRows(config, locked) : []
+  console.log(JSON.stringify({
+    file: path.resolve(file),
+    count: rows.filter((r) => r.type === 'layer').length,
+    radioGroups: has ? radioGroups(config) : [],
+    layers: rows,
+  }, null, 2))
+}
+
 /** Everything the native document driver does, forwarded verbatim. */
 async function cmdDoc(rest) {
   const { spawnSync } = await import('node:child_process')
@@ -617,6 +667,8 @@ switch (cmd) {
   case 'info': await cmdInfo(file ?? die('用法: solopdf info <file.pdf>')); break
   case 'extract-text': await cmdExtract(file ?? die('用法: solopdf extract-text <file.pdf>')); break
   case 'links': await cmdLinks(file ?? die('用法: solopdf links <file.pdf> [--pages A-B]')); break
+  case 'attachments': await cmdAttachments(file ?? die('用法: solopdf attachments <file.pdf> [--extract dir]')); break
+  case 'layers': await cmdLayers(file ?? die('用法: solopdf layers <file.pdf>')); break
   case 'export-annotations': await cmdExportAnnotations(file ?? die('用法: solopdf export-annotations <file.pdf>')); break
   case 'import-annotations': await cmdImportAnnotations(file ?? die('用法: solopdf import-annotations <file.pdf> [--dry-run]')); break
   case 'form-fields': await cmdFormFields(file ?? die('用法: solopdf form-fields <file.pdf>')); break
@@ -636,6 +688,8 @@ switch (cmd) {
   solopdf info <file.pdf> [--password pw]          文档信息（页数/书签/页码标签/元数据）
   solopdf extract-text <file.pdf> [--pages A-B]    提取文字
   solopdf links <file.pdf> [--pages A-B]           超链接列表（页、区域、内部目标页或 URL）→ JSON
+  solopdf attachments <file.pdf> [--extract dir]   嵌入附件（文档级 + 回形针注释）→ JSON；--extract 导出到目录
+  solopdf layers <file.pdf>                        图层（可选内容 OCG）：默认可见性、锁定、单选组 → JSON
   solopdf export-annotations <file.pdf>            批注伴生文件 → JSON
   solopdf import-annotations <file.pdf> [--dry-run]  PDF 内已有的注释（Acrobat/预览等）→ 伴生文件（可重复执行，不重复导入）
   solopdf form-fields <file.pdf>                   AcroForm 表单域与当前值 → JSON

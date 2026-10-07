@@ -1,6 +1,8 @@
 <script setup lang="ts">
 /**
- * Sidebar: outline / thumbnails / bookmarks / annotations.
+ * Sidebar: outline / thumbnails / bookmarks / annotations, plus two tabs that
+ * exist only when the document has the thing: attachments (embedded files)
+ * and layers (optional content).
  * Outline: full tree from doc.getOutline(); each entry's destination is
  * resolved through the same core resolver as in-page links, so a click lands
  * on the exact /XYZ spot (not just the page top) and is recorded in the
@@ -10,8 +12,11 @@
  * Annotations: filterable by kind, colour, #tag and free text; sortable.
  * Annotations other apps left inside the PDF get an "Import" row on top
  * (the banner's permanent twin — it stays after the banner is dismissed).
+ * Attachments: document-level + paperclip files; Open / Save (attachments.ts).
+ * Layers: /Order tree with radio groups and locks (layers.ts); thumbnails
+ * re-render when visibility changes.
  */
-import { computed, ref, watch, onBeforeUnmount, nextTick } from 'vue'
+import { computed, ref, watch, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import {
   store, controllers, documents, annotManagers, labelOf,
@@ -22,15 +27,45 @@ import { jump } from '../nav'
 import { openExternal } from '../platform'
 import { resolveDestination, safeExternalUrl, SHAPE_KINDS, type Annotation, type AnnotationKind, type LinkDest } from '@solopdf/core'
 import { cssColor } from '../annotations/drawing'
+import { attachView, openAttachment, saveAttachment, humanSize } from '../attachments'
+import { layerView, layerConfig, toggleLayer, resetLayers } from '../layers'
+import type { AttachmentInfo, AttachmentKind, LayerRow } from '@solopdf/core'
 
 defineProps<{ importing?: boolean }>()
-const emit = defineEmits<{ goto: [page: number, block?: number]; importPdf: [] }>()
+const emit = defineEmits<{ goto: [page: number, block?: number]; importPdf: []; toast: [msg: string] }>()
 
 const tab = computed(() => store.activeTab)
 // registries are plain Maps — touch store.docTick so these recompute on open
 const ctrl = computed(() => { void store.docTick; return tab.value ? controllers.get(tab.value.id) : undefined })
 const doc = computed(() => { void store.docTick; return tab.value ? documents.get(tab.value.id) : undefined })
 const mgr = computed(() => { void store.docTick; return tab.value ? annotManagers.get(tab.value.id) : undefined })
+
+// ── which tab is showing ──
+const attachments = computed<AttachmentInfo[]>(() => (tab.value ? attachView[tab.value.id]?.list ?? [] : []))
+const attachScanning = computed(() => (tab.value ? attachView[tab.value.id]?.scanning ?? false : false))
+const layers = computed(() => (tab.value ? layerView[tab.value.id] : undefined))
+/** the remembered tab, unless this document has no attachments / layers */
+const sbTab = computed(() => {
+  const s = store.settings.sidebarTab
+  if (s === 'attach' && !attachments.value.length) return 'outline'
+  if (s === 'layers' && !layers.value) return 'outline'
+  return s
+})
+const tabsEl = ref<HTMLDivElement>()
+// a tab switched on by the document (PageMode) may sit past the edge of a
+// narrow tab strip — bring it into view
+async function revealActiveTab(): Promise<void> {
+  await nextTick()
+  const strip = tabsEl.value
+  const el = strip?.querySelector<HTMLElement>('.active')
+  if (!strip || !el) return
+  // scroll the strip only — scrollIntoView would also move the page
+  if (el.offsetLeft + el.offsetWidth > strip.scrollLeft + strip.clientWidth) {
+    strip.scrollLeft = el.offsetLeft + el.offsetWidth - strip.clientWidth
+  } else if (el.offsetLeft < strip.scrollLeft) strip.scrollLeft = el.offsetLeft
+}
+watch(sbTab, revealActiveTab)
+onMounted(revealActiveTab)
 
 // ── outline ──
 interface OutlineNode {
@@ -108,6 +143,7 @@ async function setupThumbs(): Promise<void> {
 
 async function renderThumb(d: PDFDocumentProxy, pageNum: number, el: HTMLElement): Promise<void> {
   try {
+    const oc = tab.value ? layerConfig(tab.value.id) : null
     const page = await d.getPage(pageNum)
     const vp = page.getViewport({ scale: 0.18 })
     const canvas = document.createElement('canvas')
@@ -119,9 +155,51 @@ async function renderThumb(d: PDFDocumentProxy, pageNum: number, el: HTMLElement
       canvasContext: canvas.getContext('2d', { alpha: false })!,
       viewport: vp,
       transform: [2, 0, 0, 2, 0, 0],
+      ...(oc ? { optionalContentConfigPromise: Promise.resolve(oc) } : {}),
     } as any).promise
-    el.querySelector('.thumb-ph')?.replaceWith(canvas)
+    // first render replaces the placeholder; a layer change replaces the canvas
+    ;(el.querySelector('.thumb-ph') ?? el.querySelector('canvas'))?.replaceWith(canvas)
   } catch { /* thumb render failure is cosmetic */ }
+}
+
+// layer visibility changed: re-render the thumbnails already drawn
+watch(() => layers.value?.tick, () => {
+  const host = thumbHost.value
+  const d = doc.value
+  if (!host || !d) return
+  for (const p of renderedThumbs) {
+    const el = host.querySelector<HTMLElement>(`.thumb[data-page="${p}"]`)
+    if (el) void renderThumb(d, p, el)
+  }
+})
+
+// ── attachments ──
+const KIND_ICON: Record<AttachmentKind, string> = {
+  pdf: '📄', book: '📘', image: '🖼', risky: '⚠️', other: '📎',
+}
+function openTip(a: AttachmentInfo): string {
+  return a.kind === 'other' ? t('ef.openOsTip') : t('ef.openTabTip')
+}
+function openAtt(a: AttachmentInfo): void {
+  if (!tab.value) return
+  void openAttachment(tab.value.id, a)
+  // phone sheet: get out of the way of the tab that is about to open
+  if (a.kind !== 'risky') closeIfNarrow()
+}
+function saveAtt(a: AttachmentInfo): void {
+  if (tab.value) void saveAttachment(tab.value.id, a)
+}
+
+// ── layers ──
+function onLayerToggle(r: Extract<LayerRow, { type: 'layer' }>, e: Event): void {
+  const input = e.target as HTMLInputElement
+  if (!tab.value) return
+  const res = toggleLayer(tab.value.id, r.id, input.checked)
+  if (!res.ok) {
+    input.checked = r.visible
+    if (res.reason === 'locked') emit('toast', t('ly.lockedTip'))
+    else if (res.reason === 'radio-locked') emit('toast', t('ly.radioLockedTip'))
+  }
 }
 
 // ── bookmarks ──
@@ -287,10 +365,10 @@ async function removeAnnot(a: Annotation): Promise<void> {
 }
 
 // reload sidebar data when the document changes
-watch([doc, () => store.settings.sidebarTab], async ([d]) => {
+watch([doc, sbTab], async ([d]) => {
   if (!d) return
-  if (store.settings.sidebarTab === 'outline') await loadOutline(d)
-  if (store.settings.sidebarTab === 'thumbs') await setupThumbs()
+  if (sbTab.value === 'outline') await loadOutline(d)
+  if (sbTab.value === 'thumbs') await setupThumbs()
 }, { immediate: true })
 
 onBeforeUnmount(() => observer?.disconnect())
@@ -298,14 +376,22 @@ onBeforeUnmount(() => observer?.disconnect())
 
 <template>
   <div class="sidebar" v-if="tab">
-    <div class="sidebar-tabs">
-      <button :class="{ active: store.settings.sidebarTab === 'outline' }" @click="store.settings.sidebarTab = 'outline'">{{ t('sb.outline') }}</button>
-      <button :class="{ active: store.settings.sidebarTab === 'thumbs' }" @click="store.settings.sidebarTab = 'thumbs'">{{ t('sb.thumbs') }}</button>
-      <button :class="{ active: store.settings.sidebarTab === 'marks' }" @click="store.settings.sidebarTab = 'marks'">{{ t('sb.marks') }}</button>
-      <button :class="{ active: store.settings.sidebarTab === 'annots' }" @click="store.settings.sidebarTab = 'annots'">{{ t('sb.annots') }}</button>
+    <div class="sidebar-tabs" ref="tabsEl">
+      <button :class="{ active: sbTab === 'outline' }" @click="store.settings.sidebarTab = 'outline'">{{ t('sb.outline') }}</button>
+      <button :class="{ active: sbTab === 'thumbs' }" @click="store.settings.sidebarTab = 'thumbs'">{{ t('sb.thumbs') }}</button>
+      <button :class="{ active: sbTab === 'marks' }" @click="store.settings.sidebarTab = 'marks'">{{ t('sb.marks') }}</button>
+      <button :class="{ active: sbTab === 'annots' }" @click="store.settings.sidebarTab = 'annots'">{{ t('sb.annots') }}</button>
+      <button
+        v-if="attachments.length" data-sb="attach" :class="{ active: sbTab === 'attach' }"
+        :title="t('ef.tabTip', { n: attachments.length })" @click="store.settings.sidebarTab = 'attach'"
+      >{{ t('sb.attach') }} <span class="sb-count">{{ attachments.length }}</span></button>
+      <button
+        v-if="layers" data-sb="layers" :class="{ active: sbTab === 'layers' }"
+        :title="t('ly.tabTip')" @click="store.settings.sidebarTab = 'layers'"
+      >{{ t('sb.layers') }}</button>
     </div>
 
-    <div class="sidebar-body" v-if="store.settings.sidebarTab === 'outline'">
+    <div class="sidebar-body" v-if="sbTab === 'outline'">
       <div v-if="!flatOutline.length" class="annot-empty">{{ t('sb.noOutline') }}</div>
       <div
         v-for="(n, i) in flatOutline"
@@ -322,7 +408,7 @@ onBeforeUnmount(() => observer?.disconnect())
       </div>
     </div>
 
-    <div class="sidebar-body" v-else-if="store.settings.sidebarTab === 'thumbs'" ref="thumbHost">
+    <div class="sidebar-body" v-else-if="sbTab === 'thumbs'" ref="thumbHost">
       <div
         v-for="p in tab.numPages"
         :key="p"
@@ -338,7 +424,51 @@ onBeforeUnmount(() => observer?.disconnect())
       </div>
     </div>
 
-    <div class="sidebar-body" v-else-if="store.settings.sidebarTab === 'marks'">
+    <div class="sidebar-body" v-else-if="sbTab === 'attach'">
+      <div v-for="a in attachments" :key="a.id" class="att-item" :data-att="a.id">
+        <div class="att-head">
+          <span class="att-icon" aria-hidden="true">{{ KIND_ICON[a.kind] }}</span>
+          <span class="att-name" :title="a.name">{{ a.name }}</span>
+        </div>
+        <div v-if="a.description" class="att-desc">{{ a.description }}</div>
+        <div class="att-meta">
+          <span>{{ humanSize(a.size) }}</span>
+          <button
+            v-if="a.page" class="att-page" :title="t('ef.gotoPage')"
+            @click="jumpPage(a.page)"
+          >📎 p.{{ labelOf(tab, a.page) }}</button>
+          <span style="flex: 1"></span>
+          <button v-if="a.kind !== 'risky'" class="att-btn" data-act="open" :title="openTip(a)" @click="openAtt(a)">{{ t('ef.open') }}</button>
+          <button class="att-btn" data-act="save" :title="t('ef.saveTip')" @click="saveAtt(a)">{{ t('ef.save') }}</button>
+        </div>
+        <div v-if="a.kind === 'risky'" class="att-warn">{{ t('ef.riskyNote') }}</div>
+      </div>
+      <div v-if="attachScanning" class="att-scan">{{ t('ef.scanning') }}</div>
+    </div>
+
+    <div class="sidebar-body" v-else-if="sbTab === 'layers' && layers">
+      <div class="ly-bar">
+        <span class="ly-hint">{{ t('ly.hint') }}</span>
+        <button v-if="layers.changed" class="ly-reset" @click="resetLayers(tab.id)">{{ t('ly.reset') }}</button>
+      </div>
+      <template v-for="(r, i) in layers.rows" :key="r.type === 'layer' ? r.id : `h${i}`">
+        <div v-if="r.type === 'heading'" class="ly-heading" :style="{ paddingLeft: `${r.depth * 16 + 4}px` }">{{ r.name }}</div>
+        <label
+          v-else class="ly-row" :class="{ locked: r.locked, off: !r.visible }"
+          :style="{ paddingLeft: `${r.depth * 16 + 4}px` }" :data-layer="r.id"
+          :title="r.locked ? t('ly.lockedTip') : r.radio !== null ? t('ly.radioTip') : ''"
+        >
+          <input
+            type="checkbox" class="ly-check" :class="{ radio: r.radio !== null }"
+            :checked="r.visible" :disabled="r.locked" @change="onLayerToggle(r, $event)"
+          />
+          <span class="ly-name">{{ r.name }}</span>
+          <span v-if="r.locked" class="ly-lock" aria-hidden="true">🔒</span>
+        </label>
+      </template>
+    </div>
+
+    <div class="sidebar-body" v-else-if="sbTab === 'marks'">
       <div v-if="!bookmarks.length" class="annot-empty">{{ t('sb.noMarks') }}</div>
       <div v-for="b in bookmarks" :key="b.at" class="bm-item" @click="gotoBookmark(b)">
         <template v-if="bmEditing === b.at">

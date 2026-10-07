@@ -75,6 +75,10 @@ export interface DocPrefs {
   /** "import annotations from other apps" banner closed while this many
    *  were pending — it stays away until the PDF has more than that */
   importDismissed?: number
+  /** optional-content (layer) visibility the reader changed, keyed by
+   *  pdf.js group id ("12R"); only the differences from the document's
+   *  default state are kept */
+  layers?: Record<string, boolean>
   /** last time this entry was touched (for LRU eviction) */
   at?: number
 }
@@ -101,7 +105,7 @@ export interface Settings {
   theme: 'system' | 'light' | 'dark'
   darkPdf: 'off' | 'smart'
   updateCheck: boolean
-  sidebarTab: 'outline' | 'thumbs' | 'annots' | 'marks'
+  sidebarTab: 'outline' | 'thumbs' | 'annots' | 'marks' | 'attach' | 'layers'
   sidebarOpen: boolean
   language: 'system' | Locale
   book: BookSettings
@@ -380,7 +384,8 @@ export function newTab(path: string): TabState {
     split: null,
     kind: /\.epub$/i.test(path) ? 'epub'
       : /\.txt$/i.test(path) ? 'txt'
-      : /\.(cbz|cbr)$/i.test(path) ? 'comic'
+      // a lone image (an attachment opened from a PDF) is a one-page comic
+      : /\.(cbz|cbr|png|jpe?g|gif|webp|bmp|avif)$/i.test(path) ? 'comic'
       : /\.(mobi|azw3|azw|prc)$/i.test(path) ? 'mobi'
       : /\.djvu?$/i.test(path) ? 'djvu'
       : 'pdf',
@@ -392,9 +397,14 @@ export function newTab(path: string): TabState {
   return store.tabs[store.tabs.length - 1]
 }
 
+/** per-tab state kept by feature modules (layers, attachments) that the
+ *  store doesn't know about — they register their cleanup here */
+export const tabCloseHooks: ((tabId: number) => void)[] = []
+
 export function closeTab(id: number): void {
   const i = store.tabs.findIndex((t) => t.id === id)
   if (i < 0) return
+  for (const hook of tabCloseHooks) hook(id)
   splitControllers.get(id)?.destroy(true) // shares the document; the main one frees it
   splitControllers.delete(id)
   controllers.get(id)?.destroy()
@@ -423,7 +433,8 @@ export function docPrefsFor(path: string): DocPrefs {
 export function saveDocPrefs(path: string, patch: DocPrefs): void {
   const next = { ...docPrefsFor(path), ...patch, at: Date.now() }
   const empty = !next.rotation && !next.crop && !next.importDismissed &&
-    !Object.keys(next.pageRotations ?? {}).length
+    !Object.keys(next.pageRotations ?? {}).length &&
+    !Object.keys(next.layers ?? {}).length
   if (empty) {
     // the hash twin too — docPrefsFor falls back to it, so leaving it would
     // bring the old rotation/crop straight back
