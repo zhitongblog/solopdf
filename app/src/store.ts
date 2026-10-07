@@ -98,7 +98,8 @@ export interface Settings {
   theme: 'system' | 'light' | 'dark'
   darkPdf: 'off' | 'smart'
   updateCheck: boolean
-  sidebarTab: 'outline' | 'thumbs' | 'annots' | 'marks'
+  /** 'changes' = document compare's change list (only while comparing) */
+  sidebarTab: 'outline' | 'thumbs' | 'annots' | 'marks' | 'changes'
   sidebarOpen: boolean
   language: 'system' | Locale
   book: BookSettings

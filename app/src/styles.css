@@ -1400,3 +1400,136 @@ g.pv-hl-flash, .pv-textbox.pv-hl-flash { animation: drawflash 1.5s ease; }
 .pv-split > .pv-scroll.pv-focused { outline: 2px solid var(--split-focus); outline-offset: -2px; }
 :root { --split-focus: rgba(58, 109, 240, 0.45); }
 html.dark { --split-focus: rgba(107, 149, 255, 0.5); }
+
+/* ── two documents side by side (viewer/pair.ts) ──
+   .pv-stage wraps every tab's .pv-panes. display:contents keeps the
+   single-document layout byte-for-byte what it was; only while a pair is on
+   screen does it become a flex row, with the two paired panes ordered around
+   the divider (every other tab's panes stay display:none via v-show). */
+.pv-stage { display: contents; }
+.pv-stage.pv-pair { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.pv-pair-col { flex-direction: column; }
+.pv-pair > .pv-panes.pv-slot-a { order: 0; flex: 0 0 calc(var(--pair-ratio, 0.5) * (100% - 6px)); }
+.pv-pair > .pv-pair-divider { order: 1; }
+.pv-pair > .pv-panes.pv-slot-b { order: 2; flex: 1 1 0; }
+.pv-pair-col > .pv-pair-divider { cursor: row-resize; }
+.pv-pair-col > .pv-pair-divider::after { inset: -6px 0; }
+.pv-pair > .pv-panes.pv-pair-focused > .pv-scroll { outline: 2px solid var(--split-focus); outline-offset: -2px; }
+.pv-pair-label {
+  position: absolute; top: 6px; left: 50%; transform: translateX(-50%); z-index: 5;
+  display: flex; align-items: center; gap: 6px; max-width: calc(100% - 40px);
+  padding: 2px 6px 2px 10px; border-radius: 999px; font-size: 11px;
+  background: var(--bg-panel); color: var(--fg-dim); border: 1px solid var(--border);
+  box-shadow: var(--shadow); opacity: 0.86;
+}
+.pv-pair-focused > .pv-pair-label { color: var(--fg); opacity: 1; border-color: var(--accent); }
+.pv-pair-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-pair-close { padding: 0 5px; font-size: 13px; line-height: 1.2; border: 0; background: none; }
+.pair-drop {
+  position: absolute; top: 0; bottom: 0; width: 50%; z-index: 40; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-soft); border: 2px dashed var(--accent); border-radius: 8px;
+  color: var(--accent); font-weight: 600;
+}
+.pair-drop-right { right: 0; }
+.pair-drop-left { left: 0; }
+.tabbar .tab.paired:not(.active) { color: var(--fg); background: color-mix(in srgb, var(--bg) 55%, transparent); }
+.tab-pair-mark { color: var(--accent); font-size: 12px; margin-right: 2px; }
+.tab-menu-mask { position: fixed; inset: 0; z-index: 120; -webkit-app-region: no-drag; }
+.tab-menu {
+  position: fixed; min-width: 210px; padding: 4px; display: flex; flex-direction: column;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow);
+}
+.tab-menu-title {
+  padding: 4px 8px 6px; font-size: 11px; color: var(--fg-dim); max-width: 280px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-bottom: 1px solid var(--border); margin-bottom: 3px;
+}
+.tab-menu button { text-align: left; border: 0; background: none; padding: 6px 8px; border-radius: 5px; }
+.tab-menu button:hover:not(:disabled) { background: var(--accent-soft); }
+.tab-menu button:disabled { opacity: 0.45; }
+.vm-sub { margin: 8px 0 4px; font-size: 12px; color: var(--fg-dim); }
+.vm-docs { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.vm-doc { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vm-doc.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.vm-compare { margin-top: 4px; }
+
+/* ── document compare (compare.ts) ──
+   Marks live in the highlight layer: changed text is tinted on both sides,
+   insertions green on the new side, deletions red on the old side, a caret
+   where text went missing, a frame around a page that exists on one side. */
+:root {
+  --diff-ins: rgba(46, 160, 67, 0.30);
+  --diff-ins-ink: #2e9e5b;
+  --diff-del: rgba(229, 72, 77, 0.28);
+  --diff-del-ink: #d5393f;
+  --diff-chg: rgba(255, 166, 0, 0.34);
+  --diff-chg-ink: #c97a00;
+}
+html.dark {
+  --diff-ins-ink: #4cc777;
+  --diff-del-ink: #ff6b70;
+  --diff-chg-ink: #ffb340;
+}
+.pv-diff { position: absolute; border-radius: 2px; mix-blend-mode: multiply; }
+html.dark .pv-diff { mix-blend-mode: normal; }
+.pv-diff-ins { background: var(--diff-ins); box-shadow: inset 0 -2px 0 var(--diff-ins-ink); }
+.pv-diff-del { background: var(--diff-del); box-shadow: inset 0 -2px 0 var(--diff-del-ink); }
+.pv-diff-chg { background: var(--diff-chg); box-shadow: inset 0 -2px 0 var(--diff-chg-ink); }
+.pv-diff-caret { background: var(--diff-del-ink); border-radius: 1px; mix-blend-mode: normal; }
+.pv-diff-page-ins, .pv-diff-page-del { border-radius: 0; mix-blend-mode: normal; }
+.pv-diff-page-ins { box-shadow: inset 0 0 0 4px var(--diff-ins-ink); background: rgba(46, 160, 67, 0.06); }
+.pv-diff-page-del { box-shadow: inset 0 0 0 4px var(--diff-del-ink); background: rgba(229, 72, 77, 0.06); }
+.pv-diff-current { outline: 2px solid var(--accent); outline-offset: 1px; animation: hlflash 1.2s ease; }
+.pv-diff-page-ins.pv-diff-current, .pv-diff-page-del.pv-diff-current { outline-offset: -8px; }
+
+.cmp-dialog { width: 460px; }
+.cmp-row { margin: 10px 0; }
+.cmp-row label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px; }
+.cmp-pick { display: flex; gap: 6px; }
+.cmp-pick select { flex: 1; min-width: 0; }
+.cmp-swap-row { display: flex; align-items: center; gap: 10px; }
+.cmp-warn { color: var(--diff-del-ink); font-size: 12px; }
+.cmp-progress { font-size: 12px; color: var(--fg-dim); margin: 8px 0 0; }
+.cmp-tag {
+  display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 10px; font-weight: 700;
+  line-height: 16px; color: #fff; flex: none;
+}
+.cmp-tag-a { background: var(--diff-del-ink); }
+.cmp-tag-b { background: var(--diff-ins-ink); }
+
+.cmp-panel { display: flex; flex-direction: column; padding: 0; }
+.cmp-head { padding: 8px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.cmp-docs { font-size: 12px; display: flex; flex-direction: column; gap: 3px; }
+.cmp-docs > div { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cmp-docname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmp-summary { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 12px; }
+.cmp-summary strong { margin-right: 4px; }
+.cmp-chip { font-size: 11px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border); }
+.cmp-chip.cmp-k-change { border-color: var(--diff-chg-ink); color: var(--diff-chg-ink); }
+.cmp-chip.cmp-k-insert { border-color: var(--diff-ins-ink); color: var(--diff-ins-ink); }
+.cmp-chip.cmp-k-delete { border-color: var(--diff-del-ink); color: var(--diff-del-ink); }
+.cmp-notext { margin: 0; font-size: 11px; color: var(--diff-chg-ink); }
+.cmp-nav { display: flex; align-items: center; gap: 6px; }
+.cmp-nav button { flex: 1; }
+.cmp-pos { font-size: 12px; min-width: 52px; text-align: center; font-variant-numeric: tabular-nums; }
+.cmp-opts { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.cmp-opts .vm-check { margin: 0; font-size: 12px; }
+.cmp-list { flex: 1; overflow: auto; padding: 6px 8px; }
+.cmp-item {
+  border: 1px solid var(--border); border-left-width: 3px; border-radius: 6px;
+  padding: 6px 8px; margin-bottom: 6px; cursor: pointer; font-size: 12px; background: var(--bg-panel);
+}
+.cmp-item.cmp-k-change { border-left-color: var(--diff-chg-ink); }
+.cmp-item.cmp-k-insert { border-left-color: var(--diff-ins-ink); }
+.cmp-item.cmp-k-delete { border-left-color: var(--diff-del-ink); }
+.cmp-item:hover { background: var(--accent-soft); }
+.cmp-item.current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.cmp-item-meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--fg-dim); margin-bottom: 2px; }
+.cmp-kind { font-weight: 600; }
+.cmp-old, .cmp-new {
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  border-radius: 3px; padding: 1px 3px; margin-top: 2px; word-break: break-word;
+}
+.cmp-old { background: var(--diff-del); text-decoration: line-through; text-decoration-color: var(--diff-del-ink); }
+.cmp-new { background: var(--diff-ins); }
+.cmp-empty { color: var(--fg-dim); font-style: italic; }

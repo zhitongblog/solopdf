@@ -24,6 +24,9 @@
  *   - Annotations: both panes render from the same AnnotationManager (App
  *     wires mgr.onChange to both), so a highlight made in one pane shows up
  *     in the other immediately.
+ *   - Two DIFFERENT documents side by side are not a split: see pair.ts,
+ *     which lays two tabs out next to each other. The two are exclusive —
+ *     a paired tab never has a split, so the invariant above holds as is.
  */
 import { nextTick, ref, watch } from 'vue'
 import {

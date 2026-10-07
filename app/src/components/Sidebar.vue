@@ -8,6 +8,7 @@
  * Thumbnails: IntersectionObserver-driven lazy render at 0.18 scale.
  * Bookmarks: user-placed, from the store (never the sidecar — see store.ts).
  * Annotations: filterable by kind, colour, #tag and free text; sortable.
+ * Changes: only while the active document is being compared (compare.ts).
  */
 import { computed, ref, watch, onBeforeUnmount, nextTick } from 'vue'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
@@ -20,6 +21,8 @@ import { jump } from '../nav'
 import { openExternal } from '../platform'
 import { resolveDestination, safeExternalUrl, SHAPE_KINDS, type Annotation, type AnnotationKind, type LinkDest } from '@solopdf/core'
 import { cssColor } from '../annotations/drawing'
+import { compareFor } from '../compare'
+import ComparePanel from './ComparePanel.vue'
 
 const emit = defineEmits<{ goto: [page: number, block?: number] }>()
 
@@ -28,6 +31,10 @@ const tab = computed(() => store.activeTab)
 const ctrl = computed(() => { void store.docTick; return tab.value ? controllers.get(tab.value.id) : undefined })
 const doc = computed(() => { void store.docTick; return tab.value ? documents.get(tab.value.id) : undefined })
 const mgr = computed(() => { void store.docTick; return tab.value ? annotManagers.get(tab.value.id) : undefined })
+/** the change list exists only while this document is being compared */
+const comparing = computed(() => !!tab.value && !!compareFor(tab.value.id))
+const shownTab = computed(() =>
+  store.settings.sidebarTab === 'changes' && !comparing.value ? 'outline' : store.settings.sidebarTab)
 
 // ── outline ──
 interface OutlineNode {
@@ -274,10 +281,10 @@ async function removeAnnot(a: Annotation): Promise<void> {
 }
 
 // reload sidebar data when the document changes
-watch([doc, () => store.settings.sidebarTab], async ([d]) => {
+watch([doc, shownTab], async ([d]) => {
   if (!d) return
-  if (store.settings.sidebarTab === 'outline') await loadOutline(d)
-  if (store.settings.sidebarTab === 'thumbs') await setupThumbs()
+  if (shownTab.value === 'outline') await loadOutline(d)
+  if (shownTab.value === 'thumbs') await setupThumbs()
 }, { immediate: true })
 
 onBeforeUnmount(() => observer?.disconnect())
@@ -286,13 +293,21 @@ onBeforeUnmount(() => observer?.disconnect())
 <template>
   <div class="sidebar" v-if="tab">
     <div class="sidebar-tabs">
-      <button :class="{ active: store.settings.sidebarTab === 'outline' }" @click="store.settings.sidebarTab = 'outline'">{{ t('sb.outline') }}</button>
+      <button :class="{ active: shownTab === 'outline' }" @click="store.settings.sidebarTab = 'outline'">{{ t('sb.outline') }}</button>
       <button :class="{ active: store.settings.sidebarTab === 'thumbs' }" @click="store.settings.sidebarTab = 'thumbs'">{{ t('sb.thumbs') }}</button>
       <button :class="{ active: store.settings.sidebarTab === 'marks' }" @click="store.settings.sidebarTab = 'marks'">{{ t('sb.marks') }}</button>
       <button :class="{ active: store.settings.sidebarTab === 'annots' }" @click="store.settings.sidebarTab = 'annots'">{{ t('sb.annots') }}</button>
+      <button
+        v-if="comparing"
+        class="sb-changes-tab"
+        :class="{ active: shownTab === 'changes' }"
+        @click="store.settings.sidebarTab = 'changes'"
+      >{{ t('sb.changes') }}</button>
     </div>
 
-    <div class="sidebar-body" v-if="store.settings.sidebarTab === 'outline'">
+    <ComparePanel v-if="shownTab === 'changes'" />
+
+    <div class="sidebar-body" v-else-if="shownTab === 'outline'">
       <div v-if="!flatOutline.length" class="annot-empty">{{ t('sb.noOutline') }}</div>
       <div
         v-for="(n, i) in flatOutline"
@@ -309,7 +324,7 @@ onBeforeUnmount(() => observer?.disconnect())
       </div>
     </div>
 
-    <div class="sidebar-body" v-else-if="store.settings.sidebarTab === 'thumbs'" ref="thumbHost">
+    <div class="sidebar-body" v-else-if="shownTab === 'thumbs'" ref="thumbHost">
       <div
         v-for="p in tab.numPages"
         :key="p"
@@ -325,7 +340,7 @@ onBeforeUnmount(() => observer?.disconnect())
       </div>
     </div>
 
-    <div class="sidebar-body" v-else-if="store.settings.sidebarTab === 'marks'">
+    <div class="sidebar-body" v-else-if="shownTab === 'marks'">
       <div v-if="!bookmarks.length" class="annot-empty">{{ t('sb.noMarks') }}</div>
       <div v-for="b in bookmarks" :key="b.at" class="bm-item" @click="gotoBookmark(b)">
         <template v-if="bmEditing === b.at">

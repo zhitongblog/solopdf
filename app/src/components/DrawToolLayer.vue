@@ -31,6 +31,7 @@ import {
   renderDrawnPng, eraserHit, appendStroke, dropStrokes, type DrawTool,
 } from '../annotations/drawing'
 import TextBoxEditor from './TextBoxEditor.vue'
+import { focusPairAt } from '../viewer/pair'
 
 const props = defineProps<{ tabId: number; tool: DrawTool }>()
 const emit = defineEmits<{ switch: [tool: DrawTool]; cancel: []; toast: [msg: string] }>()
@@ -93,7 +94,8 @@ function onDown(e: PointerEvent): void {
   const c = ctrl.value
   if (!c) return
   const page = c.pageAt(e.clientX, e.clientY)
-  if (!page) return
+  // two documents side by side: a press on the other one focuses it
+  if (!page) { focusPairAt(e.clientX, e.clientY); return }
   const p = c.clientToPdf(page, e.clientX, e.clientY)
   if (!p) return
   e.preventDefault()

@@ -14,6 +14,7 @@
 | `smart-refs-paper.pdf` | 智能引用（无链接注释的论文：图/表/公式/参考文献 + 中文“图 3/表 1/公式 (2)”） | 4 页 / 6KB | 由 `scripts/gen-smartref-fixture.mjs` 手写生成（可复现），中文用非嵌入 STSong-Light |
 | `encrypted-password-solopdf.pdf` | 加密 PDF（密码输入框 + 明文批注提示） | 28 页 / AES-256 | 由中文样本加密生成，**密码：`solopdf`** |
 | `page-labels-roman.pdf` | 页码标签（/PageLabels：封面 Cover、罗马数字前言 i–iv、正文从 1 重新起、附录 A-1–A-3） | 24 页 / 4KB | `node scripts/gen-page-labels-fixture.mjs` 手写 PDF 对象生成，可复现；每页印着“Physical page N - printed label X”，另有灰/蓝色块用于纸张颜色/反色检查 |
+| `compare-contract-v1.pdf` / `compare-contract-v2.pdf` | 文档比较（合同两版：改一句、删一段、插入整页、中文逐字插入、改一个词；页脚页码在插页后整体错位） | 4 页 / 5 页，各 ~6KB | `node scripts/gen-compare-fixture.mjs` 手写 PDF 对象生成，可复现；中文用非嵌入 STSong-Light |
 
 ## 验收要点对照（来自设计蓝图 Success Criteria）
 
@@ -26,6 +27,7 @@
 - `toc-pdf-spec-iso32000.pdf`（链接）：前 60 页 277 个内部链接 + 18 个外链（`solopdf links … --pages 1-60`）；点击内部链接落到 /XYZ 精确位置，外链走系统浏览器；⌥← 返回
 - `smart-refs-paper.pdf`：p1 悬停 Figure 1 / Table 1 / Eq. (2) / (1) / [2] / [1, 3] / Fig. 2 / 图 3 / 表 1 / 公式 (2) / [4] 均弹出目标区域预览；Figure 9、[0, 1]、“(7) alone” 不弹
 - `page-labels-roman.pdf`：工具栏页码框显示印刷页码（ii (3 / 24)），输入 `iii` / `3` / `#3` 分别跳物理第 4 / 8 / 3 页；伴生文件锚点仍写物理页；`solopdf info` 输出 `1: Cover; 2-5: i–iv; 6-21: 1–16; 22-24: A-1–A-3`
+- `compare-contract-v1.pdf` → `compare-contract-v2.pdf`：`solopdf compare` 恰好报 6 处——p.2 修改「thirty (30」→「fifteen (15」、p.2 删除 2.3 整段、新增第 3 页（Schedule C）、p.3→p.4 新增「严格」「任何」、p.4→p.5「Zurich」→「Geneva」；页对齐 1-1 / 2-2 / —-3 / 3-4 / 4-5；页脚页码不算差异。应用里两版并排、两边高亮、同步滚动按对齐跳页
 - `encrypted-password-solopdf.pdf`：密码框（记住本次会话）；高亮时弹一次明文保存提示
 
 注：`*.pdf` 均来自公有领域/官方公开渠道，可安全入库；如嫌 157MB 太大可 git-lfs 或 .gitignore。

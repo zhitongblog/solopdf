@@ -28,6 +28,12 @@ SoloPDF：秒开、零广告、零遥测（更新检查可完全关闭）、永�
 - **视图**：整档或单页旋转（工具栏一键）、单页 / 双页对开、连续滚动 / 单屏翻页、
   自动裁白边（移动端读双栏论文的关键）、纸张颜色、分屏（同一文档两个视口）、
   全屏阅读与演示模式、自动滚动、阅读时屏幕常亮
+- **两个文档并排**（桌面 / iPad 宽度）：把另一个已打开的标签放到右侧（视图菜单、
+  标签右键「在右侧打开」，或把标签拖到文档区右半边），两边各用各的批注与伴生文件，
+  工具栏/侧栏/快捷键作用于有焦点的一侧；可选「同步滚动」（按页锁定）
+- **比较文档**（合同 v1 vs v2）：两版并排、按页文字相似度对齐（自动识别新增/删除的整页），
+  词级差异高亮（中文按字），两边同时标出修改/新增/删除；侧栏「差异」列表 + 上一处/下一处；
+  只比较文字层，扫描页（无文字层）会明确列出而不是当作“无变化"
 - **导航**：PDF 超链接可点（精确落点）、前进/后退、链接与 Figure/Table/[12]
   智能引用的悬停预览（没有链接的论文也行）、印刷页码（xii、A-3）
 - **手绘与图形**：画笔 / 橡皮 / 文本框 / 矩形 / 椭圆 / 直线 / 箭头，支持触控笔压感；
@@ -56,7 +62,7 @@ SoloPDF：秒开、零广告、零遥测（更新检查可完全关闭）、永�
 
 ```
 app/       Tauri 2 + Vue 3 桌面应用
-core/      共享逻辑：伴生文件格式 + 锚定算法（app 与 CLI 同一实现）
+core/      共享逻辑：伴生文件格式 + 锚定算法 + 文档比较（app 与 CLI 同一实现）
 cli/       solopdf 命令行（与应用同一 pdf.js 引擎）
 dev-mcp/   MCP server（AI/自动化驱动接口）
 test-fixtures/  标准测试集（7 个真实样本，见其 README）
@@ -77,6 +83,7 @@ node cli/src/index.mjs dict 汉字                             # 内置离线词
 node cli/src/index.mjs ocr scan.pdf --out scan-ocr.pdf      # 本地 OCR → 可搜索 PDF
 node cli/src/index.mjs ocr scan.pdf --out scan.md           # 本地 OCR → Markdown
 node cli/src/index.mjs ocr photo.jpg                        # 图片 → 文字（stdout）
+node cli/src/index.mjs compare old.pdf new.pdf [--json]     # 比较两版文档（按页对齐的差异列表）
 node cli/src/index.mjs selftest test-fixtures               # 标准测试集验收
 
 # 文档操作（转发给原生驱动 solopdf-doc，全部写新文件）
@@ -107,7 +114,7 @@ claude mcp add solopdf -- node /path/to/pdf/dev-mcp/src/index.mjs --allow-write
 只读工具：`solopdf_info` / `solopdf_extract_text` / `solopdf_search` /
 `solopdf_search_library`（跨文件夹）/ `solopdf_read_annotations` /
 `solopdf_page_image` / `solopdf_define`（离线词典）/ `solopdf_links` /
-`solopdf_translate`。
+`solopdf_translate` / `solopdf_compare`（两版 PDF 的文字差异 + 页对齐）。
 
 写门控（`--allow-write`）：`solopdf_add_annotation` /
 `solopdf_export_annotated_pdf` / `solopdf_pages` / `solopdf_merge`。

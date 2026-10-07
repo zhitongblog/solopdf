@@ -20,17 +20,25 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { gunzipSync } from 'fflate'
 import {
   parse, upsertAnnotation, genId, normalize, pageLinks, normalizePageLabels, compactPageLabels, exportSpec,
-  pickTarget, guessLang, providerReady, translateWithProvider,
+  pickTarget, guessLang, providerReady, translateWithProvider, compareDocuments,
 } from '@solopdf/core'
 
 const ALLOW_WRITE = process.argv.includes('--allow-write')
 
 const server = new McpServer({ name: 'solopdf', version: '0.1.0' })
 
+/** pdfjs-dist package root: its packed CMaps are what turn non-embedded CJK
+ *  fonts (STSong-Light + UniGB-UCS2-H …) into text instead of nothing */
+const PDFJS_ROOT = nodePath.dirname(new URL(import.meta.resolve('pdfjs-dist/package.json')).pathname)
+
 async function open(path, password) {
   if (!existsSync(path)) throw new Error(`文件不存在: ${path}`)
   const data = new Uint8Array(await readFile(path))
-  return await getDocument({ data, password, disableFontFace: true, verbosity: 0 }).promise
+  return await getDocument({
+    data, password, disableFontFace: true, verbosity: 0,
+    cMapUrl: `${PDFJS_ROOT}/cmaps/`, cMapPacked: true,
+    standardFontDataUrl: `file://${PDFJS_ROOT}/standard_fonts/`,
+  }).promise
 }
 
 function sidecarPath(pdfPath) {
@@ -136,6 +144,53 @@ server.tool(
     await doc.destroy()
     const internal = links.filter((l) => l.target != null).length
     return text({ pages: [from, hi], count: links.length, internal, external: links.length - internal, links })
+  },
+)
+
+server.tool(
+  'solopdf_compare',
+  '比较两个 PDF（只读，与应用「比较文档」同一算法）：按页文字相似度对齐（识别新增/删除的整页），'
+    + '词级差异（中文按字），返回差异列表：类型 insert/delete/change、旧/新文档页码与文字；'
+    + 'noTextA/noTextB 列出没有文字层、无法按文字比较的页（扫描件需先 OCR）',
+  {
+    a: z.string().describe('旧版本 PDF 路径'),
+    b: z.string().describe('新版本 PDF 路径'),
+    password: z.string().optional(),
+    passwordB: z.string().optional(),
+    limit: z.number().int().min(1).max(5000).default(500).describe('最多返回多少条差异'),
+  },
+  async ({ a, b, password, passwordB, limit }) => {
+    const docA = await open(a, password)
+    const docB = await open(b, passwordB ?? password)
+    const pagesOf = async (doc) => {
+      const pages = []
+      for (let p = 1; p <= doc.numPages; p++) {
+        const tc = await (await doc.getPage(p)).getTextContent()
+        pages.push(tc.items.filter((it) => 'str' in it).map((it) => ({ str: it.str, hasEOL: !!it.hasEOL })))
+      }
+      return pages
+    }
+    const r = compareDocuments(await pagesOf(docA), await pagesOf(docB))
+    await docA.destroy()
+    await docB.destroy()
+    return text({
+      pagesA: r.pagesA,
+      pagesB: r.pagesB,
+      stats: r.stats,
+      total: r.changes.length,
+      noTextA: r.noTextA,
+      noTextB: r.noTextB,
+      // page alignment: a null side = the page exists only in the other file
+      pairs: r.pairs.map((p) => [p.a, p.b]),
+      changes: r.changes.slice(0, limit).map((c) => ({
+        id: c.id,
+        kind: c.kind,
+        ...(c.pageInserted ? { pageInserted: c.pageInserted } : {}),
+        ...(c.pageDeleted ? { pageDeleted: c.pageDeleted } : {}),
+        a: { page: c.a.page, text: c.a.text },
+        b: { page: c.b.page, text: c.b.text },
+      })),
+    })
   },
 )
 

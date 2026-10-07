@@ -83,6 +83,18 @@ export interface PreviewRequest {
   touch: boolean
 }
 
+/**
+ * A document-compare mark (viewer/../compare.ts), PDF user space. `ins` /
+ * `del` / `chg` tint changed text, `caret` marks where text went missing,
+ * `page-ins` / `page-del` frame a page that exists on one side only.
+ */
+export interface DiffMark {
+  /** change id, shared by both documents' marks of the same change */
+  id: number
+  kind: 'ins' | 'del' | 'chg' | 'caret' | 'page-ins' | 'page-del'
+  quad?: Quad
+}
+
 /** a Link annotation as found on a page, target not yet resolved */
 interface PageLink {
   rect: [number, number, number, number]
@@ -190,6 +202,9 @@ export class PdfViewerController {
   private suppressClick = false
   private pointerType = 'mouse'
   private refMarks: HTMLElement[] = []
+  /** document compare: marks per 1-based page, and the change in focus */
+  private diffMarks = new Map<number, DiffMark[]>()
+  private currentDiff = -1
 
   /**
    * Split view: the other pane showing the same document. Rotation, crop and
@@ -571,6 +586,33 @@ export class PdfViewerController {
       this.update()
       this.onVisiblePage(this.currentPage())
     })
+  }
+
+  /**
+   * Where the reading line (a third down the viewport — the same line
+   * currentPage() uses) falls: the page, and how far into that page's row.
+   * Two-document sync scrolling keeps this line on corresponding pages.
+   */
+  readingLine(): { page: number; frac: number } {
+    const page = this.currentPage()
+    if (this.scrollMode === 'paged') return { page, frac: 0 }
+    const row = this.rows[this.rowOfPage[page - 1] ?? 0]
+    if (!row) return { page, frac: 0 }
+    const line = this.scroll.scrollTop + this.scroll.clientHeight / 3
+    return { page, frac: Math.max(0, Math.min(1, (line - row.top) / Math.max(1, row.height))) }
+  }
+
+  /** scroll so the reading line sits `frac` into `page` (no-op if already there) */
+  alignReadingLine(page: number, frac: number): void {
+    const i = Math.min(Math.max(page, 1), this.numPages) - 1
+    if (this.scrollMode === 'paged') {
+      if (this.currentPage() !== i + 1) { this.scrollToPage(i + 1); this.update() }
+      return
+    }
+    const row = this.rows[this.rowOfPage[i] ?? 0]
+    if (!row) return
+    const top = Math.max(0, row.top + row.height * frac - this.scroll.clientHeight / 3)
+    if (Math.abs(this.scroll.scrollTop - top) >= 1) this.scroll.scrollTop = top
   }
 
   /** progress ratio for position persistence */
@@ -1577,7 +1619,58 @@ export class PdfViewerController {
         s.hlLayer.appendChild(div)
       }
     }
+    this.paintDiff(pageNum, s.hlLayer, box, rot)
     this.paintDrawn(i, drawn)
+  }
+
+  // ── document compare marks ──────────────────────────────────────────────
+
+  /** replace all compare marks (null = compare ended) */
+  setDiffMarks(marks: Map<number, DiffMark[]> | null): void {
+    const pages = new Set([...this.diffMarks.keys(), ...(marks?.keys() ?? [])])
+    this.diffMarks = marks ?? new Map()
+    if (!marks) this.currentDiff = -1
+    for (const p of pages) this.paintHighlights(p)
+  }
+
+  /** emphasize one change's marks (the one selected in the change list) */
+  setCurrentDiff(id: number): void {
+    this.currentDiff = id
+    for (const s of this.slots) {
+      s.hlLayer?.querySelectorAll<HTMLElement>('.pv-diff').forEach((el) => {
+        el.classList.toggle('pv-diff-current', el.dataset.diff === String(id))
+      })
+    }
+  }
+
+  /** first mark of a change on this document, for scrolling to it */
+  diffAnchor(id: number): { page: number; quad?: Quad } | null {
+    for (const [page, marks] of this.diffMarks) {
+      const m = marks.find((x) => x.id === id)
+      if (m) return { page, quad: m.quad }
+    }
+    return null
+  }
+
+  private paintDiff(pageNum: number, layer: HTMLDivElement, box: PageBox, rot: number): void {
+    const marks = this.diffMarks.get(pageNum)
+    if (!marks?.length) return
+    for (const m of marks) {
+      const div = document.createElement('div')
+      div.className = `pv-diff pv-diff-${m.kind}`
+      if (m.id === this.currentDiff) div.classList.add('pv-diff-current')
+      div.dataset.diff = String(m.id)
+      if (m.kind === 'page-ins' || m.kind === 'page-del') {
+        div.style.cssText = 'left:0;top:0;right:0;bottom:0'
+      } else if (m.quad) {
+        const v = pdfRectToView(m.quad, box, rot, this.scale)
+        // a caret is a point: give it a visible stroke
+        const w = m.kind === 'caret' ? 3 : v.width
+        const left = m.kind === 'caret' ? v.left - 1.5 : v.left
+        div.style.cssText = `left:${left}px;top:${v.top}px;width:${w}px;height:${v.height}px`
+      } else continue
+      layer.appendChild(div)
+    }
   }
 
   /**
