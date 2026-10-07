@@ -117,6 +117,8 @@ export const reviewContact = {
   demoAccountRequired: false,
   notes: `SoloPDF is a fully local PDF reader. No account needed, no server component.
 
+MAC: FIX FOR THE PREVIOUS REJECTION (5.1.1(ii), 1.6.0 — "Add Folder" on the Home folder showed a photo-library prompt with no purpose string). The library scan no longer enters privacy-protected locations at all: it skips ~/Library and package bundles such as "Photos Library.photoslibrary", so adding the Home folder does not prompt for Photos. As a safeguard the app now also declares clear purpose strings (Photos, Documents, Desktop, Downloads, removable and network volumes) explaining that SoloPDF only reads PDF / e-book files and never reads or uploads photos.
+
 OPTIONAL "ASK AI" FEATURE (new in this version): it is OFF by default and SoloPDF ships no AI service of its own. A user can turn it on in Settings and enter their own OpenAI-compatible endpoint (for example a local Ollama / LM Studio server on their own computer, or a provider they have an account with). Before any text is sent, the app shows a consent sheet naming the exact endpoint and stating whether it is on the local machine or online; nothing is sent without that consent, and only short excerpts of the open document (not the whole file) are sent. We collect nothing and operate no server. All other features in this version (importing annotations, comparing documents, attachments, layers, reading ruler, citations, FB2/TIFF) work fully offline.
 
 SAMPLE PDF: https://solopdf.doaipm.com/sample.pdf — download in Safari, then in SoloPDF tap "Open PDF" and pick it from Files > Downloads (or use any of your own PDFs).
@@ -152,5 +154,5 @@ export const screenshots = {
 // Per-platform release plan: store version string must match the attached build's train.
 export const platforms = {
   IOS:    { versionString: '0.8.0', buildVersion: '0.8.0' },
-  MAC_OS: { versionString: '1.6.0', buildVersion: '1.6.0' },
+  MAC_OS: { versionString: '1.7.0', buildVersion: '1.7.0' },
 };

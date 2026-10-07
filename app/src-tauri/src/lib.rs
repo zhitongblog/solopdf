@@ -1059,6 +1059,34 @@ fn is_readable_doc(path: &str) -> bool {
     }
 }
 
+/// Folders the library scan never walks into. Hidden folders are caches and
+/// version-control noise. The rest are places macOS guards with a privacy
+/// prompt (App Review, MAS 1.6.0: "Add folder" on the home folder popped a
+/// photo-library prompt) or that hold app data rather than documents:
+/// package bundles such as `Photos Library.photoslibrary` / `*.app`, and the
+/// user's `~/Library` (Mail, Messages, Contacts, Calendars databases …).
+fn skip_scan_dir(p: &Path) -> bool {
+    let Some(name) = p.file_name().map(|n| n.to_string_lossy().to_lowercase()) else {
+        return false;
+    };
+    if name.starts_with('.') {
+        return true;
+    }
+    const BUNDLES: &[&str] = &[
+        "photoslibrary", "photolibrary", "migratedphotolibrary", "aplibrary", "musiclibrary",
+        "tvlibrary", "imovielibrary", "fcpbundle", "app", "appex", "bundle", "framework",
+        "plugin", "kext", "xcarchive", "xcodeproj", "xcworkspace", "lrdata", "lrcat-data",
+    ];
+    if let Some((_, ext)) = name.rsplit_once('.') {
+        if BUNDLES.contains(&ext) {
+            return true;
+        }
+    }
+    // ~/Library — a "Library" folder directly inside /Users/<name>
+    name == "library"
+        && p.parent().and_then(|h| h.parent()).map(|u| u == Path::new("/Users")).unwrap_or(false)
+}
+
 #[derive(Serialize)]
 struct ScannedFile {
     path: String,
@@ -1072,53 +1100,53 @@ struct ScannedFile {
 /// for a minute is worse than one that says "too many files".
 #[tauri::command]
 async fn scan_folder(path: String, max_depth: u32) -> Result<Vec<ScannedFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || Ok(walk_docs(Path::new(&path), max_depth, |_| {})))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The scan itself; `on_dir` sees every folder that gets read (tests use it
+/// to prove no privacy-guarded folder is ever opened).
+fn walk_docs(root: &Path, max_depth: u32, mut on_dir: impl FnMut(&Path)) -> Vec<ScannedFile> {
     const MAX_FILES: usize = 5000;
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut out = Vec::new();
-        let mut stack = vec![(PathBuf::from(&path), 0u32)];
-        while let Some((dir, depth)) = stack.pop() {
+    let mut out = Vec::new();
+    let mut stack = vec![(root.to_path_buf(), 0u32)];
+    while let Some((dir, depth)) = stack.pop() {
+        if out.len() >= MAX_FILES {
+            break;
+        }
+        on_dir(&dir);
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            let Ok(md) = entry.metadata() else { continue };
+            if md.is_dir() {
+                if !skip_scan_dir(&p) && depth < max_depth {
+                    stack.push((p, depth + 1));
+                }
+                continue;
+            }
+            if !is_readable_doc(&p.to_string_lossy()) {
+                continue;
+            }
+            out.push(ScannedFile {
+                name: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                path: p.to_string_lossy().into_owned(),
+                size: md.len(),
+                modified: md
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            });
             if out.len() >= MAX_FILES {
                 break;
             }
-            let Ok(entries) = fs::read_dir(&dir) else { continue };
-            for entry in entries.flatten() {
-                let p = entry.path();
-                let Ok(md) = entry.metadata() else { continue };
-                if md.is_dir() {
-                    // hidden folders are caches and version-control noise
-                    let hidden = p
-                        .file_name()
-                        .map(|n| n.to_string_lossy().starts_with('.'))
-                        .unwrap_or(false);
-                    if !hidden && depth < max_depth {
-                        stack.push((p, depth + 1));
-                    }
-                    continue;
-                }
-                if !is_readable_doc(&p.to_string_lossy()) {
-                    continue;
-                }
-                out.push(ScannedFile {
-                    name: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-                    path: p.to_string_lossy().into_owned(),
-                    size: md.len(),
-                    modified: md
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0),
-                });
-                if out.len() >= MAX_FILES {
-                    break;
-                }
-            }
         }
-        out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-        Ok(out)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    }
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out
 }
 
 fn covers_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -1525,5 +1553,47 @@ mod doc_ext_tests {
         for no in ["/a/archive.zip", "/a/noext", "/a.pdf/dir", ".pdf", "photo.png"] {
             assert!(!is_readable_doc(no), "{no}");
         }
+    }
+}
+
+#[cfg(test)]
+mod scan_skip_tests {
+    use super::{skip_scan_dir, walk_docs};
+    use std::path::Path;
+
+    /// Real-machine check (macOS): "Add folder" on the home folder must not
+    /// open Photos / ~/Library — run with `cargo test --lib -- --ignored home_scan`
+    #[test]
+    #[ignore]
+    fn home_scan_never_enters_guarded_folders() {
+        let home = std::env::var("HOME").unwrap();
+        let mut bad = Vec::new();
+        let mut n = 0;
+        let files = walk_docs(Path::new(&home), 4, |d| {
+            n += 1;
+            let s = d.to_string_lossy();
+            if s.contains(".photoslibrary") || s.starts_with(&format!("{home}/Library")) {
+                bad.push(s.into_owned());
+            }
+        });
+        eprintln!("visited {n} folders, found {} documents", files.len());
+        assert!(bad.is_empty(), "entered guarded folders: {bad:?}");
+    }
+
+    #[test]
+    fn skips_privacy_guarded_and_bundle_folders() {
+        assert!(skip_scan_dir(Path::new("/Users/a/Pictures/Photos Library.photoslibrary")));
+        assert!(skip_scan_dir(Path::new("/Users/a/Library")));
+        assert!(skip_scan_dir(Path::new("/Users/a/.git")));
+        assert!(skip_scan_dir(Path::new("/Applications/SoloPDF.app")));
+        assert!(skip_scan_dir(Path::new("/Users/a/Music/Music Library.musiclibrary")));
+    }
+
+    #[test]
+    fn keeps_ordinary_folders() {
+        assert!(!skip_scan_dir(Path::new("/Users/a/Documents")));
+        assert!(!skip_scan_dir(Path::new("/Users/a/Documents/Library"))); // a user's own "Library" folder
+        assert!(!skip_scan_dir(Path::new("/Users/a/Pictures")));
+        assert!(!skip_scan_dir(Path::new("/Users/a/Books/v1.2 drafts")));
     }
 }

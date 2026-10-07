@@ -6,5 +6,21 @@
 	     卡"缺出口合规声明"(usesNonExemptEncryption null) -->
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<!-- macOS privacy purpose strings (App Review 5.1.1(ii), MAS 1.6.0).
+	     The library scan skips the places that trigger these (see
+	     skip_scan_dir in lib.rs); the strings cover anything that still
+	     reaches a guarded folder, e.g. a PDF opened from Downloads. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>SoloPDF only reads PDF and e-book files. When you add a folder to your library, SoloPDF looks inside it for documents; it never reads, copies or uploads your photos. You can choose Don't Allow.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>SoloPDF opens the PDFs and e-books you keep in Documents, and saves your highlights as a Markdown notes file next to each document.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>SoloPDF opens the PDFs and e-books you keep on the Desktop, and saves your highlights as a Markdown notes file next to each document.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>SoloPDF opens the PDFs and e-books you download, and saves your highlights as a Markdown notes file next to each document.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>SoloPDF opens PDFs and e-books stored on external drives and USB sticks, for example when you add a folder from one to your library.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>SoloPDF opens PDFs and e-books stored on network drives, for example when you add a folder from one to your library.</string>
 </dict>
 </plist>
