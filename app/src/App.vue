@@ -27,6 +27,8 @@ import {
   openSplit, closeSplit, focusPane, startDividerDrag, splitAvailable, relayoutPanes,
 } from './viewer/split'
 import { printDocument } from './print'
+import { prepareLayers, layerConfig } from './layers'
+import { scanAttachments, setAttachmentHost, openAttachmentData, attachView } from './attachments'
 import { initWakeLock, setKeepAwake } from './wakelock'
 import { setWindowFullscreen, watchFullscreenExit } from './fullscreen'
 import { normalizePageLabels } from '@solopdf/core'
@@ -313,9 +315,19 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
     if (prefs.rotation) ctrl.rotation = prefs.rotation
     if (prefs.pageRotations) ctrl.setPageRotations(prefs.pageRotations)
     if (prefs.crop) ctrl.crop = prefs.crop
+    // layers: saved visibility must be in place before the first paint
+    ctrl.ocConfig = await prepareLayers(tab, doc)
     controllers.set(tab.id, ctrl)
     wireController(tab, ctrl)
     await ctrl.init()
+    // embedded files (document-level now, paperclips in the background);
+    // a PDF that asks for its attachments / layers panel gets it shown
+    void scanAttachments(tab, doc).then(async () => {
+      const mode = await doc.getPageMode().catch(() => null)
+      if (!store.settings.sidebarOpen || store.activeTabId !== tab.id) return
+      if (mode === 'UseAttachments' && attachView[tab.id]?.list.length) store.settings.sidebarTab = 'attach'
+      else if (mode === 'UseOC' && ctrl.ocConfig) store.settings.sidebarTab = 'layers'
+    }).catch(() => {})
     // printed page numbers — display only, never written anywhere
     void doc.getPageLabels()
       .then((l) => { tab.pageLabels = normalizePageLabels(l, doc.numPages) })
@@ -379,6 +391,7 @@ function wireController(tab: TabState, ctrl: PdfViewerController): void {
   ctrl.onBeforeJump = () => remember(tab.id)
   ctrl.onExternalLink = (url) => { void openExternal(url) }
   ctrl.onPreview = (req) => onLinkPreview(tab.id, req)
+  ctrl.onAttachment = (a) => { void openAttachmentData(tab.id, a) }
 }
 
 // ── split view ──
@@ -900,7 +913,7 @@ async function doPrint(): Promise<void> {
   if (!tab || !doc) return
   showToast(t('app.printPrep'))
   try {
-    await printDocument(doc)
+    await printDocument(doc, undefined, layerConfig(tab.id))
   } catch (err) {
     showToast(t('app.printFail', { msg: (err as Error).message }))
   }
@@ -946,6 +959,7 @@ function onResize(): void {
 let posTimer = 0
 onMounted(async () => {
   await initStore()
+  setAttachmentHost({ open: (p) => openPath(p), toast: showToast })
   // phones: sidebar starts closed regardless of persisted desktop preference
   if (window.innerWidth < 700) store.settings.sidebarOpen = false
   applyTheme()
@@ -979,6 +993,9 @@ onMounted(async () => {
     annotManagers,
     documents,
     printDocument,
+    layers: await import('./layers'),
+    attachments: await import('./attachments'),
+    webDownloads: (await import('./platform/web')).webDownloads,
     exportMd,
     ocr: await import('./ocr'),
     openImageOcr: (p: string) => { imageOcrPath.value = p },
@@ -1115,6 +1132,7 @@ watch(() => store.settings.sidebarOpen, () => {
       <Sidebar
         v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind === 'pdf' && !chromeHidden"
         @goto="gotoBookmark"
+        @toast="showToast"
       />
       <div class="app-content">
         <Toolbar

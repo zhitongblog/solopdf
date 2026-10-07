@@ -21,7 +21,9 @@ import { gunzipSync } from 'fflate'
 import {
   parse, upsertAnnotation, genId, normalize, pageLinks, normalizePageLabels, compactPageLabels, exportSpec,
   pickTarget, guessLang, providerReady, translateWithProvider,
+  collectAttachments, uniqueNames, layerRows, findLockedOcgs, radioGroups,
 } from '@solopdf/core'
+import { inflateSync } from 'node:zlib'
 
 const ALLOW_WRITE = process.argv.includes('--allow-write')
 
@@ -342,7 +344,62 @@ server.tool(
   },
 )
 
+server.tool(
+  'solopdf_attachments',
+  '列出 PDF 的嵌入附件（只读）：文档级附件 + 页面上的回形针（FileAttachment 注释）；含名称、大小、说明、所在页、类型（pdf/book/image 可在 SoloPDF 打开，risky=可执行文件只可另存，other=交给系统）。导出到磁盘用 solopdf_extract_attachment（需 --allow-write）',
+  { path: z.string(), password: z.string().optional() },
+  async ({ path, password }) => {
+    const doc = await open(path, password)
+    const all = await collectAttachments(doc)
+    await doc.destroy()
+    return text({ count: all.length, attachments: all.map((a) => a.info) })
+  },
+)
+
+server.tool(
+  'solopdf_layers',
+  '列出 PDF 的图层（可选内容 OCG，只读）：按文档 /Order 排列的图层与分组标题、默认可见性、是否锁定、所属单选组（同组只能开一个）',
+  { path: z.string(), password: z.string().optional() },
+  async ({ path, password }) => {
+    const doc = await open(path, password)
+    const config = await doc.getOptionalContentConfig()
+    const has = config.getOrder() !== null
+    const locked = has
+      ? findLockedOcgs(new Uint8Array(await readFile(path)), (b) => inflateSync(b))
+      : []
+    const rows = has ? layerRows(config, locked) : []
+    await doc.destroy()
+    return text({
+      count: rows.filter((r) => r.type === 'layer').length,
+      radioGroups: has ? radioGroups(config) : [],
+      layers: rows,
+    })
+  },
+)
+
 if (ALLOW_WRITE) {
+  server.tool(
+    'solopdf_extract_attachment',
+    '把 PDF 的嵌入附件写到目录（需 --allow-write）。id 取自 solopdf_attachments；省略 id = 全部导出。文件名经过清洗（去目录、去保留字符、重名加序号），只写文件，从不执行',
+    { path: z.string(), outDir: z.string(), id: z.string().optional(), password: z.string().optional() },
+    async ({ path, outDir, id, password }) => {
+      const doc = await open(path, password)
+      const all = await collectAttachments(doc)
+      await doc.destroy()
+      const picked = id ? all.filter((a) => a.info.id === id) : all
+      if (!picked.length) throw new Error(id ? `没有这个附件: ${id}` : '该 PDF 没有附件')
+      await mkdir(outDir, { recursive: true })
+      const names = uniqueNames(picked.map((a) => a.info.name))
+      const written = []
+      for (let i = 0; i < picked.length; i++) {
+        const dest = nodePath.join(outDir, names[i])
+        await writeFile(dest, picked[i].content)
+        written.push({ id: picked[i].info.id, path: nodePath.resolve(dest), size: picked[i].info.size })
+      }
+      return text({ written })
+    },
+  )
+
   server.tool(
     'solopdf_add_annotation',
     '向 PDF 的伴生批注文件追加一条批注（需 --allow-write 启动）',

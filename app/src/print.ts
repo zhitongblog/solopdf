@@ -17,8 +17,11 @@ import { isTauri } from './platform'
 const BATCH = 10
 const PRINT_DPI = 200 // ≈2.08x of 96dpi
 
-/** render all pages to JPEG data URLs in batches */
-async function renderPagesToImages(doc: PDFDocumentProxy): Promise<string[]> {
+type OcConfig = Awaited<ReturnType<PDFDocumentProxy['getOptionalContentConfig']>>
+
+/** render all pages to JPEG data URLs in batches; `oc` = the reader's
+ *  current layer visibility (prints what is on screen, not the defaults) */
+async function renderPagesToImages(doc: PDFDocumentProxy, oc?: OcConfig | null): Promise<string[]> {
   const urls: string[] = []
   const scale = PRINT_DPI / 96
   for (let start = 1; start <= doc.numPages; start += BATCH) {
@@ -32,6 +35,7 @@ async function renderPagesToImages(doc: PDFDocumentProxy): Promise<string[]> {
       await page.render({
         canvasContext: canvas.getContext('2d', { alpha: false })!,
         viewport: vp,
+        ...(oc ? { optionalContentConfigPromise: Promise.resolve(oc) } : {}),
       } as any).promise
       urls.push(canvas.toDataURL('image/jpeg', 0.92))
       canvas.width = 0 // release backing store immediately
@@ -43,9 +47,9 @@ async function renderPagesToImages(doc: PDFDocumentProxy): Promise<string[]> {
 }
 
 /** Tauri path: overlay in the main document + native WKWebView print */
-async function printViaOverlay(doc: PDFDocumentProxy): Promise<void> {
+async function printViaOverlay(doc: PDFDocumentProxy, oc?: OcConfig | null): Promise<void> {
   const { invoke } = await import('@tauri-apps/api/core')
-  const urls = await renderPagesToImages(doc)
+  const urls = await renderPagesToImages(doc, oc)
   const overlay = document.createElement('div')
   overlay.className = 'print-overlay'
   for (const u of urls) {
@@ -76,9 +80,11 @@ export async function printDocument(
   doc: PDFDocumentProxy,
   /** test seam: E2E stubs the system dialog call */
   trigger?: (w: Window) => void,
+  /** optional-content config carrying the reader's layer choices */
+  oc?: OcConfig | null,
 ): Promise<void> {
   if (isTauri() && !trigger) {
-    return printViaOverlay(doc)
+    return printViaOverlay(doc, oc)
   }
   const doTrigger = trigger ?? ((w: Window) => w.print())
   const frame = document.createElement('iframe')
@@ -92,7 +98,7 @@ export async function printDocument(
       '</style></head><body></body></html>')
     fdoc.close()
 
-    for (const u of await renderPagesToImages(doc)) {
+    for (const u of await renderPagesToImages(doc, oc)) {
       const img = fdoc.createElement('img')
       img.src = u
       fdoc.body.appendChild(img)

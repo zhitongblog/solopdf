@@ -52,6 +52,13 @@ export class ComicBook {
   private urls = new Map<number, string>()
 
   async load(bytes: Uint8Array, path: string): Promise<void> {
+    // a single picture (an image attachment opened from a PDF): one page
+    const base = path.split(/[\\/]/).pop() ?? path
+    if (IMAGE_RE.test(base) && !isRar(bytes) && !isZip(bytes)) {
+      this.zip = { [base]: bytes }
+      this.pages = [{ name: base, index: 0 }]
+      return
+    }
     this.kind = /\.cbr$/i.test(path) || isRar(bytes) ? 'cbr' : 'cbz'
     if (this.kind === 'cbz') await this.loadZip(bytes)
     else await this.loadRar(bytes)
@@ -129,6 +136,11 @@ export class ComicBook {
 function isRar(bytes: Uint8Array): boolean {
   // "Rar!\x1a\x07"
   return bytes[0] === 0x52 && bytes[1] === 0x61 && bytes[2] === 0x72 && bytes[3] === 0x21
+}
+
+function isZip(bytes: Uint8Array): boolean {
+  // "PK\x03\x04"
+  return bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04
 }
 
 function mimeOf(name: string): string {
