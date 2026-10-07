@@ -8,7 +8,8 @@
  *     ├── new PdfViewerController . owns scroll DOM (non-reactive)
  *     ├── new AnnotationManager ... sidecar load + anchor resolve
  *     └── restorePosition() ....... path key, hash fallback (bg)
- * Split view (two panes, one document) lives in viewer/split.ts.
+ * Split view (two panes, one document) lives in viewer/split.ts; two
+ * different documents side by side in viewer/pair.ts; compare in compare.ts.
  */
 import { computed, onMounted, onBeforeUnmount, ref, watch, nextTick } from 'vue'
 import {
@@ -26,6 +27,12 @@ import { AnnotationManager, undoLabelText } from './annotations/manager'
 import {
   openSplit, closeSplit, focusPane, startDividerDrag, splitAvailable, relayoutPanes,
 } from './viewer/split'
+import {
+  pair, pairVisible, pairShown, inPair, partnerOf, pairable, openPair, closePair, focusPairTab,
+  noteDriver, onPairScroll, setPairSync, startPairDividerDrag, relayoutPair,
+} from './viewer/pair'
+import { compareSession, compareFor, runCompare, gotoChange, stepChange, endCompare, compareCurrent } from './compare'
+import CompareDialog from './components/CompareDialog.vue'
 import { printDocument } from './print'
 import { prepareLayers, layerConfig } from './layers'
 import { scanAttachments, setAttachmentHost, openAttachmentData, attachView } from './attachments'
@@ -415,6 +422,8 @@ let selOwner: PdfViewerController | null = null
 function wireController(tab: TabState, ctrl: PdfViewerController): void {
   ctrl.onVisiblePage = (p) => {
     if (controllers.get(tab.id) !== ctrl) return // the unfocused pane doesn't drive the page box
+    // two documents side by side: the pane being driven keeps the other in step
+    onPairScroll(tab.id)
     if (p !== tab.currentPage) noteTurn()
     tab.currentPage = p
   }
@@ -438,17 +447,69 @@ function wireController(tab: TabState, ctrl: PdfViewerController): void {
 }
 
 // ── split view ──
-function toggleSplit(dir?: 'row' | 'col'): void {
+// Same-document split and a two-document pair are alternatives: asking for
+// one while the other is on screen replaces it.
+async function toggleSplit(dir?: 'row' | 'col'): Promise<void> {
   const tab = store.activeTab
   if (!tab || tab.kind !== 'pdf') return
+  if (pairVisible.value) { await closePair(); return }
   if (tab.split && (!dir || dir === tab.split.dir)) void closeSplit(tab)
   else void openSplit(tab, dir ?? store.settings.splitDir, (c) => wireController(tab, c))
 }
-function setSplit(dir: 'row' | 'col' | null): void {
+async function setSplit(dir: 'row' | 'col' | null): Promise<void> {
   const tab = store.activeTab
   if (!tab) return
+  if (inPair(tab.id)) await closePair()
   if (dir === null) void closeSplit(tab)
   else void openSplit(tab, dir, (c) => wireController(tab, c))
+}
+
+// ── two documents side by side / compare ──
+/** put open tab `id` on the right of the active document */
+async function pairWith(id: number, side: 'right' | 'left' = 'right'): Promise<void> {
+  const cur = store.activeTab
+  if (!cur || cur.id === id) return
+  const ok = side === 'right'
+    ? await openPair(cur.id, id, { focus: cur.id })
+    : await openPair(id, cur.id, { focus: cur.id })
+  if (!ok) showToast(t('pair.cant'))
+}
+const compareDialog = ref<{ a?: number; b?: number } | null>(null)
+function openCompare(b?: number): void {
+  viewMenuOpen.value = false
+  const cur = store.activeTab
+  compareDialog.value = { a: cur?.kind === 'pdf' ? cur.id : undefined, b }
+}
+/** CompareDialog: open a file as a tab, resolve to its id once loaded */
+async function openForCompare(path: string): Promise<number | null> {
+  const before = store.activeTabId
+  await openPath(path)
+  const tab = store.tabs.find((x) => x.path === path) ?? store.activeTab
+  if (before && store.tabs.some((x) => x.id === before)) store.activeTabId = before
+  return tab && documents.has(tab.id) ? tab.id : null
+}
+/** dragging a tab onto the document area: left or right half */
+const dropSide = ref<'left' | 'right' | null>(null)
+function dragTabId(e: DragEvent): boolean {
+  return !!e.dataTransfer?.types.includes('application/x-solopdf-tab')
+}
+function onDragOver(e: DragEvent): void {
+  if (!dragTabId(e) || !splitAvailable.value || !pdfViewActive.value) return
+  e.preventDefault()
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  dropSide.value = e.clientX > r.left + r.width / 2 ? 'right' : 'left'
+}
+function onDragLeave(e: DragEvent): void {
+  const to = e.relatedTarget as Node | null
+  if (!to || !(e.currentTarget as HTMLElement).contains(to)) dropSide.value = null
+}
+function onDrop(e: DragEvent): void {
+  const side = dropSide.value
+  dropSide.value = null
+  if (!dragTabId(e) || !side) return
+  e.preventDefault()
+  const id = Number(e.dataTransfer!.getData('application/x-solopdf-tab'))
+  if (id && id !== store.activeTabId && pairable(id)) void pairWith(id, side)
 }
 
 function jumpAfterLoad(tabId: number, jump: { page: number; annot?: string }): void {
@@ -868,6 +929,7 @@ const loupeEnabled = computed(() => !isMobile() && pdfViewActive.value && !prese
 /** re-fit after the chrome around the scroll host appears/disappears — no
  *  window resize event fires for that, and the position must survive it */
 async function refitActive(): Promise<void> {
+  if (pairVisible.value) { await relayoutPair(); return }
   const tab = store.activeTab
   const ctrl = tab && controllers.get(tab.id)
   if (!ctrl) return
@@ -1039,7 +1101,14 @@ onMounted(async () => {
   window.addEventListener('mouseup', onMouseNav)
   window.addEventListener('auxclick', onMouseNav)
   document.addEventListener('scroll', onAnyScroll, true)
-  posTimer = window.setInterval(() => { const t = store.activeTab; if (t) savePosition(t) }, 5000)
+  posTimer = window.setInterval(() => {
+    const t = store.activeTab
+    if (!t) return
+    savePosition(t)
+    // the other document of a visible pair is being read too
+    const other = pairVisible.value ? store.tabs.find((x) => x.id === partnerOf(t.id)) : undefined
+    if (other) savePosition(other)
+  }, 5000)
 
   // E2E harness — used by browser tests and by the native debug bridge
   ;(window as any).__solopdf = {
@@ -1052,6 +1121,20 @@ onMounted(async () => {
     toggleSplit,
     setSplit,
     focusPane: (pane: 0 | 1) => { const t = store.activeTab; if (t) focusPane(t, pane) },
+    // two documents side by side + compare (viewer/pair.ts, compare.ts)
+    pair,
+    pairWith,
+    openPair,
+    closePair,
+    setPairSync,
+    focusPairTab,
+    runCompare,
+    compareSession,
+    compareCurrent,
+    gotoChange,
+    stepChange,
+    endCompare,
+    openCompare,
     annotManagers,
     documents,
     printDocument,
@@ -1191,6 +1274,7 @@ watch(() => store.settings.theme, () => {
 watch(() => store.settings.sidebarOpen, () => {
   const tab = store.activeTab
   if (tab?.split) void relayoutPanes(tab)
+  if (pairVisible.value) void relayoutPair()
 })
 </script>
 
@@ -1200,6 +1284,9 @@ watch(() => store.settings.sidebarOpen, () => {
       v-if="(!store.activeTab?.bookMode || chromeReveal) && !chromeHidden"
       @new="pickAndOpen"
       @close="onCloseTab"
+      @pair="(id) => pairWith(id)"
+      @compare="(id) => openCompare(id)"
+      @unpair="closePair()"
     />
     <div class="app-main">
       <div
@@ -1214,7 +1301,12 @@ watch(() => store.settings.sidebarOpen, () => {
         @import-pdf="importPdfAnnots"
         @toast="showToast"
       />
-      <div class="app-content">
+      <div
+        class="app-content"
+        @dragover="onDragOver"
+        @dragleave="onDragLeave"
+        @drop="onDrop"
+      >
         <Toolbar
           v-if="store.activeTab && store.activeTab.kind === 'pdf' && (!store.activeTab.bookMode || chromeReveal) && !chromeHidden"
           @search="searchOpen = !searchOpen"
@@ -1246,12 +1338,25 @@ watch(() => store.settings.sidebarOpen, () => {
           @search="librarySearchOpen = true"
           @toast="showToast"
         />
+        <!-- display:contents until two documents are side by side (pair.ts) -->
+        <div
+          class="pv-stage"
+          :class="pairVisible && pair ? ['pv-pair', `pv-pair-${pair.dir}`] : null"
+          :style="pairVisible && pair ? { '--pair-ratio': pair.ratio } : undefined"
+        >
         <template v-for="tab in store.tabs" :key="tab.id">
           <div
-            v-show="tab.id === store.activeTabId && !tab.bookMode"
+            v-show="(tab.id === store.activeTabId || pairShown(tab.id)) && !tab.bookMode"
             class="pv-panes"
-            :class="tab.split ? ['pv-split', `pv-split-${tab.split.dir}`] : null"
+            :class="[
+              tab.split ? ['pv-split', `pv-split-${tab.split.dir}`] : null,
+              pairShown(tab.id) ? [pair?.a === tab.id ? 'pv-slot-a' : 'pv-slot-b', { 'pv-pair-focused': tab.id === store.activeTabId }] : null,
+            ]"
             :style="tab.split ? { '--split-ratio': tab.split.ratio } : undefined"
+            :data-pane-tab="tab.id"
+            @pointerdown.capture="focusPairTab(tab.id); noteDriver(tab.id)"
+            @wheel.passive="noteDriver(tab.id)"
+            @touchstart.passive="noteDriver(tab.id)"
           >
             <div
               class="pv-scroll"
@@ -1281,6 +1386,18 @@ watch(() => store.settings.sidebarOpen, () => {
                 @pointerdown.capture="focusPane(tab, 1)"
               ></div>
             </template>
+            <div v-if="pairShown(tab.id)" class="pv-pair-label" @pointerdown.stop>
+              <span v-if="compareFor(tab.id)" class="cmp-tag" :class="compareSession?.a === tab.id ? 'cmp-tag-a' : 'cmp-tag-b'">
+                {{ compareSession?.a === tab.id ? t('cmp.tagOld') : t('cmp.tagNew') }}
+              </span>
+              <span class="pv-pair-name" :title="tab.path">{{ tab.name }}</span>
+              <button
+                v-if="pair?.b === tab.id"
+                class="pv-pair-close"
+                :title="t('sp.closePair')"
+                @click.stop="closePair()"
+              >×</button>
+            </div>
             <!-- last child: the split layout keys off :first-child; inside the
                  panes so it sits under the toolbar at any toolbar height -->
             <div v-if="importBanner && tab.id === store.activeTabId" class="import-banner" role="status">
@@ -1307,6 +1424,19 @@ watch(() => store.settings.sidebarOpen, () => {
             @redo="undoAnnot('redo')"
           />
         </template>
+          <div
+            v-if="pairVisible && pair"
+            class="pv-divider pv-pair-divider"
+            role="separator"
+            :aria-orientation="pair.dir === 'row' ? 'vertical' : 'horizontal'"
+            :title="t('sp.dragTip')"
+            @pointerdown="startPairDividerDrag($event)"
+            @dblclick="pair.ratio = 0.5; relayoutPair()"
+          ></div>
+        </div>
+        <div v-if="dropSide" class="pair-drop" :class="`pair-drop-${dropSide}`">
+          <span>{{ dropSide === 'right' ? t('tab.dropRight') : t('tab.dropLeft') }}</span>
+        </div>
         <div v-if="noTextBanner" class="notext-banner">
           {{ t('app.noTextLayer') }}
           <button v-if="isTauri()" class="banner-ocr-btn" @click="ocrOpen = true">{{ t('app.ocrBanner') }}</button>
@@ -1437,6 +1567,8 @@ watch(() => store.settings.sidebarOpen, () => {
       @close="viewMenuOpen = false"
       @toast="showToast"
       @split="setSplit"
+      @pair="(id) => { viewMenuOpen = false; pairWith(id) }"
+      @compare="openCompare()"
       @fullscreen="setReadingFs(!readingFs)"
       @present="startPresentation"
       @cite="viewMenuOpen = false; citeOpen = true"
@@ -1466,6 +1598,14 @@ watch(() => store.settings.sidebarOpen, () => {
       v-if="citeOpen && store.activeTab && documents.has(store.activeTab.id)"
       ref="citeRef"
       @close="citeOpen = false"
+      @toast="showToast"
+    />
+    <CompareDialog
+      v-if="compareDialog"
+      :initial-a="compareDialog.a"
+      :initial-b="compareDialog.b"
+      :opener="openForCompare"
+      @close="compareDialog = null"
       @toast="showToast"
     />
     <StatsPanel v-if="statsOpen" @close="statsOpen = false" @toast="showToast" />

@@ -16,6 +16,7 @@ import type { Quad } from '@solopdf/core'
 import { store, controllers, annotManagers } from '../store'
 import { t } from '../i18n'
 import { focusPaneAt } from '../viewer/split'
+import { focusPairAt } from '../viewer/pair'
 
 const props = defineProps<{ tabId: number; tool: 'note' | 'region' }>()
 const emit = defineEmits<{ done: [msg: string]; cancel: [] }>()
@@ -66,7 +67,9 @@ function onPointerDown(e: PointerEvent): void {
   const c = tab ? focusPaneAt(tab, e.clientX, e.clientY) : ctrl.value
   if (!c) return
   const page = c.pageAt(e.clientX, e.clientY)
-  if (!page) return
+  // two documents side by side: a press on the other one focuses it (the
+  // tool follows the focused document; press again to place there)
+  if (!page) { focusPairAt(e.clientX, e.clientY); return }
   startPage = page
   startX = e.clientX
   startY = e.clientY

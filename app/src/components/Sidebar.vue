@@ -15,6 +15,7 @@
  * Attachments: document-level + paperclip files; Open / Save (attachments.ts).
  * Layers: /Order tree with radio groups and locks (layers.ts); thumbnails
  * re-render when visibility changes.
+ * Changes: only while the active document is being compared (compare.ts).
  */
 import { computed, ref, watch, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
@@ -30,6 +31,8 @@ import { cssColor } from '../annotations/drawing'
 import { attachView, openAttachment, saveAttachment, humanSize } from '../attachments'
 import { layerView, layerConfig, toggleLayer, resetLayers } from '../layers'
 import type { AttachmentInfo, AttachmentKind, LayerRow } from '@solopdf/core'
+import { compareFor } from '../compare'
+import ComparePanel from './ComparePanel.vue'
 
 defineProps<{ importing?: boolean }>()
 const emit = defineEmits<{ goto: [page: number, block?: number]; importPdf: []; toast: [msg: string] }>()
@@ -39,6 +42,8 @@ const tab = computed(() => store.activeTab)
 const ctrl = computed(() => { void store.docTick; return tab.value ? controllers.get(tab.value.id) : undefined })
 const doc = computed(() => { void store.docTick; return tab.value ? documents.get(tab.value.id) : undefined })
 const mgr = computed(() => { void store.docTick; return tab.value ? annotManagers.get(tab.value.id) : undefined })
+/** the change list exists only while this document is being compared */
+const comparing = computed(() => !!tab.value && !!compareFor(tab.value.id))
 
 // ── which tab is showing ──
 const attachments = computed<AttachmentInfo[]>(() => (tab.value ? attachView[tab.value.id]?.list ?? [] : []))
@@ -49,6 +54,7 @@ const sbTab = computed(() => {
   const s = store.settings.sidebarTab
   if (s === 'attach' && !attachments.value.length) return 'outline'
   if (s === 'layers' && !layers.value) return 'outline'
+  if (s === 'changes' && !comparing.value) return 'outline'
   return s
 })
 const tabsEl = ref<HTMLDivElement>()
@@ -389,9 +395,17 @@ onBeforeUnmount(() => observer?.disconnect())
         v-if="layers" data-sb="layers" :class="{ active: sbTab === 'layers' }"
         :title="t('ly.tabTip')" @click="store.settings.sidebarTab = 'layers'"
       >{{ t('sb.layers') }}</button>
+      <button
+        v-if="comparing"
+        class="sb-changes-tab"
+        :class="{ active: sbTab === 'changes' }"
+        @click="store.settings.sidebarTab = 'changes'"
+      >{{ t('sb.changes') }}</button>
     </div>
 
-    <div class="sidebar-body" v-if="sbTab === 'outline'">
+    <ComparePanel v-if="sbTab === 'changes'" />
+
+    <div class="sidebar-body" v-else-if="sbTab === 'outline'">
       <div v-if="!flatOutline.length" class="annot-empty">{{ t('sb.noOutline') }}</div>
       <div
         v-for="(n, i) in flatOutline"

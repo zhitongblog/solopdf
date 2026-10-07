@@ -16,9 +16,17 @@ import { NO_CROP, type CropRect } from '../viewer/geometry'
 import { t } from '../i18n'
 import { isMobile } from '../platform'
 import { splitAvailable } from '../viewer/split'
+import { pair, inPair, partnerOf, pairable, setPairSync } from '../viewer/pair'
 
 defineProps<{ readingFs?: boolean }>()
-const emit = defineEmits<{ close: []; toast: [msg: string]; fullscreen: []; present: []; split: [dir: 'row' | 'col' | null]; cite: [] }>()
+const emit = defineEmits<{
+  close: []; toast: [msg: string]; fullscreen: []; present: []
+  split: [dir: 'row' | 'col' | null]
+  /** show another open document on the right */
+  pair: [tabId: number]
+  compare: []
+  cite: []
+}>()
 
 const tab = computed(() => store.activeTab)
 const ctrl = computed(() => { void store.docTick; return tab.value ? controllers.get(tab.value.id) : undefined })
@@ -98,6 +106,15 @@ function clearCrop(): void {
   crop.value = { ...NO_CROP }
   applyCrop()
 }
+
+/** other open PDFs that can go on the right (two different documents) */
+const otherDocs = computed(() => {
+  void store.docTick
+  const cur = tab.value
+  return store.tabs.filter((x) => x.id !== cur?.id && pairable(x.id))
+})
+const paired = computed(() => !!tab.value && inPair(tab.value.id))
+const partner = computed(() => (tab.value ? partnerOf(tab.value.id) : null))
 
 const autoScrolling = computed(() => { void store.docTick; return ctrl.value?.autoScrolling ?? false })
 
@@ -195,7 +212,7 @@ const fsKey = isMac ? '⌃⌘F' : 'F11'
       <template v-if="splitAvailable && tab && !tab.bookMode">
         <h4>{{ t('vm.split') }}</h4>
         <div class="vm-seg">
-          <button :class="{ active: !tab.split }" @click="emit('split', null)">{{ t('vm.splitOff') }}</button>
+          <button :class="{ active: !tab.split && !paired }" @click="emit('split', null)">{{ t('vm.splitOff') }}</button>
           <button
             :class="{ active: tab.split?.dir === 'row' }"
             @click="emit('split', 'row')"
@@ -204,6 +221,29 @@ const fsKey = isMac ? '⌃⌘F' : 'F11'
             :class="{ active: tab.split?.dir === 'col' }"
             @click="emit('split', 'col')"
           >{{ t('vm.splitCol') }}</button>
+        </div>
+        <template v-if="otherDocs.length">
+          <p class="vm-sub">{{ t('vm.pairWith') }}</p>
+          <div class="vm-docs">
+            <button
+              v-for="d in otherDocs" :key="d.id"
+              class="vm-doc"
+              :class="{ active: partner === d.id }"
+              :title="d.path"
+              @click="emit('pair', d.id)"
+            >◨ {{ d.name }}</button>
+          </div>
+        </template>
+        <label class="vm-check" v-if="paired">
+          <input
+            type="checkbox"
+            :checked="pair?.sync"
+            @change="setPairSync(($event.target as HTMLInputElement).checked)"
+          />
+          {{ t('vm.syncScroll') }}
+        </label>
+        <div class="vm-row">
+          <button class="vm-compare" @click="emit('compare')">⇆ {{ t('vm.compare') }}</button>
         </div>
       </template>
 

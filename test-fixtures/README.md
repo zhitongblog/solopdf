@@ -19,6 +19,7 @@
 | `annotated-by-other-apps.pdf` | 导入其他应用的注释（Highlight×3 含跨行与中文、Underline、StrikeOut、Squiggly、Text 便签+回复、FreeText、Ink、Square、Circle、带箭头的“\”斜线 Line、Line、Polygon；另有 Stamp（不支持→跳过）与 Hidden 高亮（不导入）） | 3 页 / 8KB | `node scripts/gen-annotated-fixture.mjs` 手写 PDF 对象生成，可复现；Courier/STSong 等宽排版，quadpoints 精确落在已知词上 |
 | `attachments-sample.pdf` | 嵌入附件：4 个文档级附件（inner-report.pdf / data.csv / install.bat / photo.png）+ 第 1 页一个无外观流的回形针注释（annexe.pdf） | 2 页 / 11KB | `node scripts/gen-attach-layers-fixtures.mjs` 手写生成，可复现；/PageMode /UseAttachments |
 | `layers-sample.pdf` | 图层（OCG）：Base map（锁定）/ Labels / Theme 组下 Day·Night 单选组（Night 默认关） | 2 页 / 2KB | 同上脚本；/PageMode /UseOC |
+| `compare-contract-v1.pdf` / `compare-contract-v2.pdf` | 文档比较（合同两版：改一句、删一段、插入整页、中文逐字插入、改一个词；页脚页码在插页后整体错位） | 4 页 / 5 页，各 ~6KB | `node scripts/gen-compare-fixture.mjs` 手写 PDF 对象生成，可复现；中文用非嵌入 STSong-Light |
 
 ## 验收要点对照（来自设计蓝图 Success Criteria）
 
@@ -35,6 +36,7 @@
 - `attachments-sample.pdf`：侧栏出现「附件 5」（打开即切到该页签）；inner-report.pdf / annexe.pdf 在新标签打开，photo.png 以图片视图打开，data.csv 交给系统，install.bat 只有「另存为」；点页面上的回形针打开 annexe.pdf；`solopdf attachments … --extract d` 写出 5 个文件
 - `layers-sample.pdf`：侧栏出现「图层」；Base map 锁定不可切换；打开 Night 自动关闭 Day（单选组）；关 Labels 后 LABEL TEXT 消失；分屏两侧、缩略图、打印同步；重开文档保持上次的选择，「恢复默认」清除；`solopdf layers` 输出 4 个图层、1 个单选组、Base map locked
 - 其他无附件/无图层的样本：两个页签都不出现
+- `compare-contract-v1.pdf` → `compare-contract-v2.pdf`：`solopdf compare` 恰好报 6 处——p.2 修改「thirty (30」→「fifteen (15」、p.2 删除 2.3 整段、新增第 3 页（Schedule C）、p.3→p.4 新增「严格」「任何」、p.4→p.5「Zurich」→「Geneva」；页对齐 1-1 / 2-2 / —-3 / 3-4 / 4-5；页脚页码不算差异。应用里两版并排、两边高亮、同步滚动按对齐跳页
 - `encrypted-password-solopdf.pdf`：密码框（记住本次会话）；高亮时弹一次明文保存提示
 
 注：`*.pdf` 均来自公有领域/官方公开渠道，可安全入库；如嫌 157MB 太大可 git-lfs 或 .gitignore。

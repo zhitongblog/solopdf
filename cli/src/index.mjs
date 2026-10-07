@@ -18,6 +18,7 @@
  *   solopdf translate "text" [--to zh-Hans]     # on-device translation (macOS)
  *   solopdf doc <…>                             # page ops, merge, compress, …
  *   solopdf cite <file.pdf> [--format bibtex|apa|gbt|json] [--online]
+ *   solopdf compare old.pdf new.pdf [--json]    # text differences, page-aligned
  *
  * Used by Claude/CI for self-testing (global rule #2) and by users for
  * scripting. Read-only EXCEPT the commands that name an explicit output
@@ -33,6 +34,7 @@ import {
   genId, scanPdfAnnotations, buildImports, spliceImports, importSummary, needsLineFix, fixLineDirections,
   collectAttachments, uniqueNames, layerRows, findLockedOcgs, radioGroups,
   readCitationInput, extractCitation, formatCitation, fetchDoiMetadata, CITE_FORMATS, pageDeepLink,
+  compareDocuments,
 } from '@solopdf/core'
 
 // piping into `head` etc. closes stdout early — exit quietly instead of crashing
@@ -58,13 +60,13 @@ function pdfjsRoot() {
   return path.dirname(pkg)
 }
 
-async function open(file) {
+async function open(file, password = flag('password')) {
   if (!existsSync(file)) die(`文件不存在: ${file}`)
   const data = new Uint8Array(await readFile(file))
   const root = pdfjsRoot()
   const task = getDocument({
     data,
-    password: flag('password'),
+    password,
     // node has no DOM canvas; disable font rendering paths we don't need
     disableFontFace: true,
     verbosity: 0,
@@ -650,6 +652,67 @@ async function cmdCite(file) {
   await doc.destroy()
 }
 
+/** text items of every page, the same filter the viewer applies */
+async function compareInput(doc) {
+  const pages = []
+  for (let p = 1; p <= doc.numPages; p++) {
+    const tc = await (await doc.getPage(p)).getTextContent()
+    pages.push(tc.items.filter((it) => 'str' in it).map((it) => ({ str: it.str, hasEOL: !!it.hasEOL })))
+  }
+  return pages
+}
+
+/** compare two PDFs → change list (same core algorithm as the app's compare view) */
+async function cmdCompare(fileA, fileB) {
+  if (!fileB) die('用法: solopdf compare <old.pdf> <new.pdf> [--json] [--password pw] [--password-b pw]')
+  const docA = await open(fileA)
+  const docB = await open(fileB, flag('password-b') ?? flag('password'))
+  const r = compareDocuments(await compareInput(docA), await compareInput(docB))
+  await docA.destroy()
+  await docB.destroy()
+  if (args.includes('--json')) {
+    // spans are item offsets for the viewer; the CLI reports pages + text
+    console.log(JSON.stringify({
+      a: path.resolve(fileA),
+      b: path.resolve(fileB),
+      pagesA: r.pagesA,
+      pagesB: r.pagesB,
+      stats: r.stats,
+      noTextA: r.noTextA,
+      noTextB: r.noTextB,
+      pairs: r.pairs,
+      changes: r.changes.map((c) => ({
+        id: c.id,
+        kind: c.kind,
+        ...(c.pageInserted ? { pageInserted: c.pageInserted } : {}),
+        ...(c.pageDeleted ? { pageDeleted: c.pageDeleted } : {}),
+        a: { page: c.a.page, text: c.a.text },
+        b: { page: c.b.page, text: c.b.text },
+      })),
+    }, null, 2))
+    return
+  }
+  const KIND = { insert: '新增', delete: '删除', change: '修改' }
+  const q = (s) => `「${s.length > 120 ? s.slice(0, 119) + '…' : s}」`
+  console.log(`${path.basename(fileA)} (${r.pagesA} 页) → ${path.basename(fileB)} (${r.pagesB} 页)`)
+  const st = r.stats
+  console.log(`${r.changes.length} 处差异：修改 ${st.changed} · 新增 ${st.inserted} · 删除 ${st.deleted}` +
+    (st.insertedPages ? ` · 新增页 ${st.insertedPages}` : '') + (st.deletedPages ? ` · 删除页 ${st.deletedPages}` : ''))
+  if (r.noTextA.length || r.noTextB.length) {
+    console.log(`注意：以下页面没有文字层，无法按文字比较（可先 OCR）：` +
+      (r.noTextA.length ? ` 旧 p.${r.noTextA.join(',')}` : '') + (r.noTextB.length ? ` 新 p.${r.noTextB.join(',')}` : ''))
+  }
+  console.log('')
+  for (const c of r.changes) {
+    const where = `p.${c.a.page} → p.${c.b.page}`
+    if (c.pageInserted) console.log(`#${c.id} 新增整页  ${where}  新文档第 ${c.pageInserted} 页 ${q(c.b.text)}`)
+    else if (c.pageDeleted) console.log(`#${c.id} 删除整页  ${where}  旧文档第 ${c.pageDeleted} 页 ${q(c.a.text)}`)
+    else if (c.kind === 'change') console.log(`#${c.id} ${KIND[c.kind]}  ${where}  ${q(c.a.text)} → ${q(c.b.text)}`)
+    else if (c.kind === 'insert') console.log(`#${c.id} ${KIND[c.kind]}  ${where}  + ${q(c.b.text)}`)
+    else console.log(`#${c.id} ${KIND[c.kind]}  ${where}  - ${q(c.a.text)}`)
+  }
+}
+
 async function cmdSelftest(dir) {
   // acceptance sweep over the standard fixture set (design doc test plan)
   const cases = [
@@ -718,6 +781,7 @@ switch (cmd) {
   case 'translate': await cmdTranslate(file ?? die('用法: solopdf translate "文字"|- [--to zh-Hans] [--online] [--provider deepl|openai …]')); break
   case 'doc': await cmdDoc(args.slice(1)); break
   case 'cite': await cmdCite(file ?? die('用法: solopdf cite <file.pdf> [--format bibtex|apa|gbt|all|json] [--online]')); break
+  case 'compare': await cmdCompare(file ?? die('用法: solopdf compare <old.pdf> <new.pdf> [--json]'), args[2]); break
   case 'selftest': await cmdSelftest(file ?? die('用法: solopdf selftest <fixtures-dir>')); break
   default:
     console.log(`solopdf — SoloPDF 命令行工具（与应用同一渲染引擎）
@@ -741,6 +805,7 @@ switch (cmd) {
   solopdf cite <file.pdf> [--format bibtex|apa|gbt|json] [--online]
                                                    引用信息（DOI/arXiv/标题/作者/年份；--online 才联网查 doi.org）
   solopdf doc <子命令> …                            页面/合并/拆分/压缩/加密（solopdf-doc）
+  solopdf compare <old.pdf> <new.pdf> [--json]     比较两版文档：按页对齐，列出新增/删除/修改的文字
   solopdf selftest <fixtures-dir>                  标准测试集验收
 
   solopdf doc 的子命令：pages / merge / split / annotate / compress /
