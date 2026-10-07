@@ -23,6 +23,10 @@ SoloPDF：秒开、零广告、零遥测（更新检查可完全关闭）、永�
 - **标注不只有高亮**：下划线 / 删除线 / 波浪线 / 便签图钉 /
   **框选截图**（截图存进 `<文档名>.annotations.assets/`，伴生 MD 里以
   `![](…)` 引用——SoloMD、GitHub、任何 Markdown 阅读器都直接显示图）
+- **导入其他应用的注释**：Acrobat / 预览 / PDF Expert / Zotero / 福昕留在 PDF 里的高亮、
+  下划线、删除线、波浪线、便签（含回复）、文本框、手绘、矩形、椭圆、直线/箭头、多边形，
+  打开时提示一键导入伴生文件（原文摘录、作者、日期、颜色都保留；可撤销；重复导入不重复；
+  导入后原注释不再由 PDF 重复绘制；PDF 本身不改）
 - **导出带标准 PDF 注释的副本**：把伴生文件里的标注写成真正的 PDF 注释，
   Preview / Acrobat / 福昕都能看到（原文件永不修改）
 - **视图**：整档或单页旋转（工具栏一键）、单页 / 双页对开、连续滚动 / 单屏翻页、
@@ -70,6 +74,7 @@ node cli/src/index.mjs extract-text <file.pdf> [--pages A-B]
 node cli/src/index.mjs links <file.pdf> [--pages A-B]       # 超链接 → JSON
 node cli/src/index.mjs translate "text" [--to zh-Hans]      # 本机翻译（macOS）
 node cli/src/index.mjs export-annotations <file.pdf>        # 伴生批注 → JSON
+node cli/src/index.mjs import-annotations <file.pdf> [--dry-run]  # PDF 内其他应用的注释 → 伴生文件（不重复导入）
 node cli/src/index.mjs annotate <file.pdf> --out x.pdf      # 伴生批注 → 标准 PDF 注释
 node cli/src/index.mjs to-images <file.pdf> --out-dir d     # 页面 → PNG/JPEG
 node cli/src/index.mjs search <dir> <query>                 # 跨文件搜索
@@ -107,10 +112,10 @@ claude mcp add solopdf -- node /path/to/pdf/dev-mcp/src/index.mjs --allow-write
 只读工具：`solopdf_info` / `solopdf_extract_text` / `solopdf_search` /
 `solopdf_search_library`（跨文件夹）/ `solopdf_read_annotations` /
 `solopdf_page_image` / `solopdf_define`（离线词典）/ `solopdf_links` /
-`solopdf_translate`。
+`solopdf_translate` / `solopdf_pdf_annotations`（PDF 内其他应用留下的注释及导入状态）。
 
 写门控（`--allow-write`）：`solopdf_add_annotation` /
-`solopdf_export_annotated_pdf` / `solopdf_pages` / `solopdf_merge`。
+`solopdf_export_annotated_pdf` / `solopdf_import_annotations` / `solopdf_pages` / `solopdf_merge`。
 
 ## 开发
 

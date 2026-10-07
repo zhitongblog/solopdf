@@ -38,6 +38,27 @@ export interface AnchorData {
    * rewrites the section (e.g. after a note edit), so the strokes survive.
    */
   draw?: DrawData
+  /**
+   * Set on marks imported from an annotation already inside the PDF (made
+   * in Acrobat / Preview / Zotero …). Same reasoning as `draw`: inside the
+   * anchor JSON, so the dedupe key travels with the section — undo of an
+   * import removes it together with the mark, and re-import finds it again.
+   */
+  src?: ImportSource
+}
+
+/** Where an imported mark came from (see core/import.ts). */
+export interface ImportSource {
+  /** pdf.js annotation id = the PDF object reference, e.g. "12R" */
+  ref: string
+  /** PDF /Subtype, e.g. "Highlight" — guards against a reused ref */
+  type: string
+  /** /T — the other app's author name */
+  author?: string
+  /** /M or /CreationDate as ISO 8601 */
+  date?: string
+  /** refs of reply annotations (/IRT) folded into this mark's note */
+  replies?: string[]
 }
 
 /**

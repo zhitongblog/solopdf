@@ -7,6 +7,7 @@
  *   solopdf extract-text <file.pdf> [--pages 1-5] [--password pw]
  *   solopdf links <file.pdf> [--pages 1-5]      # hyperlinks → JSON
  *   solopdf export-annotations <file.pdf>       # sidecar -> JSON
+ *   solopdf import-annotations <file.pdf> [--dry-run]  # PDF's own annots -> sidecar
  *   solopdf selftest <fixtures-dir>             # acceptance run over fixtures
  *   solopdf annotate <file.pdf> [--out x.pdf]   # sidecar -> real PDF annots
  *   solopdf to-images <file.pdf> --out-dir d    # pages -> PNG/JPEG
@@ -26,6 +27,7 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import {
   parse, orderLinesForReading, pageLinks, normalizePageLabels, formatPageLabelRanges, exportSpec,
   pickTarget, guessLang, providerReady, translateWithProvider,
+  genId, scanPdfAnnotations, buildImports, spliceImports, importSummary, needsLineFix, fixLineDirections,
 } from '@solopdf/core'
 
 // piping into `head` etc. closes stdout early — exit quietly instead of crashing
@@ -161,6 +163,38 @@ async function cmdExportAnnotations(file) {
   const text = await readFile(sidecar, 'utf-8')
   const sc = parse(text)
   console.log(JSON.stringify(sc, null, 2))
+}
+
+/**
+ * Annotations made in other apps (Acrobat / Preview / Zotero …) → sidecar.
+ * Merges: marks already imported (anchor.src ref) are skipped, so running it
+ * twice adds nothing. The PDF is only read; --dry-run writes nothing at all.
+ */
+async function cmdImportAnnotations(file) {
+  const { writeFile } = await import('node:fs/promises')
+  const doc = await open(file)
+  const unsupported = []
+  const pdf = await scanPdfAnnotations(doc, [1, doc.numPages], unsupported)
+  // pdf.js normalizes /L — read the raw direction back for diagonal/arrowed lines
+  if (needsLineFix(pdf)) fixLineDirections(pdf, new Uint8Array(await readFile(file)))
+  const sidecar = file.replace(/\.pdf$/i, '') + '.annotations.md'
+  const text = existsSync(sidecar) ? await readFile(sidecar, 'utf-8') : ''
+  const sc = text.trim() ? parse(text) : null
+  const existing = sc?.annotations ?? []
+  const { annotations } = await buildImports(doc, pdf, existing, genId)
+  const meta = sc?.meta.pdfName ? sc.meta : { version: 1, pdfName: path.basename(file) }
+  const dryRun = args.includes('--dry-run')
+  if (!dryRun && annotations.length) {
+    await writeFile(sidecar, spliceImports(text, annotations, path.resolve(file), meta), 'utf-8')
+  }
+  console.log(JSON.stringify({
+    file: path.resolve(file),
+    sidecar: path.resolve(sidecar),
+    dryRun,
+    written: !dryRun && annotations.length > 0,
+    ...importSummary(pdf, annotations, existing, unsupported),
+  }, null, 2))
+  await doc.destroy()
 }
 
 async function cmdFormFields(file) {
@@ -584,6 +618,7 @@ switch (cmd) {
   case 'extract-text': await cmdExtract(file ?? die('用法: solopdf extract-text <file.pdf>')); break
   case 'links': await cmdLinks(file ?? die('用法: solopdf links <file.pdf> [--pages A-B]')); break
   case 'export-annotations': await cmdExportAnnotations(file ?? die('用法: solopdf export-annotations <file.pdf>')); break
+  case 'import-annotations': await cmdImportAnnotations(file ?? die('用法: solopdf import-annotations <file.pdf> [--dry-run]')); break
   case 'form-fields': await cmdFormFields(file ?? die('用法: solopdf form-fields <file.pdf>')); break
   case 'export-md': await cmdExportMd(file ?? die('用法: solopdf export-md <file.pdf>')); break
   case 'ocr': await cmdOcr(file ?? die('用法: solopdf ocr <file.pdf|img> [--out x.pdf|x.md] [--lang zh|ja|en]')); break
@@ -602,6 +637,7 @@ switch (cmd) {
   solopdf extract-text <file.pdf> [--pages A-B]    提取文字
   solopdf links <file.pdf> [--pages A-B]           超链接列表（页、区域、内部目标页或 URL）→ JSON
   solopdf export-annotations <file.pdf>            批注伴生文件 → JSON
+  solopdf import-annotations <file.pdf> [--dry-run]  PDF 内已有的注释（Acrobat/预览等）→ 伴生文件（可重复执行，不重复导入）
   solopdf form-fields <file.pdf>                   AcroForm 表单域与当前值 → JSON
   solopdf export-md <file.pdf>                     全文导出为 Markdown（stdout）
   solopdf ocr <file.pdf|img> [--out x.pdf|x.md]    本地 OCR：扫描件 → 可搜索 PDF / Markdown

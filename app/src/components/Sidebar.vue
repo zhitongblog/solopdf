@@ -8,6 +8,8 @@
  * Thumbnails: IntersectionObserver-driven lazy render at 0.18 scale.
  * Bookmarks: user-placed, from the store (never the sidecar — see store.ts).
  * Annotations: filterable by kind, colour, #tag and free text; sortable.
+ * Annotations other apps left inside the PDF get an "Import" row on top
+ * (the banner's permanent twin — it stays after the banner is dismissed).
  */
 import { computed, ref, watch, onBeforeUnmount, nextTick } from 'vue'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
@@ -21,7 +23,8 @@ import { openExternal } from '../platform'
 import { resolveDestination, safeExternalUrl, SHAPE_KINDS, type Annotation, type AnnotationKind, type LinkDest } from '@solopdf/core'
 import { cssColor } from '../annotations/drawing'
 
-const emit = defineEmits<{ goto: [page: number, block?: number] }>()
+defineProps<{ importing?: boolean }>()
+const emit = defineEmits<{ goto: [page: number, block?: number]; importPdf: [] }>()
 
 const tab = computed(() => store.activeTab)
 // registries are plain Maps — touch store.docTick so these recompute on open
@@ -193,6 +196,16 @@ watch(mgr, (m) => {
   }
 }, { immediate: true })
 
+/** annotations in the PDF itself not yet imported into the sidecar */
+const pdfPending = computed(() => { void store.docTick; void annots.value; return mgr.value?.pendingImports.length ?? 0 })
+
+/** "Alice Chen · 2024-03-01" for marks imported from another app */
+function sourceLine(a: Annotation): string {
+  const s = a.anchor.src
+  if (!s) return ''
+  return [s.author, s.date?.slice(0, 10)].filter(Boolean).join(' · ') || t('imp.fromPdf')
+}
+
 const allTags = computed(() => {
   const set = new Set<string>()
   for (const a of annots.value) for (const g of tagsOf(a)) set.add(g)
@@ -346,6 +359,10 @@ onBeforeUnmount(() => observer?.disconnect())
     </div>
 
     <div class="sidebar-body annots-body" v-else>
+      <div v-if="pdfPending" class="annot-import">
+        <span>{{ t('imp.sidebar', { n: pdfPending }) }}</span>
+        <button :disabled="importing" @click="emit('importPdf')">{{ t('imp.action') }}</button>
+      </div>
       <div class="annot-filters">
         <input class="af-search" v-model="query" :placeholder="t('sb.search')" />
         <div class="af-chips">
@@ -423,6 +440,7 @@ onBeforeUnmount(() => observer?.disconnect())
             <span class="ai-kind" :class="`sw-${a.color}`" :style="swatchStyle(a.color)">{{ KIND_GLYPH[a.kind ?? 'highlight'] ?? '•' }}</span>
             <span :title="`${a.anchor.page} / ${tab.numPages}`">p.{{ labelOf(tab, a.anchor.page) }}</span>
             <span v-if="a.orphan" :title="t('sb.orphanTip')">{{ t('sb.orphan') }}</span>
+            <span v-if="a.anchor.src" class="ai-src" :title="t('imp.fromPdf')">{{ sourceLine(a) }}</span>
             <span style="flex: 1"></span>
             <button @click.stop="startEdit(a)">{{ t('sb.edit') }}</button>
             <button @click.stop="removeAnnot(a)">{{ t('sb.delete') }}</button>

@@ -205,7 +205,11 @@ export async function renderDrawnPng(ctrl: PdfViewerController, a: Annotation): 
   const span = Math.max(q.x2 - q.x1, q.y2 - q.y1)
   const scale = Math.min(2.5, 1600 / span)
   const v = pdfRectToView(q, box, rotation, scale)
-  const canvas = await ctrl.renderToCanvas(page, scale, { x: v.left, y: v.top, w: v.width, h: v.height })
+  // the mark is painted on top below — an imported one's PDF original must
+  // not be in the background as well
+  const canvas = await ctrl.renderToCanvas(
+    page, scale, { x: v.left, y: v.top, w: v.width, h: v.height }, a.anchor.src ? [a.anchor.src.ref] : [],
+  )
   const ctx = canvas.getContext('2d')!
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   paintDrawn(ctx, a, (x, y) => {

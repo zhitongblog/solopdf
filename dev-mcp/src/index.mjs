@@ -21,6 +21,7 @@ import { gunzipSync } from 'fflate'
 import {
   parse, upsertAnnotation, genId, normalize, pageLinks, normalizePageLabels, compactPageLabels, exportSpec,
   pickTarget, guessLang, providerReady, translateWithProvider,
+  scanPdfAnnotations, buildImports, spliceImports, importSummary, importedRefs, needsLineFix, fixLineDirections,
 } from '@solopdf/core'
 
 const ALLOW_WRITE = process.argv.includes('--allow-write')
@@ -342,7 +343,84 @@ server.tool(
   },
 )
 
+// ── annotations made in other apps (Acrobat / Preview / Zotero …) ──────────
+
+/** like open(), plus the CMaps non-embedded CJK fonts need — excerpts of a
+ *  highlight on Chinese text come back empty without them */
+async function openForImport(path, password) {
+  if (!existsSync(path)) throw new Error(`文件不存在: ${path}`)
+  const data = new Uint8Array(await readFile(path))
+  const root = nodePath.dirname(new URL(import.meta.resolve('pdfjs-dist/package.json')).pathname)
+  const doc = await getDocument({
+    data: data.slice(), password, disableFontFace: true, verbosity: 0,
+    cMapUrl: `${root}/cmaps/`, cMapPacked: true, standardFontDataUrl: `file://${root}/standard_fonts/`,
+  }).promise
+  return { doc, data }
+}
+
+/** scan + plan an import against the current sidecar (shared by both tools) */
+async function planImport(path, password) {
+  const { doc, data } = await openForImport(path, password)
+  try {
+    const unsupported = []
+    const pdf = await scanPdfAnnotations(doc, [1, doc.numPages], unsupported)
+    if (needsLineFix(pdf)) fixLineDirections(pdf, data)
+    const sc = sidecarPath(path)
+    const text = existsSync(sc) ? await readFile(sc, 'utf-8') : ''
+    const parsed = text.trim() ? parse(text) : null
+    const existing = parsed?.annotations ?? []
+    const { annotations } = await buildImports(doc, pdf, existing, genId)
+    return { pdf, unsupported, sc, text, parsed, existing, annotations }
+  } finally {
+    await doc.destroy()
+  }
+}
+
+server.tool(
+  'solopdf_pdf_annotations',
+  '列出 PDF 文件内已有的注释（Acrobat/预览/Zotero 等其他应用留下的高亮、下划线、便签、手绘、图形…；只读）。' +
+  '每条含所在页、类型、作者、日期、颜色、批注内容、划线下的原文，以及是否已导入 SoloPDF 伴生文件',
+  { path: z.string(), password: z.string().optional() },
+  async ({ path, password }) => {
+    const { pdf, unsupported, existing, annotations } = await planImport(path, password)
+    const preview = new Map(annotations.map((a) => [a.anchor.src.ref, a]))
+    const imported = importedRefs(existing)
+    return text({
+      count: pdf.length,
+      pending: annotations.length,
+      unsupported: unsupported.map((u) => `${u.subtype}@p.${u.page}`),
+      annotations: pdf.map((p) => ({
+        ref: p.ref,
+        page: p.page,
+        subtype: p.subtype,
+        author: p.author,
+        date: p.date,
+        color: p.color,
+        contents: p.contents,
+        inReplyTo: p.inReplyTo ?? null,
+        // what the import would write (null for replies — they join their parent's note)
+        kind: preview.get(p.ref)?.kind ?? null,
+        excerpt: preview.get(p.ref)?.excerpt ?? null,
+        imported: imported.has(p.ref),
+      })),
+    })
+  },
+)
+
 if (ALLOW_WRITE) {
+  server.tool(
+    'solopdf_import_annotations',
+    '把 PDF 内其他应用留下的注释导入伴生批注文件（需 --allow-write；PDF 本身不改；已导入的不会重复导入；dryRun=true 只预览）',
+    { path: z.string(), dryRun: z.boolean().default(false), password: z.string().optional() },
+    async ({ path, dryRun, password }) => {
+      const { pdf, unsupported, sc, text: before, parsed, existing, annotations } = await planImport(path, password)
+      const meta = parsed?.meta.pdfName ? parsed.meta : { version: 1, pdfName: path.split('/').pop() }
+      const written = !dryRun && annotations.length > 0
+      if (written) await writeFile(sc, spliceImports(before, annotations, path, meta), 'utf-8')
+      return text({ sidecar: sc, dryRun, written, ...importSummary(pdf, annotations, existing, unsupported) })
+    },
+  )
+
   server.tool(
     'solopdf_add_annotation',
     '向 PDF 的伴生批注文件追加一条批注（需 --allow-write 启动）',

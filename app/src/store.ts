@@ -72,6 +72,9 @@ export interface DocPrefs {
   pageRotations?: Record<string, number>
   /** display-only margin trim */
   crop?: CropRect
+  /** "import annotations from other apps" banner closed while this many
+   *  were pending — it stays away until the PDF has more than that */
+  importDismissed?: number
   /** last time this entry was touched (for LRU eviction) */
   at?: number
 }
@@ -419,7 +422,7 @@ export function docPrefsFor(path: string): DocPrefs {
 
 export function saveDocPrefs(path: string, patch: DocPrefs): void {
   const next = { ...docPrefsFor(path), ...patch, at: Date.now() }
-  const empty = !next.rotation && !next.crop &&
+  const empty = !next.rotation && !next.crop && !next.importDismissed &&
     !Object.keys(next.pageRotations ?? {}).length
   if (empty) {
     // the hash twin too — docPrefsFor falls back to it, so leaving it would

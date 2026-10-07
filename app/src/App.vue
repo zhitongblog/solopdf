@@ -332,6 +332,9 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
     }
     await mgr.load()
     tab.sidecarLocation = mgr.sidecarLocation
+    // annotations other apps left inside the PDF → import banner (background:
+    // getAnnotations per page, no text extraction until the user says so)
+    void mgr.scanPdf(doc).then(() => { store.docTick++ }).catch(() => {})
 
     addRecent(path)
     noteOpened(tab)
@@ -347,6 +350,38 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
       : String((err as Error)?.message ?? err)
     showToast(t('app.openFail', { msg: tab.loadError }))
   }
+}
+
+// ── annotations from other apps (Acrobat / Preview / Zotero …) ──
+/** pending imports for the banner; 0 once dismissed (until more turn up) */
+const importBanner = computed(() => {
+  void store.docTick
+  const tab = store.activeTab
+  if (!tab || tab.kind !== 'pdf' || tab.bookMode) return 0
+  const n = annotManagers.get(tab.id)?.pendingImports.length ?? 0
+  return n > (docPrefsFor(tab.path).importDismissed ?? 0) ? n : 0
+})
+const importing = ref(false)
+
+async function importPdfAnnots(): Promise<void> {
+  const tab = store.activeTab
+  const mgr = tab && annotManagers.get(tab.id)
+  const doc = tab && documents.get(tab.id)
+  if (!tab || !mgr || !doc || importing.value) return
+  importing.value = true
+  try {
+    const n = await mgr.importFromPdf(doc, controllers.get(tab.id))
+    tab.sidecarLocation = mgr.sidecarLocation
+    showToast(n ? t('imp.done', { n, file: mgr.sidecarLocation.split('/').pop()! }) : t('imp.none'))
+  } catch (err) {
+    showToast(t('app.annotSaveFail', { msg: (err as Error).message }))
+  } finally {
+    importing.value = false
+  }
+}
+function dismissImport(): void {
+  const tab = store.activeTab
+  if (tab) saveDocPrefs(tab.path, { importDismissed: importBanner.value })
 }
 
 /** who set the current selection — only that controller may clear it */
@@ -992,6 +1027,8 @@ onMounted(async () => {
     startPresentation,
     stopPresentation,
     presenting,
+    importPdfAnnots,
+    importBanner,
     undo: () => undoAnnot('undo'),
     redo: () => undoAnnot('redo'),
     toast: () => toast.value,
@@ -1114,7 +1151,9 @@ watch(() => store.settings.sidebarOpen, () => {
       ></div>
       <Sidebar
         v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind === 'pdf' && !chromeHidden"
+        :importing="importing"
         @goto="gotoBookmark"
+        @import-pdf="importPdfAnnots"
       />
       <div class="app-content">
         <Toolbar
@@ -1182,6 +1221,13 @@ watch(() => store.settings.sidebarOpen, () => {
                 @pointerdown.capture="focusPane(tab, 1)"
               ></div>
             </template>
+            <!-- last child: the split layout keys off :first-child; inside the
+                 panes so it sits under the toolbar at any toolbar height -->
+            <div v-if="importBanner && tab.id === store.activeTabId" class="import-banner" role="status">
+              <span class="ib-text">{{ t('imp.banner', { n: importBanner }) }}</span>
+              <button class="ib-go" :disabled="importing" @click="importPdfAnnots">{{ t('imp.action') }}</button>
+              <button class="ib-close" :title="t('imp.dismiss')" :aria-label="t('imp.dismiss')" @click="dismissImport">✕</button>
+            </div>
           </div>
           <ComicView
             v-if="tab.kind === 'comic' || tab.kind === 'djvu'"

@@ -635,6 +635,40 @@ h4.bk-block { font-size: 1.15em; }
 .bm-btn { padding: 2px 6px; font-size: 11px; flex: none; }
 .bm-input { flex: 1; min-width: 0; }
 
+/* ── annotations from other apps: import prompt ── */
+/* top of the page panes (just under the toolbar), clear of the no-text
+   banner (bottom) and the toast */
+.import-banner {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 30;
+  display: flex; align-items: center; gap: 8px; max-width: calc(100% - 32px);
+  background: var(--bg-panel); border: 1px solid var(--border); color: var(--fg);
+  border-radius: 18px; padding: 4px 6px 4px 14px; font-size: 12.5px; box-shadow: var(--shadow);
+}
+.import-banner .ib-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-banner .ib-go {
+  flex: none; background: var(--accent); color: #fff; border-color: var(--accent);
+  border-radius: 12px; padding: 2px 12px; font-size: 12px;
+}
+.import-banner .ib-go:hover { opacity: 0.9; background: var(--accent); }
+.import-banner .ib-close { flex: none; border: none; background: none; color: var(--fg-dim); padding: 2px 6px; }
+/* phone: a full-width bar with thumb-sized targets instead of a pill */
+@media (max-width: 700px) {
+  .import-banner {
+    left: 8px; right: 8px; transform: none; max-width: none; border-radius: 12px;
+    padding: 6px 6px 6px 12px; font-size: 13px;
+  }
+  .import-banner .ib-text { white-space: normal; flex: 1; }
+  .import-banner .ib-go { min-height: 44px; padding: 0 16px; font-size: 14px; }
+  .import-banner .ib-close { min-width: 44px; min-height: 44px; font-size: 15px; }
+}
+.annot-import {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border-bottom: 1px solid var(--border); background: var(--accent-soft); font-size: 12px;
+}
+.annot-import span { flex: 1; }
+.annot-import button { background: var(--accent); color: #fff; border-color: var(--accent); font-size: 12px; padding: 2px 10px; }
+.ai-src { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
 /* ── annotation filters ── */
 .annots-body { display: flex; flex-direction: column; }
 .annot-filters {

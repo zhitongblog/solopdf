@@ -32,11 +32,12 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 import { TextLayer, OPS, AnnotationLayer, AnnotationMode } from 'pdfjs-dist'
 import { SimpleLinkService } from 'pdfjs-dist/web/pdf_viewer.mjs'
 import {
-  buildPageIndex, matchOnPage, isDrawn, linkTargetOf, annotRect, resolveLinkTarget,
+  buildPageIndex, matchOnPage, isDrawn, linkTargetOf, annotRect, resolveLinkTarget, importedRefs,
   type PageTextIndex, type RawLinkTarget, type LinkDest, type RefKind,
 } from '@solopdf/core'
 import { SmartRefIndex, refUnderPoint, type RefHit } from './refs'
 import { splitSentences } from '../tts'
+import { renderHiding } from '../annotations/importer'
 import type { Annotation, Quad } from '@solopdf/core'
 import {
   NO_CROP, cropOffset, displaySize, normRotation, pdfRectToView, pdfToView, rotatedSize, viewToPdf,
@@ -163,6 +164,9 @@ export class PdfViewerController {
   private zoomDebounce = 0
   private annotations: Annotation[] = []
   private resolvedQuads = new Map<string, { page: number; quads: Quad[]; orphan: boolean }>()
+  /** PDF annotations now drawn from the sidecar (imported): pdf.js id →
+   *  subtype ('' = any). Their originals are left off the canvas. */
+  private importedSrc = new Map<string, string>()
   private linkService = new SimpleLinkService()
   private autoRaf = 0
   private autoSpeed = 0
@@ -689,14 +693,22 @@ export class PdfViewerController {
       canvas.style.width = `${vp.width}px`
       canvas.style.height = `${vp.height}px`
       const ctx = canvas.getContext('2d', { alpha: false })!
-      const task = s.page.render({
+      // one getAnnotations() feeds the imported-mark hiding, the form
+      // widgets and the links (pdf.js caches it per page)
+      const page = s.page
+      const annots = await page.getAnnotations({ intent: 'display' }).catch(() => [] as unknown[])
+      if (this.destroyed) return
+      const hidden = this.hiddenOn(annots)
+      // imported annotations are painted by our own layers — leave the
+      // PDF's original appearance off the canvas (see importer.ts)
+      const task = renderHiding(this.doc, hidden, () => page.render({
         canvasContext: ctx,
         viewport: vp,
         transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
         // forms render as live DOM widgets (AnnotationLayer below), not
         // baked pixels — this is what makes填写/打勾 interactive
         annotationMode: AnnotationMode.ENABLE_FORMS,
-      } as Parameters<PDFPageProxy['render']>[0])
+      } as Parameters<PDFPageProxy['render']>[0]))
       s.renderTask = task
       await task.promise
       s.renderTask = null
@@ -760,11 +772,8 @@ export class PdfViewerController {
         s.textLayerDiv = tl
       }
 
-      // one getAnnotations() feeds both the form widgets and the links
-      const annots = await s.page.getAnnotations({ intent: 'display' }).catch(() => [] as unknown[])
-      if (this.destroyed) return
       // interactive form widgets (text inputs / checkboxes / dropdowns)
-      await this.renderFormLayer(s, vp, annots)
+      await this.renderFormLayer(s, vp, annots.filter((a) => !hidden.has((a as { id?: string }).id ?? '')))
       // hyperlinks
       this.renderLinkLayer(s, i, annots)
 
@@ -1222,7 +1231,15 @@ export class PdfViewerController {
   }
 
   /** offscreen render of one page, for thumbnails / region capture / export */
-  async renderToCanvas(pageNum: number, scale: number, clip?: { x: number; y: number; w: number; h: number }): Promise<HTMLCanvasElement> {
+  /**
+   * `hide`: when given, also leave the imported originals off — plus these
+   * extra pdf.js ids (a drawn mark's picture paints the mark itself on top,
+   * so the original under it would show twice). Without it the PDF's own
+   * annotations render as usual (covers, previews, presentation).
+   */
+  async renderToCanvas(
+    pageNum: number, scale: number, clip?: { x: number; y: number; w: number; h: number }, hide?: string[],
+  ): Promise<HTMLCanvasElement> {
     const page = await this.doc.getPage(pageNum)
     const i = pageNum - 1
     const vp = page.getViewport({ scale, rotation: page.rotate + this.userRotationOf(i) })
@@ -1235,7 +1252,13 @@ export class PdfViewerController {
     ctx.fillStyle = '#fff'
     ctx.fillRect(0, 0, w, h)
     if (clip) ctx.translate(-clip.x, -clip.y)
-    await page.render({ canvasContext: ctx, viewport: vp } as Parameters<typeof page.render>[0]).promise
+    let hidden: Set<string> = new Set()
+    if (hide) {
+      hidden = this.hiddenOn(await page.getAnnotations({ intent: 'display' }).catch(() => []))
+      for (const id of hide) hidden.add(id)
+    }
+    await renderHiding(this.doc, hidden, () =>
+      page.render({ canvasContext: ctx, viewport: vp } as Parameters<typeof page.render>[0])).promise
     return canvas
   }
 
@@ -1489,8 +1512,30 @@ export class PdfViewerController {
 
   // ── highlights ───────────────────────────────────────────────────────────
 
+  /** pdf.js ids of this page's annotations that the sidecar has imported */
+  private hiddenOn(annots: unknown[]): Set<string> {
+    const out = new Set<string>()
+    if (!this.importedSrc.size) return out
+    for (const a of annots as { id?: string; subtype?: string }[]) {
+      const type = a.id ? this.importedSrc.get(a.id) : undefined
+      // the subtype check guards against a ref reused by another file
+      // that happens to have the same name as the sidecar's PDF
+      if (type !== undefined && (type === '' || type === a.subtype)) out.add(a.id!)
+    }
+    return out
+  }
+
   async setAnnotations(annots: Annotation[]): Promise<void> {
     this.annotations = annots
+    // an import, its undo, or deleting an imported mark changes which PDF
+    // originals pdf.js must skip — repaint the canvases when it does
+    const src = importedRefs(annots)
+    const key = (m: Map<string, string>) => [...m].map(([k, v]) => `${k}:${v}`).sort().join(',')
+    if (key(src) !== key(this.importedSrc)) {
+      this.importedSrc = src
+      this.invalidateRendered()
+      this.update()
+    }
     this.resolvedQuads.clear()
     for (const a of annots) {
       if (a.orphan) {

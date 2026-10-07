@@ -17,13 +17,16 @@
  */
 import {
   parse, upsertAnnotation, removeAnnotation, stripPrivate, genId, makeFingerprint,
-  diffSidecar, applyEdit, UndoStack,
+  diffSidecar, applyEdit, UndoStack, buildImports, spliceImports, pendingImports, isDrawn,
 } from '@solopdf/core'
-import type { SidecarEdit } from '@solopdf/core'
+import type { SidecarEdit, PdfAnnot } from '@solopdf/core'
+import type { PDFDocumentProxy } from 'pdfjs-dist'
 import type { Annotation, AnnotationKind, Quad, SidecarMeta, SidecarLabels } from '@solopdf/core'
 import { platform } from '../platform'
 import { t } from '../i18n'
-import type { SelectionInfo } from '../viewer/controller'
+import type { SelectionInfo, PdfViewerController } from '../viewer/controller'
+import { scanForImport } from './importer'
+import { renderDrawnPng } from './drawing'
 
 /** sidecar display labels follow the app language (parser is label-agnostic) */
 function labels(): SidecarLabels {
@@ -53,7 +56,7 @@ function labels(): SidecarLabels {
  * (unknown kinds pass through — the UI falls back to a generic word).
  */
 export interface UndoLabel {
-  op: 'add' | 'delete' | 'note' | 'color' | 'kind' | 'edit' | 'multi'
+  op: 'add' | 'delete' | 'note' | 'color' | 'kind' | 'edit' | 'multi' | 'import'
   kind: string
   count: number
 }
@@ -75,6 +78,7 @@ export type UndoResult =
 /** "删除高亮" / "Delete Highlight" … — the action name used in toasts and tooltips */
 export function undoLabelText(l: UndoLabel): string {
   if (l.op === 'multi') return t('un.multi', { n: l.count })
+  if (l.op === 'import') return t('un.import', { n: l.count })
   const word = t('sc.' + l.kind)
   const kind = word === 'sc.' + l.kind ? t('un.annot') : word
   return t('un.' + l.op, { kind })
@@ -87,6 +91,10 @@ function sectionAnnot(section: string | null): Annotation | undefined {
 /** Describe an edit from its before/after sections — works for any kind. */
 function describe(edit: SidecarEdit): UndoLabel {
   const ch = edit.changes
+  // nothing but new sections that came out of the PDF: an import
+  if (ch.every((c) => !c.before && sectionAnnot(c.after)?.anchor.src)) {
+    return { op: 'import', kind: sectionAnnot(ch[0].after)?.kind ?? 'highlight', count: ch.length }
+  }
   if (ch.length > 1) {
     const a = sectionAnnot(ch[0].after ?? ch[0].before)
     return { op: 'multi', kind: a?.kind ?? 'highlight', count: ch.length }
@@ -113,6 +121,8 @@ export class AnnotationManager {
   /** pictures about to be overwritten by update(), captured for record() */
   private overwritten = new Map<string, Uint8Array>()
   onChange: (annots: Annotation[]) => void = () => {}
+  /** annotations found inside the PDF itself (other apps'); null = not scanned yet */
+  pdfAnnots: PdfAnnot[] | null = null
 
   constructor(
     private pdfPath: string,
@@ -303,6 +313,44 @@ export class AnnotationManager {
     await this.write(removeAnnotation(this.text, id))
     this.annotations = parse(this.text).annotations
     this.onChange(this.annotations)
+  }
+
+  /** PDF annotations (from other apps) not yet in the sidecar */
+  get pendingImports(): PdfAnnot[] {
+    return this.pdfAnnots ? pendingImports(this.pdfAnnots, this.annotations) : []
+  }
+
+  /** look for importable annotations in the PDF (once per document) */
+  async scanPdf(doc: PDFDocumentProxy): Promise<PdfAnnot[]> {
+    if (!this.pdfAnnots) this.pdfAnnots = await scanForImport(doc)
+    return this.pdfAnnots
+  }
+
+  /**
+   * Bring the PDF's own annotations into the sidecar — all pending ones, in
+   * ONE write, so the whole import is a single undo step (and undoing it
+   * also forgets the import: the dedupe key lives in the sections). Drawn
+   * marks get their picture like hand-drawn ones when a viewer is at hand.
+   * The PDF file is never touched. Returns how many marks were added.
+   */
+  async importFromPdf(doc: PDFDocumentProxy, ctrl?: PdfViewerController | null): Promise<number> {
+    const pdf = await this.scanPdf(doc)
+    const { annotations } = await buildImports(doc, pdf, this.annotations, genId)
+    if (!annotations.length) return 0
+    const marks = this.stripExcerpts ? annotations.map(stripPrivate) : annotations
+    if (ctrl) {
+      for (const a of marks) {
+        if (!isDrawn(a.kind) || a.kind === 'textbox') continue
+        const png = await renderDrawnPng(ctrl, a).catch(() => null)
+        if (!png) continue
+        a.image = `${a.id}.png`
+        await platform().writeSidecarAsset(this.pdfPath, a.image, png)
+      }
+    }
+    await this.write(spliceImports(this.text, marks, this.pdfPath, this.meta, labels()))
+    this.annotations = parse(this.text).annotations
+    this.onChange(this.annotations)
+    return marks.length
   }
 
   /** release blob URLs (called when the tab closes) */

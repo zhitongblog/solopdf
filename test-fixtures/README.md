@@ -14,6 +14,7 @@
 | `smart-refs-paper.pdf` | 智能引用（无链接注释的论文：图/表/公式/参考文献 + 中文“图 3/表 1/公式 (2)”） | 4 页 / 6KB | 由 `scripts/gen-smartref-fixture.mjs` 手写生成（可复现），中文用非嵌入 STSong-Light |
 | `encrypted-password-solopdf.pdf` | 加密 PDF（密码输入框 + 明文批注提示） | 28 页 / AES-256 | 由中文样本加密生成，**密码：`solopdf`** |
 | `page-labels-roman.pdf` | 页码标签（/PageLabels：封面 Cover、罗马数字前言 i–iv、正文从 1 重新起、附录 A-1–A-3） | 24 页 / 4KB | `node scripts/gen-page-labels-fixture.mjs` 手写 PDF 对象生成，可复现；每页印着“Physical page N - printed label X”，另有灰/蓝色块用于纸张颜色/反色检查 |
+| `annotated-by-other-apps.pdf` | 导入其他应用的注释（Highlight×3 含跨行与中文、Underline、StrikeOut、Squiggly、Text 便签+回复、FreeText、Ink、Square、Circle、带箭头的“\”斜线 Line、Line、Polygon；另有 Stamp（不支持→跳过）与 Hidden 高亮（不导入）） | 3 页 / 8KB | `node scripts/gen-annotated-fixture.mjs` 手写 PDF 对象生成，可复现；Courier/STSong 等宽排版，quadpoints 精确落在已知词上 |
 
 ## 验收要点对照（来自设计蓝图 Success Criteria）
 
@@ -26,6 +27,7 @@
 - `toc-pdf-spec-iso32000.pdf`（链接）：前 60 页 277 个内部链接 + 18 个外链（`solopdf links … --pages 1-60`）；点击内部链接落到 /XYZ 精确位置，外链走系统浏览器；⌥← 返回
 - `smart-refs-paper.pdf`：p1 悬停 Figure 1 / Table 1 / Eq. (2) / (1) / [2] / [1, 3] / Fig. 2 / 图 3 / 表 1 / 公式 (2) / [4] 均弹出目标区域预览；Figure 9、[0, 1]、“(7) alone” 不弹
 - `page-labels-roman.pdf`：工具栏页码框显示印刷页码（ii (3 / 24)），输入 `iii` / `3` / `#3` 分别跳物理第 4 / 8 / 3 页；伴生文件锚点仍写物理页；`solopdf info` 输出 `1: Cover; 2-5: i–iv; 6-21: 1–16; 22-24: A-1–A-3`
+- `annotated-by-other-apps.pdf`：打开即提示“此 PDF 含 14 条其他应用留下的注释”；导入后侧栏 14 条（作者/日期/原文摘录齐全，回复并入便签），页面上原注释不再由 pdf.js 重复绘制；⌘Z 一步撤销整次导入；再次导入为 0；`solopdf import-annotations … --dry-run` 输出 found 14 / replies 1 / unsupported Stamp@p.2
 - `encrypted-password-solopdf.pdf`：密码框（记住本次会话）；高亮时弹一次明文保存提示
 
 注：`*.pdf` 均来自公有领域/官方公开渠道，可安全入库；如嫌 157MB 太大可 git-lfs 或 .gitignore。
