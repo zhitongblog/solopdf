@@ -24,13 +24,12 @@ const zhHans = {
   keywords: 'pdf,阅读器,无广告,批注,高亮,笔记,markdown,表单填写,pdf阅读,本地',
   promotionalText: '干净、快速、本地运行的 PDF 阅读器 —— 高亮自动变成 Markdown 笔记。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `• 链接:PDF 里的链接能点,跳到精确位置;前进/后退;悬停预览链接和 Figure / Table / [12] 引用
-• 手绘:画笔、橡皮、文本框、矩形、椭圆、直线、箭头,支持 Apple Pencil 压感
-• 撤销/重做:所有批注操作都能撤销
-• 分屏:同一文档两个视口对照阅读
-• 选区翻译:用系统本机翻译,不联网;译文可存成笔记
-• 全屏阅读、演示模式、纸张颜色、印刷页码(xii、A-3)
-• 工具栏一键旋转`,
+  whatsNew: `• 导入其他应用的批注:Acrobat、预览、PDF Expert 里做的高亮和便签一键转成 SoloPDF 笔记
+• 比较两版文档:按页对齐,逐词标出新增、删除、修改;两个文档可以并排阅读
+• PDF 附件与图层:打开 PDF 里嵌的文件;工程图、地图的图层可开关
+• 阅读标尺、放大镜;一键复制 BibTeX / APA / GB/T 7714 引用
+• 新格式:FB2 电子书、多页 TIFF;书内搜索
+• 问 AI(默认关闭):总结、提问,回答带页码可跳回原文;需在设置里自己配置服务,可用本机模型`,
 };
 
 const zhHant = {
@@ -47,13 +46,12 @@ const zhHant = {
   keywords: 'pdf,閱讀器,無廣告,批註,螢光筆,筆記,markdown,表單填寫,pdf閱讀,本地',
   promotionalText: '乾淨、快速、本地執行的 PDF 閱讀器 —— 螢光標記自動變成 Markdown 筆記。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `• 連結:PDF 裡的連結能點,跳到精確位置;前進/返回;滑過預覽連結和 Figure / Table / [12] 引用
-• 手繪:畫筆、橡皮擦、文字方塊、矩形、橢圓、直線、箭頭,支援 Apple Pencil 壓力
-• 復原/重做:所有標註操作都能復原
-• 分割畫面:同一文件兩個視窗對照閱讀
-• 選取翻譯:使用系統本機翻譯,不連網;譯文可存成筆記
-• 全螢幕閱讀、簡報模式、紙張顏色、印刷頁碼(xii、A-3)
-• 工具列一鍵旋轉`,
+  whatsNew: `• 匯入其他 App 的註解:Acrobat、預覽、PDF Expert 裡的螢光標記和便利貼一鍵轉成 SoloPDF 筆記
+• 比較兩版文件:依頁對齊,逐詞標出新增、刪除、修改;兩份文件可以並排閱讀
+• PDF 附件與圖層:開啟 PDF 內嵌的檔案;工程圖、地圖的圖層可開關
+• 閱讀尺規、放大鏡;一鍵複製 BibTeX / APA / GB/T 7714 引用
+• 新格式:FB2 電子書、多頁 TIFF;書內搜尋
+• 問 AI(預設關閉):摘要、提問,回答附頁碼可跳回原文;需在設定裡自行設定服務,可用本機模型`,
 };
 
 const enUS = {
@@ -70,13 +68,12 @@ Everything runs on your device. No network calls, no data collection.`,
   keywords: 'pdf,reader,annotate,highlight,markdown,notes,forms,viewer,offline,documents',
   promotionalText: 'A clean, fast, local-first PDF reader — highlights become Markdown notes.',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `• Links: links inside PDFs now work and land on the exact spot; Back and Forward; hover previews for links and for Figure / Table / [12] references
-• Ink: pen, eraser, text boxes, rectangles, ellipses, lines and arrows, with Apple Pencil pressure
-• Undo and redo for every annotation change
-• Split view: two panes on the same document
-• Translate a selection with the system's on-device translation — no network; save the translation as a note
-• Full screen, presentation mode, paper colours, printed page numbers (xii, A-3)
-• One-tap rotate in the toolbar`,
+  whatsNew: `• Import annotations made in other apps: highlights and notes from Acrobat, Preview or PDF Expert become SoloPDF notes in one tap
+• Compare two versions: pages aligned, word-level insertions, deletions and changes; read two documents side by side
+• PDF attachments and layers: open embedded files; toggle layers in drawings and maps
+• Reading ruler and magnifier; copy a BibTeX / APA / GB/T 7714 citation
+• New formats: FB2 e-books and multi-page TIFF; search inside books
+• Ask AI (off by default): summaries and questions with page citations you can tap; uses a service you configure, including a model on your own computer`,
 };
 
 const ja = {
@@ -93,13 +90,12 @@ const ja = {
   keywords: 'pdf,リーダー,注釈,ハイライト,ノート,markdown,フォーム,閲覧,オフライン',
   promotionalText: '広告なし・完全ローカルの PDF リーダー。ハイライトが Markdown ノートになります。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `• リンク:PDF 内のリンクが正確な位置へジャンプ。戻る/進む。リンクや Figure / Table / [12] 参照をホバーでプレビュー
-• 手書き:ペン、消しゴム、テキストボックス、四角形、楕円、直線、矢印。Apple Pencil の筆圧に対応
-• すべての注釈操作を取り消し/やり直し
-• 分割表示:同じ文書を 2 つのペインで
-• 選択範囲の翻訳:システムのオンデバイス翻訳で通信なし。訳文をメモとして保存
-• 全画面、プレゼンテーション、紙の色、印刷ページ番号(xii、A-3)
-• ツールバーからワンタップで回転`,
+  whatsNew: `• 他のアプリの注釈を読み込み:Acrobat・プレビュー・PDF Expert のハイライトやメモを SoloPDF のノートにワンタップで変換
+• 2 つの版を比較:ページを揃えて追加・削除・変更を単語単位で表示。2 つの文書を並べて閲覧
+• PDF の添付ファイルとレイヤー:埋め込みファイルを開く。図面や地図のレイヤーを切り替え
+• リーディングルーラーとルーペ。BibTeX / APA / GB/T 7714 の引用をコピー
+• 新フォーマット:FB2 電子書籍、複数ページ TIFF。書籍内検索
+• AI に質問(既定はオフ):要約と質問、回答のページ番号から原文へ。設定で自分のサービスを指定(ローカルモデルも可)`,
 };
 
 // whatsNew is intentionally absent — Apple rejects it on an app's first version.
@@ -121,7 +117,7 @@ export const reviewContact = {
   demoAccountRequired: false,
   notes: `SoloPDF is a fully local PDF reader. No account needed, no server component.
 
-FIX FOR THE PREVIOUS REJECTION (2.1a, 0.7.0 crashed on launch on iPad Air 11-inch (M3), iPadOS 27.0): the attached crash logs show UIKit's launch-time check for apps that have not adopted the UIScene life cycle (EXC_BREAKPOINT in _UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption), which iOS 27 enforces for apps built with the iOS 27 SDK. Build 0.7.1 adopts the UIScene life cycle (UIApplicationSceneManifest + a UISceneDelegate). We reproduced the exact crash on iPadOS 27 / iOS 27 with the 0.7.0 code, and verified that 0.7.1 launches, opens PDFs from the Files picker and via "Open in SoloPDF", and survives backgrounding and rotation on both iPad and iPhone.
+OPTIONAL "ASK AI" FEATURE (new in this version): it is OFF by default and SoloPDF ships no AI service of its own. A user can turn it on in Settings and enter their own OpenAI-compatible endpoint (for example a local Ollama / LM Studio server on their own computer, or a provider they have an account with). Before any text is sent, the app shows a consent sheet naming the exact endpoint and stating whether it is on the local machine or online; nothing is sent without that consent, and only short excerpts of the open document (not the whole file) are sent. We collect nothing and operate no server. All other features in this version (importing annotations, comparing documents, attachments, layers, reading ruler, citations, FB2/TIFF) work fully offline.
 
 SAMPLE PDF: https://solopdf.doaipm.com/sample.pdf — download in Safari, then in SoloPDF tap "Open PDF" and pick it from Files > Downloads (or use any of your own PDFs).
 
@@ -155,6 +151,6 @@ export const screenshots = {
 
 // Per-platform release plan: store version string must match the attached build's train.
 export const platforms = {
-  IOS:    { versionString: '0.7.1', buildVersion: '0.7.1' },
+  IOS:    { versionString: '0.8.0', buildVersion: '0.8.0' },
   MAC_OS: { versionString: '1.6.0', buildVersion: '1.6.0' },
 };
