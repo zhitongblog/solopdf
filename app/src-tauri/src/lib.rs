@@ -741,6 +741,28 @@ async fn translate_http(
         .map_err(|e| e.to_string())?
 }
 
+/// Ask AI: stream the user-configured chat endpoint's answer to the WebView
+/// (request built in @solopdf/core). Events: {status} then {data} per line.
+#[tauri::command]
+async fn ai_http_stream(
+    id: u32,
+    url: String,
+    headers: Vec<(String, String)>,
+    body: String,
+    on_event: tauri::ipc::Channel<serde_json::Value>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        translate::http_stream(id, &url, &headers, &body, |ev| on_event.send(ev).is_ok())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn ai_http_cancel(id: u32) {
+    translate::cancel_stream(id);
+}
+
 // ── DjVu ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -1318,6 +1340,8 @@ pub fn run() {
             translate_engine,
             translate_open_settings,
             translate_http,
+            ai_http_stream,
+            ai_http_cancel,
             read_user_dicts,
             djvu_info,
             djvu_page,
