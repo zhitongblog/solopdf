@@ -533,6 +533,25 @@ h4.bk-block { font-size: 1.15em; }
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
 .bk-fs-btn:hover { opacity: 0.9; }
+.bk-search-btn {
+  position: absolute; right: 14px; top: calc(10px + env(safe-area-inset-top, 0px)); z-index: 20;
+  width: 38px; height: 38px; border-radius: 19px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--bk-fg); color: var(--bk-bg); opacity: 0.45;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.bk-search-btn:hover { opacity: 0.9; }
+::highlight(solopdf-search) { background-color: rgba(255, 152, 0, 0.55); color: inherit; }
+
+/* FictionBook structure (core/fb2.ts emits these classes) */
+.bk-chapter .fb2-poem { margin: 1em 0 1em 2em; }
+.bk-chapter .fb2-stanza { margin-bottom: 1em; }
+.bk-chapter .fb2-stanza p.fb2-v { margin: 0; text-align: left; }
+.bk-chapter p.fb2-author { text-align: right; font-style: italic; color: var(--bk-dim); }
+.bk-chapter .fb2-epigraph { border-left: none; margin: 1em 0 1.5em auto; max-width: 70%; font-style: italic; }
+.bk-chapter .fb2-subtitle { text-align: center; font-weight: 600; }
+.bk-chapter p.fb2-img { text-align: center; }
+.bk-chapter p.fb2-empty { margin: 0 0 0.5em; }
 .bk-paged-bar { padding-bottom: env(safe-area-inset-bottom, 0px); height: calc(40px + env(safe-area-inset-bottom, 0px)); }
 
 /* ── view menu (rotation / layout / crop / auto-scroll) ── */
@@ -1052,7 +1071,8 @@ h4.bk-block { font-size: 1.15em; }
 .cm-fit-width .cm-stage img { width: 100%; height: auto; object-fit: contain; }
 .cm-fit-contain .cm-stage img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .cm-stage .cm-rot { position: relative; flex: none; }
-.cm-stage .cm-rot img { position: absolute; left: 50%; top: 50%; max-width: none; max-height: none; }
+/* outranks the fit rules (.cm-fit-height … img:only-child): the inline size is the layout */
+.cm-view .cm-stage .cm-rot img { position: absolute; left: 50%; top: 50%; max-width: none; max-height: none; object-fit: fill; }
 .cm-rot-btns { flex: 1; display: flex; gap: 6px; }
 .cm-rot-btns button {
   flex: 1; background: var(--bg); color: var(--fg); border: 1px solid var(--border);
@@ -1075,6 +1095,14 @@ h4.bk-block { font-size: 1.15em; }
   .cm-bar button { min-width: 40px; min-height: 40px; }
   .cm-slider { flex: 1; min-width: 0; width: auto; }
 }
+/* zoomed in: the view scrolls, the stage grows past it (centered while smaller) */
+.cm-view.cm-zoomed { display: block; overflow: auto; touch-action: pan-x pan-y; }
+.cm-view.cm-zoomed .cm-stage { width: max-content; height: max-content; min-width: 100%; min-height: 100%; }
+.cm-zoom { display: inline-flex; align-items: center; }
+.cm-bar .cm-zoom button { padding: 0 4px; }
+.cm-bar .cm-zoom-val { font-size: 12px; min-width: 44px; font-variant-numeric: tabular-nums; }
+.cm-bar button:disabled { opacity: 0.35; }
+.cm-bar .cm-ocr-btn { font-size: 12px; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 10px; padding: 1px 8px; }
 .cm-loading {
   display: flex; align-items: center; justify-content: center;
   min-width: 200px; height: 60%; color: #8a8f98; font-size: 13px;

@@ -20,7 +20,7 @@ import { applyMarks } from '../book/marks'
 import { undoLabelText } from '../annotations/manager'
 
 const props = defineProps<{ tabId: number; source: 'pdf' | 'epub' | 'txt' }>()
-const emit = defineEmits<{ selection: [sel: SelectionInfo | null]; ocr: []; chrome: []; undo: []; redo: [] }>()
+const emit = defineEmits<{ selection: [sel: SelectionInfo | null]; ocr: []; chrome: []; undo: []; redo: []; search: [] }>()
 
 const SECTION = 120
 
@@ -179,8 +179,77 @@ onMounted(async () => {
       await nextTick()
       return h.scrollTop > before
     },
+    reveal,
+    clearReveal,
   })
 })
+
+// ── search hits (chapter books) ──
+// The match is marked with the CSS Custom Highlight API, which paints over a
+// Range without touching the DOM — applyMarks() owns the <mark>s and would
+// fight anything we inserted. Engines without it still get the page turn.
+const HL = 'solopdf-search'
+function clearReveal(): void {
+  ;(CSS as unknown as { highlights?: Map<string, unknown> }).highlights?.delete(HL)
+}
+
+/** the nth case-insensitive match of q inside el, as a Range */
+function findRange(el: HTMLElement, q: string, nth: number): Range | null {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  const nodes: Text[] = []
+  let text = ''
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    nodes.push(n as Text)
+    text += (n as Text).data
+  }
+  const hay = text.toLocaleLowerCase()
+  const needle = q.toLocaleLowerCase()
+  let at = hay.indexOf(needle)
+  for (let k = 0; k < nth && at >= 0; k++) at = hay.indexOf(needle, at + Math.max(1, needle.length))
+  if (at < 0) return null
+  const locate = (pos: number, end: boolean): [Text, number] | null => {
+    let acc = 0
+    for (const node of nodes) {
+      const len = node.data.length
+      if (pos < acc + len || (end && pos === acc + len)) return [node, pos - acc]
+      acc += len
+    }
+    return null
+  }
+  const a = locate(at, false)
+  const b = locate(at + needle.length, true)
+  if (!a || !b) return null
+  const r = document.createRange()
+  r.setStart(a[0], a[1])
+  r.setEnd(b[0], b[1])
+  return r
+}
+
+async function reveal(chapter: number, q: string, nth: number): Promise<void> {
+  if (!q) return
+  await enterAt(chapter)
+  await nextTick()
+  const holder = layout.value === 'paged'
+    ? pagedContent.value
+    : host.value?.querySelector<HTMLElement>(`[data-section="${chapter - 1}"]`)
+  if (!holder) return
+  const range = findRange(holder, q, nth)
+  if (!range) return
+  if (layout.value === 'paged' && pagedContent.value) {
+    // both rects carry the same translateX, so their difference is the
+    // match's x inside the multi-column strip
+    const x = range.getBoundingClientRect().left - pagedContent.value.getBoundingClientRect().left
+    pageIdx.value = Math.min(Math.max(0, Math.floor(x / stepW())), pageCount.value - 1)
+    syncPagedPage()
+  } else {
+    const box = range.getBoundingClientRect()
+    const h = host.value
+    if (h) h.scrollTop += box.top - h.getBoundingClientRect().top - h.clientHeight / 3
+  }
+  const HighlightCtor = (window as unknown as { Highlight?: new (r: Range) => unknown }).Highlight
+  const reg = (CSS as unknown as { highlights?: Map<string, unknown> }).highlights
+  if (HighlightCtor && reg) reg.set(HL, new HighlightCtor(range))
+}
 
 onBeforeUnmount(() => {
   cancelled = true
@@ -627,6 +696,9 @@ function tocJump(chapter: number): void {
     <button class="bk-chrome-btn" :title="t('bk.chrome')" @click.stop="emit('chrome')">‹</button>
     <button v-if="!isMobile()" class="bk-fs-btn" :title="t('bk.fullscreen')" @click.stop="toggleFullscreen">⛶</button>
     <button v-if="tocEntries.length" class="bk-toc-btn" :title="t('bk.toc')" @click.stop="tocOpen = !tocOpen">☰</button>
+    <button v-if="source === 'epub'" class="bk-search-btn" :title="t('bk.search')" data-testid="bk-search" @click.stop="emit('search')">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+    </button>
     <div v-if="undoState.show" class="bk-undo"><div class="bk-undo-btns">
       <button :disabled="!undoState.canUndo" :title="undoState.undoTip" :aria-label="t('un.undo')" @click.stop="emit('undo')">↶</button>
       <button :disabled="!undoState.canRedo" :title="undoState.redoTip" :aria-label="t('un.redo')" @click.stop="emit('redo')">↷</button>

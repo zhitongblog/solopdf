@@ -918,12 +918,7 @@ fn list_imported(app: tauri::AppHandle) -> Result<Vec<String>, String> {
         .map(|e| e.path())
         .filter(|p| {
             p.is_file()
-                && p.extension()
-                    .map(|e| {
-                        let e = e.to_string_lossy().to_lowercase();
-                        ["pdf", "epub", "txt", "cbz", "cbr", "mobi", "azw3", "djvu", "djv"].contains(&e.as_str())
-                    })
-                    .unwrap_or(false)
+                && is_readable_doc(&p.to_string_lossy())
         })
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
@@ -939,6 +934,25 @@ fn library_path(app: tauri::AppHandle) -> Result<String, String> {
 
 // ── library ──────────────────────────────────────────────────────────────
 
+/// Extensions the reader opens. `.fb2.zip` is matched by suffix below — a
+/// bare `.zip` is not a book.
+const DOC_EXTS: [&str; 15] = [
+    "pdf", "epub", "txt", "cbz", "cbr", "mobi", "azw3", "djvu", "djv", "fb2", "fbz", "tif", "tiff",
+    "azw", "prc",
+];
+
+/// Whether a path names a document SoloPDF can open (by name only).
+fn is_readable_doc(path: &str) -> bool {
+    let low = path.to_lowercase();
+    if low.ends_with(".fb2.zip") {
+        return true;
+    }
+    match low.rsplit_once('.') {
+        Some((stem, ext)) => !stem.is_empty() && !ext.contains('/') && DOC_EXTS.contains(&ext),
+        None => false,
+    }
+}
+
 #[derive(Serialize)]
 struct ScannedFile {
     path: String,
@@ -952,7 +966,6 @@ struct ScannedFile {
 /// for a minute is worse than one that says "too many files".
 #[tauri::command]
 async fn scan_folder(path: String, max_depth: u32) -> Result<Vec<ScannedFile>, String> {
-    const EXTS: [&str; 9] = ["pdf", "epub", "txt", "cbz", "cbr", "mobi", "azw3", "djvu", "djv"];
     const MAX_FILES: usize = 5000;
     tauri::async_runtime::spawn_blocking(move || {
         let mut out = Vec::new();
@@ -976,11 +989,7 @@ async fn scan_folder(path: String, max_depth: u32) -> Result<Vec<ScannedFile>, S
                     }
                     continue;
                 }
-                let ext = p
-                    .extension()
-                    .map(|e| e.to_string_lossy().to_lowercase())
-                    .unwrap_or_default();
-                if !EXTS.contains(&ext.as_str()) {
+                if !is_readable_doc(&p.to_string_lossy()) {
                     continue;
                 }
                 out.push(ScannedFile {
@@ -1262,11 +1271,7 @@ fn print_webview() -> Result<(), String> {
 fn collect_open_args(args: impl Iterator<Item = String>) -> Vec<String> {
     args.skip(1)
         .filter(|a| {
-            let low = a.to_lowercase();
-            [".pdf", ".epub", ".txt", ".cbz", ".cbr", ".mobi", ".azw3", ".djvu", ".djv"]
-                .iter()
-                .any(|e| low.ends_with(e))
-                || a.starts_with("solopdf://")
+            is_readable_doc(a) || a.starts_with("solopdf://")
         })
         .collect()
 }
@@ -1394,3 +1399,21 @@ pub fn run() {
 }
 
 use std::hash::Hasher as _;
+
+#[cfg(test)]
+mod doc_ext_tests {
+    use super::is_readable_doc;
+
+    #[test]
+    fn readable_doc_names() {
+        for ok in [
+            "/a/b.pdf", "/a/B.EPUB", "book.fb2", "book.FBZ", "/x/book.fb2.zip", "scan.tif",
+            "scan.TIFF", "c.cbz", "d.djvu", "k.azw3",
+        ] {
+            assert!(is_readable_doc(ok), "{ok}");
+        }
+        for no in ["/a/archive.zip", "/a/noext", "/a.pdf/dir", ".pdf", "photo.png"] {
+            assert!(!is_readable_doc(no), "{no}");
+        }
+    }
+}

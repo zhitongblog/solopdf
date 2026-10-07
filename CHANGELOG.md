@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## 未发布
+
+### 新格式
+- **FB2（FictionBook）**：.fb2 / .fbz / .fb2.zip，走 EPUB 同一个图书视图——
+  章节目录（嵌套 section）、内嵌 base64 图片、诗歌/题记/表格/脚注、封面进书架；
+  按 XML 声明识别编码（windows-1251 / KOI8-R / UTF-16），声明与实际不符时自动回退。
+  高亮/批注/进度/朗读与 EPUB 一致
+- **TIFF / 多页 TIFF**：CCITT G3/G4 传真、LZW、PackBits、Deflate、JPEG；
+  走漫画/DjVu 的图片页视图，支持翻页、旋转，桌面版可对当前页做本地 OCR
+- 图片页视图（漫画 / DjVu / TIFF）新增**缩放**（底栏 − / + 、⌘+滚轮或触控板捏合、
+  键盘 + − 0），放大后可拖动平移
+- **图书内搜索**：EPUB / MOBI / FB2 右上角 🔍（或 ⌘F），按章节列出结果，点击跳到
+  该处并标出匹配
+- CLI / MCP：`info` 支持 FB2 与 TIFF，`extract-text` 支持 FB2，`to-images` 支持 TIFF，
+  `search` 会搜文件夹里的 FB2
+
+### 修复
+- 漫画/DjVu 单页且旋转 90° 时图片被压成方形加黑边
+- CLI `search` 遇到加密 PDF 不再整体退出
+- MCP / CLI / 浏览器调试模式的伴生文件命名与应用一致（`书名.annotations.md`）
+
 ## v0.7.1 — 0.7 的第一个公开版本
 
 功能与 v0.7.0 相同。v0.7.0 打了 tag 但没有发出 GitHub Release（发布说明漏写），

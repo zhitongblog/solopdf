@@ -57,11 +57,15 @@ MIMES = [
     'application/vnd.comicbook+zip',
     'application/vnd.comicbook-rar',
     'image/vnd.djvu',
+    'application/x-fictionbook+xml',
+    'application/x-fictionbook',
+    'application/x-zip-compressed-fb2',
+    'image/tiff',
 ]
 # Providers frequently report octet-stream for anything they don't know, so
 # a second filter matches on the file name instead. pathPattern needs the
 # doubled backslash escape and does NOT support alternation.
-EXTS = ['pdf', 'epub', 'txt', 'mobi', 'azw3', 'cbz', 'cbr', 'djvu', 'djv']
+EXTS = ['pdf', 'epub', 'txt', 'mobi', 'azw3', 'cbz', 'cbr', 'djvu', 'djv', 'fb2', 'fbz', 'tif', 'tiff']
 
 lines = ['            <!-- solopdf-intent-filters -->']
 lines.append('            <intent-filter>')

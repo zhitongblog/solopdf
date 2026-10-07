@@ -50,7 +50,8 @@ SoloPDF：秒开、零广告、零遥测（更新检查可完全关闭）、永�
   引擎:macOS/iOS 用系统 Vision(零体积),Windows/Linux 内置 PP-OCRv4 ONNX(离线模型)
 - **表单填写**：AcroForm 文本框/勾选/下拉直接填写，"保存已填表单"导出副本（原文件永不改动）
 - 打印（分批渲染，500 页不爆内存）
-- **格式**：PDF · EPUB · TXT · MOBI/AZW3 · CBZ/CBR 漫画 · DjVu
+- **格式**：PDF · EPUB · TXT · MOBI/AZW3 · FB2（含 .fbz / .fb2.zip，自动识别 windows-1251 等编码）·
+  CBZ/CBR 漫画 · DjVu · TIFF（多页，含 CCITT G4 传真 / LZW / Deflate / JPEG；可缩放、旋转、整页 OCR）
 
 ## 结构
 
@@ -66,12 +67,14 @@ test-fixtures/  标准测试集（7 个真实样本，见其 README）
 
 ```bash
 node cli/src/index.mjs info <file.pdf> [--password pw]      # 页数/书签/元数据
-node cli/src/index.mjs extract-text <file.pdf> [--pages A-B]
+node cli/src/index.mjs info book.fb2                         # FB2/.fbz：书名/作者/编码/章节目录
+node cli/src/index.mjs info scan.tiff                        # TIFF：页数/每页尺寸/压缩方式
+node cli/src/index.mjs extract-text <file.pdf> [--pages A-B] # FB2 时 --pages 按章节
 node cli/src/index.mjs links <file.pdf> [--pages A-B]       # 超链接 → JSON
 node cli/src/index.mjs translate "text" [--to zh-Hans]      # 本机翻译（macOS）
 node cli/src/index.mjs export-annotations <file.pdf>        # 伴生批注 → JSON
 node cli/src/index.mjs annotate <file.pdf> --out x.pdf      # 伴生批注 → 标准 PDF 注释
-node cli/src/index.mjs to-images <file.pdf> --out-dir d     # 页面 → PNG/JPEG
+node cli/src/index.mjs to-images <file.pdf> --out-dir d     # 页面 → PNG/JPEG（TIFF 亦可）
 node cli/src/index.mjs search <dir> <query>                 # 跨文件搜索
 node cli/src/index.mjs dict 汉字                             # 内置离线词典
 node cli/src/index.mjs ocr scan.pdf --out scan-ocr.pdf      # 本地 OCR → 可搜索 PDF
@@ -104,7 +107,7 @@ claude mcp add solopdf -- node /path/to/pdf/dev-mcp/src/index.mjs
 claude mcp add solopdf -- node /path/to/pdf/dev-mcp/src/index.mjs --allow-write
 ```
 
-只读工具：`solopdf_info` / `solopdf_extract_text` / `solopdf_search` /
+只读工具：`solopdf_info`（PDF / FB2 / TIFF）/ `solopdf_extract_text`（PDF / FB2）/ `solopdf_search` /
 `solopdf_search_library`（跨文件夹）/ `solopdf_read_annotations` /
 `solopdf_page_image` / `solopdf_define`（离线词典）/ `solopdf_links` /
 `solopdf_translate`。

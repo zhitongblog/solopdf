@@ -7,12 +7,21 @@ import { fileURLToPath } from 'node:url'
 /**
  * Dev-only fixtures API so the full UI can run and be E2E-tested in a plain
  * browser (Unzoo) without Tauri:
- *   GET  /__fixtures            -> JSON list of test-fixtures/*.pdf
- *   GET  /__fixtures/<name>     -> the PDF, native Range support via sendFile
+ *   GET  /__fixtures            -> JSON list of readable test-fixtures (PDF,
+ *                                  EPUB, FB2/FBZ, TIFF, comics, …)
+ *   GET  /__fixtures/<name>     -> the file, with HTTP Range support
  *   GET  /__sidecar?p=<abs>     -> sidecar text ('' if absent)
  *   PUT  /__sidecar?p=<abs>     -> write sidecar text
  * Never shipped: only registered by configureServer (vite dev).
  */
+const DOC_RE = /\.(pdf|epub|txt|cbz|cbr|mobi|azw3|djvu?|fb2|fbz|tiff?)$|\.fb2\.zip$/i
+const MIME: Record<string, string> = {
+  pdf: 'application/pdf', epub: 'application/epub+zip', txt: 'text/plain; charset=utf-8',
+  fb2: 'application/x-fictionbook+xml', fbz: 'application/zip', zip: 'application/zip',
+  tif: 'image/tiff', tiff: 'image/tiff', cbz: 'application/vnd.comicbook+zip',
+}
+const mimeOf = (f: string): string => MIME[f.toLowerCase().split('.').pop() ?? ''] ?? 'application/octet-stream'
+
 function fixturesApi(): Plugin {
   const FIXTURES = path.resolve(__dirname, '../test-fixtures')
   return {
@@ -22,7 +31,7 @@ function fixturesApi(): Plugin {
         const url = new URL(req.url ?? '/', 'http://x')
         const rel = decodeURIComponent(url.pathname.replace(/^\//, ''))
         if (!rel) {
-          const list = fs.readdirSync(FIXTURES).filter((f) => f.endsWith('.pdf'))
+          const list = fs.readdirSync(FIXTURES).filter((f) => DOC_RE.test(f))
           res.setHeader('content-type', 'application/json')
           res.end(JSON.stringify(list))
           return
@@ -50,14 +59,14 @@ function fixturesApi(): Plugin {
             res.setHeader('content-range', `bytes ${start}-${end}/${stat.size}`)
             res.setHeader('accept-ranges', 'bytes')
             res.setHeader('content-length', end - start + 1)
-            res.setHeader('content-type', 'application/pdf')
+            res.setHeader('content-type', mimeOf(file))
             fs.createReadStream(file, { start, end }).pipe(res)
             return
           }
         }
         res.setHeader('accept-ranges', 'bytes')
         res.setHeader('content-length', stat.size)
-        res.setHeader('content-type', 'application/pdf')
+        res.setHeader('content-type', mimeOf(file))
         fs.createReadStream(file).pipe(res)
       })
       // region screenshots live in <stem>.annotations.assets/ beside the PDF

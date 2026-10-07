@@ -27,7 +27,7 @@ export interface TabState {
   /** 图书阅读模式(重排视图) */
   bookMode: boolean
   /** 文档类型:EPUB/TXT 走图书视图,漫画走 ComicView */
-  kind: 'pdf' | 'epub' | 'txt' | 'comic' | 'mobi' | 'djvu'
+  kind: 'pdf' | 'epub' | 'txt' | 'comic' | 'mobi' | 'djvu' | 'fb2' | 'tiff'
   /** 图书模式的精确位置(块序):TXT 的 page 粒度是"章",长章恢复
    *  到章首体验差——存/恢复都以块为准,page 仅作章级回退 */
   bookBlock: number
@@ -255,18 +255,18 @@ export const controllers = new Map<number, PdfViewerController>()
 export const splitControllers = new Map<number, PdfViewerController>()
 export const documents = new Map<number, PDFDocumentProxy>()
 export const annotManagers = new Map<number, AnnotationManager>()
-/** EPUB and MOBI/KF8 share a chapter interface, so they share a registry —
- *  BookView only ever asks for chapters, toc and chapterHtml(). */
+/** EPUB, MOBI/KF8 and FB2 share a chapter interface, so they share a
+ *  registry — BookView only ever asks for chapters, toc and chapterHtml(). */
 export const epubBooks = new Map<
   number,
-  import('./book/epub').EpubBook | import('./book/mobi').MobiBook
+  import('./book/epub').EpubBook | import('./book/mobi').MobiBook | import('./book/fb2').Fb2Book
 >()
 export const txtBooks = new Map<number, import('@solopdf/core').TxtBook>()
-/** Paged image documents: comics and DjVu scans differ only in how a page
- *  is produced, so they share the reader and this registry. */
+/** Paged image documents: comics, DjVu and TIFF scans differ only in how a
+ *  page is produced, so they share the reader and this registry. */
 export const comicBooks = new Map<
   number,
-  import('./book/comic').ComicBook | import('./book/djvu').DjvuBook
+  import('./book/comic').ComicBook | import('./book/djvu').DjvuBook | import('./book/tiff').TiffBook
 >()
 
 /** Book-mode hooks the reader needs from outside the component: which blocks
@@ -275,6 +275,10 @@ export interface BookApi {
   blocks(): HTMLElement[]
   /** advance one screen/section; false when the book ends */
   advance(): Promise<boolean>
+  /** chapter books: go to the nth match of `query` in `chapter` and mark it */
+  reveal?(chapter: number, query: string, nth: number): Promise<void>
+  /** drop the search mark */
+  clearReveal?(): void
 }
 export const bookApis = new Map<number, BookApi>()
 
@@ -380,6 +384,10 @@ export function newTab(path: string): TabState {
       : /\.(cbz|cbr)$/i.test(path) ? 'comic'
       : /\.(mobi|azw3|azw|prc)$/i.test(path) ? 'mobi'
       : /\.djvu?$/i.test(path) ? 'djvu'
+      : /\.(fb2|fbz)$|\.fb2\.zip$/i.test(path) ? 'fb2'
+      : /\.tiff?$/i.test(path) ? 'tiff'
+      // any other .zip: a comic archive is the only other zip we read
+      : /\.zip$/i.test(path) ? 'comic'
       : 'pdf',
   }
   store.tabs.push(t)
