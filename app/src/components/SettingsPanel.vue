@@ -9,7 +9,7 @@
  * it, not here.
  */
 import { computed, onMounted, ref } from 'vue'
-import { TRANSLATE_LANGS } from '@solopdf/core'
+import { TRANSLATE_LANGS, isLocalEndpoint, endpointHost } from '@solopdf/core'
 import { store } from '../store'
 import { isMobile, isTauri } from '../platform'
 import { t, LOCALES, currentLocale } from '../i18n'
@@ -31,6 +31,21 @@ const trEngineLabel = computed(() => {
   return t('st.trNativeNone')
 })
 const tr = computed(() => store.settings.translate)
+const ai = computed(() => store.settings.ai)
+const aiLocal = computed(() => isLocalEndpoint(ai.value.provider.baseUrl))
+const aiHost = computed(() => endpointHost(ai.value.provider.baseUrl))
+/** the two local servers people actually run, and "whatever translation uses" */
+function aiPreset(kind: 'ollama' | 'lmstudio' | 'translate'): void {
+  const p = ai.value.provider
+  if (kind === 'ollama') p.baseUrl = 'http://localhost:11434/v1'
+  else if (kind === 'lmstudio') p.baseUrl = 'http://localhost:1234/v1'
+  else {
+    const src = tr.value.provider
+    p.baseUrl = src.baseUrl ?? ''
+    p.apiKey = src.apiKey ?? ''
+    p.model = src.model ?? ''
+  }
+}
 function langName(tag: string): string {
   try {
     return new Intl.DisplayNames([currentLocale.value], { type: 'language' }).of(tag) ?? tag
@@ -229,6 +244,73 @@ async function clearCache(kind: 'textindex' | 'covers'): Promise<void> {
         <p v-if="tr.provider.kind !== 'off' && trEngine !== 'none'" class="sr-sub st-note">
           {{ t('st.trOnlineOnlyFallback') }}
         </p>
+
+        <h4>{{ t('st.g.ai') }}</h4>
+        <div class="settings-row">
+          <div>
+            <div class="sr-label">{{ t('st.aiEnable') }}</div>
+            <div class="sr-sub st-warn">{{ t('st.aiEnableSub') }}</div>
+          </div>
+          <input type="checkbox" v-model="ai.enabled" data-testid="ai-enabled" />
+        </div>
+        <template v-if="ai.enabled">
+          <div class="settings-row">
+            <div><div class="sr-label">{{ t('st.aiPresets') }}</div></div>
+            <div class="st-cache-btns">
+              <button data-testid="ai-preset-ollama" @click="aiPreset('ollama')">Ollama</button>
+              <button data-testid="ai-preset-lms" @click="aiPreset('lmstudio')">LM Studio</button>
+              <button v-if="tr.provider.kind === 'openai'" @click="aiPreset('translate')">{{ t('st.aiPresetTr') }}</button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <input
+              class="st-wide" autocomplete="off" spellcheck="false" data-testid="ai-base-url"
+              v-model.trim="ai.provider.baseUrl" :placeholder="t('st.aiBaseUrl') + ' — http://localhost:11434/v1'"
+            />
+          </div>
+          <div class="settings-row">
+            <input
+              class="st-wide" type="password" autocomplete="off" spellcheck="false" data-testid="ai-key"
+              v-model.trim="ai.provider.apiKey" :placeholder="t('st.aiApiKey')"
+            />
+          </div>
+          <div class="settings-row">
+            <input
+              class="st-wide" autocomplete="off" spellcheck="false" data-testid="ai-model"
+              v-model.trim="ai.provider.model" :placeholder="t('st.aiModel') + ' — qwen2.5:7b, llama3.1, gpt-4o-mini…'"
+            />
+          </div>
+          <p class="sr-sub st-note" :class="{ 'st-warn': !aiLocal }" data-testid="ai-where">
+            {{ aiLocal ? t('st.aiLocalNote') : t('st.aiRemoteNote', { host: aiHost }) }}
+          </p>
+          <div class="settings-row">
+            <div>
+              <div class="sr-label">{{ t('st.aiTopK') }}</div>
+              <div class="sr-sub">{{ t('st.aiTopKSub') }}</div>
+            </div>
+            <select v-model.number="ai.topK">
+              <option v-for="k in [3, 4, 6, 8, 12]" :key="k" :value="k">{{ k }}</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <div>
+              <div class="sr-label">{{ t('st.aiBudget') }}</div>
+              <div class="sr-sub">{{ t('st.aiBudgetSub') }}</div>
+            </div>
+            <select v-model.number="ai.summaryBudget" data-testid="ai-budget">
+              <option v-for="b in [12000, 24000, 48000, 96000, 200000]" :key="b" :value="b">
+                {{ t('st.aiBudgetChars', { k: Math.round(b / 1000) }) }}
+              </option>
+            </select>
+          </div>
+          <div class="settings-row" v-if="ai.approved.length">
+            <div>
+              <div class="sr-label">{{ t('st.aiApproved') }}</div>
+              <div class="sr-sub">{{ ai.approved.join(' · ') }}</div>
+            </div>
+            <button @click="ai.approved = []">{{ t('st.aiForget') }}</button>
+          </div>
+        </template>
 
         <h4>{{ t('st.g.privacy') }}</h4>
         <div class="settings-row">

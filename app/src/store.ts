@@ -142,6 +142,8 @@ export interface Settings {
   translate: TranslateSettings
   /** reading aids: line-focus ruler, magnifier loupe, citation format */
   aids: AidSettings
+  /** Ask AI — off by default, bring-your-own endpoint (see ai.ts) */
+  ai: AiSettings
 }
 
 export interface AidSettings {
@@ -157,6 +159,19 @@ export interface AidSettings {
   loupeZoom: number
   /** last citation format picked */
   citeFormat: 'bibtex' | 'apa' | 'gbt'
+}
+
+export interface AiSettings {
+  /** master switch — off by default */
+  enabled: boolean
+  /** OpenAI-compatible endpoint; a local Ollama / LM Studio needs no key */
+  provider: import('@solopdf/core').AiProvider
+  /** passages sent per question */
+  topK: number
+  /** most characters a whole-document summary may send */
+  summaryBudget: number
+  /** endpoints (base URLs) the reader approved sending text to */
+  approved: string[]
 }
 
 export interface TranslateSettings {
@@ -244,6 +259,14 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   // no hover on a phone: there the band is dragged by its handle
   aids: { ruler: false, rulerLines: 1, rulerDim: 0.45, rulerFollow: !MOBILE, loupeZoom: 3, citeFormat: 'bibtex' },
+  ai: {
+    enabled: false,
+    // a local server is the suggestion: nothing leaves the machine
+    provider: { baseUrl: 'http://localhost:11434/v1', apiKey: '', model: '' },
+    topK: 6,
+    summaryBudget: 48000,
+    approved: [],
+  },
 }
 
 export function applyLanguage(): void {
@@ -351,6 +374,12 @@ export async function initStore(): Promise<void> {
       ...DEFAULT_SETTINGS.translate,
       ...(s.settings.translate ?? {}),
       provider: { ...DEFAULT_SETTINGS.translate.provider, ...(s.settings.translate?.provider ?? {}) },
+    }
+    store.settings.ai = {
+      ...DEFAULT_SETTINGS.ai,
+      ...(s.settings.ai ?? {}),
+      provider: { ...DEFAULT_SETTINGS.ai.provider, ...(s.settings.ai?.provider ?? {}) },
+      approved: [...(s.settings.ai?.approved ?? [])],
     }
   }
   if (s.recents) store.recents = s.recents

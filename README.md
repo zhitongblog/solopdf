@@ -43,6 +43,11 @@ SoloPDF：秒开、零广告、零遥测（更新检查可完全关闭）、永�
 - **手绘与图形**：画笔 / 橡皮 / 文本框 / 矩形 / 椭圆 / 直线 / 箭头，支持触控笔压感；
   **撤销 / 重做**覆盖所有批注操作
 - **选区翻译**：Apple 平台用系统本机翻译（不联网），其他平台可自配服务
+- **问 AI（默认关闭，自带服务）**：总结全文 / 本页、就文档提问、选中文字「用 AI 解释」；
+  回答带 [p.N] 页码引用，点一下跳过去（⌥← 返回）。只发送本地检索（BM25，中文按双字）
+  选出的相关段落，不发整本书；长文档按预算 map-reduce 总结，可随时停止。任何
+  OpenAI 兼容端点都行——本机 Ollama / LM Studio 不需要密钥、内容不出本机。
+  首次使用会明确告诉你文字将发往哪里；回答可「存为笔记」写进伴生 Markdown（可撤销）
 - **朗读**：调用系统语音，句子级跟随高亮并自动翻页，零体积零联网
 - **离线词典**：内置 CC-CEDICT（12 万词条，4MB），中文按最长前缀匹配；
   macOS/iOS 另可直接唤起系统词典
@@ -107,6 +112,11 @@ node cli/src/index.mjs ocr scan.pdf --out scan-ocr.pdf      # 本地 OCR → 可
 node cli/src/index.mjs ocr scan.pdf --out scan.md           # 本地 OCR → Markdown
 node cli/src/index.mjs ocr photo.jpg                        # 图片 → 文字（stdout）
 node cli/src/index.mjs compare old.pdf new.pdf [--json]     # 比较两版文档（按页对齐的差异列表）
+node cli/src/index.mjs ask paper.pdf "损失函数怎么定义的？"   # 问 AI（带 [p.N] 引用，流式输出）
+node cli/src/index.mjs summarize paper.pdf [--page 3]       # AI 摘要（长文档 map-reduce，--budget 字数）
+node cli/src/index.mjs retrieve paper.pdf "query" --k 6     # 本地检索最相关页段落 → JSON（不调模型）
+#   AI 服务：--endpoint http://localhost:11434/v1 --model qwen2.5:7b [--key k]
+#   或环境变量 SOLOPDF_AI_ENDPOINT / SOLOPDF_AI_MODEL / SOLOPDF_AI_KEY；--json 输出结构化结果
 node cli/src/index.mjs selftest test-fixtures               # 标准测试集验收
 
 # 文档操作（转发给原生驱动 solopdf-doc，全部写新文件）
@@ -140,7 +150,8 @@ claude mcp add solopdf -- node /path/to/pdf/dev-mcp/src/index.mjs --allow-write
 `solopdf_translate` / `solopdf_pdf_annotations`（PDF 内其他应用留下的注释及导入状态）/
 `solopdf_attachments`（嵌入附件）/ `solopdf_layers`（图层）/
 `solopdf_cite`（引用信息，`online: true` 才联网） /
-`solopdf_compare`（两版 PDF 的文字差异 + 页对齐）。
+`solopdf_compare`（两版 PDF 的文字差异 + 页对齐） /
+`solopdf_retrieve`（本地 BM25 检索最相关的页段落，不调用模型、不联网——给外部 LLM 带页码引用作答用）。
 
 写门控（`--allow-write`）：`solopdf_add_annotation` /
 `solopdf_export_annotated_pdf` / `solopdf_import_annotations` / `solopdf_pages` / `solopdf_merge` /
@@ -154,6 +165,7 @@ pnpm --filter @solopdf/core build   # CLI/MCP 依赖的共享模块
 pnpm --filter @solopdf/core test    # core 单元测试
 cargo test --lib --manifest-path app/src-tauri/Cargo.toml   # pdfops / djvu 测试
 node scripts/check-i18n.mjs         # 四语言文案完整性
+node scripts/mock-llm.mjs --port 11435   # 假的 OpenAI 兼容服务（SSE 流式、[p.N] 引用），测「问 AI」用
 pnpm dev                            # 浏览器模式（vite + fixtures API，供 E2E）
 pnpm tauri dev                      # 桌面应用
 pnpm tauri build                    # 打包

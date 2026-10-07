@@ -15,13 +15,14 @@ import { store } from '../store'
 import { isMobile } from '../platform'
 import { t } from '../i18n'
 
-const props = defineProps<{ selection: SelectionInfo }>()
+const props = defineProps<{ selection: SelectionInfo; explain?: boolean }>()
 const emit = defineEmits<{
   pick: [color: string, kind: AnnotationKind]
   note: [color: string, kind: AnnotationKind]
   copy: []
   define: []
   translate: []
+  explain: []
 }>()
 
 const COLORS = ['yellow', 'green', 'blue', 'pink'] as const
@@ -69,6 +70,7 @@ const style = computed(() => {
         <button class="hl-act" :title="t('hl.copy')" @click="$emit('copy')">⧉</button>
         <button class="hl-act" :title="t('hl.define')" @click="$emit('define')">📖</button>
         <button class="hl-act hl-translate" :title="t('hl.translate')" @click="$emit('translate')">{{ t('hl.translateGlyph') }}</button>
+        <button v-if="explain" class="hl-act hl-explain" :title="t('ai.explain')" data-testid="hl-explain" @click="$emit('explain')">AI</button>
       </template>
     </div>
     <!-- phones: four 44px kinds + four actions don't fit one row at 375px -->
@@ -77,6 +79,7 @@ const style = computed(() => {
       <button class="hl-act" :title="t('hl.copy')" @click="$emit('copy')">⧉</button>
       <button class="hl-act" :title="t('hl.define')" @click="$emit('define')">📖</button>
       <button class="hl-act hl-translate" :title="t('hl.translate')" @click="$emit('translate')">{{ t('hl.translateGlyph') }}</button>
+      <button v-if="explain" class="hl-act hl-explain" :title="t('ai.explain')" @click="$emit('explain')">AI</button>
     </div>
   </div>
 </template>

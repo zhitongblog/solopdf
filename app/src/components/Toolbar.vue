@@ -9,11 +9,11 @@ import { navState, jump, goBack, goForward } from '../nav'
 import { isDrawTool, TOOL_GLYPH, type DrawTool } from '../annotations/drawing'
 import { splitAvailable } from '../viewer/split'
 
-defineProps<{ bookmarked?: boolean; tool?: 'none' | 'note' | 'region' | DrawTool; speaking?: boolean }>()
+defineProps<{ bookmarked?: boolean; tool?: 'none' | 'note' | 'region' | DrawTool; speaking?: boolean; aiOpen?: boolean }>()
 defineEmits<{
   search: []; settings: []; print: []; saveFilled: []; exportMd: []; ocr: []
   book: []; view: []; rotate: []; bookmark: []; tool: [kind: 'note' | 'region' | 'draw']; docTools: []; speak: []
-  undo: []; redo: []; split: []; cite: []
+  undo: []; redo: []; split: []; cite: []; ai: []
 }>()
 
 const tab = computed(() => store.activeTab)
@@ -141,6 +141,7 @@ function zoom(dir: 1 | -1): void {
     <button :title="t('tb.exportMdTip')" @click="$emit('exportMd')">MD↓</button>
     <button class="cite-btn" :title="t('tb.cite')" @click="$emit('cite')">❝</button>
     <button :class="{ active: speaking }" :title="t('tb.speak')" @click="$emit('speak')">🔊</button>
+    <button class="ask-btn" :class="{ active: aiOpen }" :title="t('ai.open')" data-testid="tb-ai" @click="$emit('ai')">AI</button>
     <button :title="t('tb.search')" @click="$emit('search')">🔍</button>
     <button v-if="!isMobile()" :title="t('tb.print')" @click="$emit('print')">🖨</button>
     <button :title="t('tb.settings')" @click="$emit('settings')">⚙︎</button>

@@ -68,6 +68,8 @@ import ReadingRuler from './components/ReadingRuler.vue'
 import MagnifierLoupe from './components/MagnifierLoupe.vue'
 import CitePanel from './components/CitePanel.vue'
 import { clipboardLog } from './clipboard'
+import AskPanel from './components/AskPanel.vue'
+import { aiState, aiSupported } from './ai'
 import { noteOpened, captureCover, addToLibrary } from './library'
 import { startStats, stopStats, noteTurn } from './stats'
 import { speaker, startReading, stopReading } from './readaloud'
@@ -748,6 +750,48 @@ async function addTranslationNote(translation: string): Promise<void> {
   await highlightSelection(store.settings.defaultColor, 'highlight', translation, req.sel)
 }
 
+// ── Ask AI ──
+const phoneLayout = (): boolean => isMobile() || window.innerWidth < 700
+
+/** selection popover → "explain with AI": hand the passage to the panel */
+function explainSelection(): void {
+  const sel = selection.value
+  const tab = store.activeTab
+  if (!sel?.text.trim() || !tab) return
+  aiState.pending = { tabId: tab.id, text: sel.text.trim().slice(0, 4000), page: sel.page }
+  aiState.open = true
+}
+
+/**
+ * A [p.N] citation was clicked. Page view: a real jump, recorded in the
+ * back/forward history (⌥← returns). Book views move by page/chapter like a
+ * bookmark does. On a phone the sheet steps aside so the page is visible.
+ */
+function aiGoto(page: number): void {
+  const tab = store.activeTab
+  if (!tab) return
+  if (tab.kind === 'pdf' && !tab.bookMode) {
+    const ctrl = controllers.get(tab.id)
+    if (ctrl) jump(tab.id, () => { ctrl.scrollToPage(page); ctrl.settle() })
+  } else {
+    tab.currentPage = page
+    tab.bookBlock = 0
+  }
+  if (phoneLayout()) aiState.open = false
+}
+
+function toggleAi(): void {
+  aiState.open = !aiState.open
+}
+
+// the desktop panel narrows the reading area: re-fit like the sidebar does
+watch(() => aiState.open, () => {
+  if (phoneLayout()) return
+  const tab = store.activeTab
+  if (tab?.split) void relayoutPanes(tab)
+  else void refitActive()
+})
+
 async function copySelection(): Promise<void> {
   const text = selection.value?.text
   if (!text) return
@@ -875,6 +919,7 @@ function onKey(e: KeyboardEvent): void {
   else if (mod && e.key === ',') { e.preventDefault(); settingsOpen.value = !settingsOpen.value }
   else if (mod && e.key === 'b') { e.preventDefault(); store.settings.sidebarOpen = !store.settings.sidebarOpen }
   else if (mod && e.key === 'd') { e.preventDefault(); toggleBookmark() }
+  else if (mod && !e.shiftKey && e.key.toLowerCase() === 'j') { e.preventDefault(); if (tab) toggleAi() }
   else if (mod && e.key === '\\') {
     e.preventDefault()
     if (splitAvailable.value && tab?.kind === 'pdf' && !tab.bookMode) toggleSplit()
@@ -886,7 +931,8 @@ function onKey(e: KeyboardEvent): void {
     // Esc peels one layer: an open panel first, then full-screen reading
     if (searchOpen.value || settingsOpen.value || viewMenuOpen.value || translateReq.value) {
       searchOpen.value = false; settingsOpen.value = false; viewMenuOpen.value = false; translateReq.value = null
-    } else if (readingFs.value) void setReadingFs(false)
+    } else if (aiState.open) aiState.open = false
+    else if (readingFs.value) void setReadingFs(false)
   }
   else if (!mod && tab && ctrl && !tab.bookMode && !isTyping(e)) {
     if (e.key === 'j' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); ctrl.turnPage(1) }
@@ -1206,6 +1252,7 @@ onMounted(async () => {
     ocr: await import('./ocr'),
     openImageOcr: (p: string) => { imageOcrPath.value = p },
     toggleBookMode,
+    ai: { state: aiState, module: await import('./ai'), explainSelection, goto: aiGoto, toggle: toggleAi },
     rotateDoc,
     toggleAutoScroll,
     toggleBookmark,
@@ -1349,7 +1396,7 @@ watch(() => store.settings.sidebarOpen, () => {
       @compare="(id) => openCompare(id)"
       @unpair="closePair()"
     />
-    <div class="app-main">
+    <div class="app-main" :class="{ 'ask-open': aiState.open && !!store.activeTab && !chromeHidden && !phoneLayout() }">
       <div
         v-if="store.settings.sidebarOpen && store.activeTab && store.activeTab.kind === 'pdf' && !chromeHidden"
         class="sidebar-backdrop"
@@ -1386,6 +1433,8 @@ watch(() => store.settings.sidebarOpen, () => {
           @redo="undoAnnot('redo')"
           @split="toggleSplit()"
           @cite="citeOpen = true"
+          @ai="toggleAi"
+          :ai-open="aiState.open"
           :speaking="readAloud"
           @tool="onToolButton"
           :bookmarked="!!currentBookmark"
@@ -1485,6 +1534,7 @@ watch(() => store.settings.sidebarOpen, () => {
             @chrome="chromeReveal = !chromeReveal"
             @undo="undoAnnot('undo')"
             @redo="undoAnnot('redo')"
+            @ai="toggleAi"
           />
         </template>
           <div
@@ -1518,6 +1568,14 @@ watch(() => store.settings.sidebarOpen, () => {
           @click="setReadingFs(false)"
         >⤡</button>
       </div>
+      <AskPanel
+        v-if="aiState.open && store.activeTab && !chromeHidden"
+        @close="aiState.open = false"
+        @goto="aiGoto"
+        @toast="showToast"
+        @settings="settingsOpen = true"
+        @undo="undoAnnot('undo')"
+      />
     </div>
 
     <ReadingRuler
@@ -1536,6 +1594,8 @@ watch(() => store.settings.sidebarOpen, () => {
       @copy="copySelection"
       @define="defineSelection"
       @translate="translateSelection"
+      :explain="store.settings.ai.enabled && aiSupported(store.activeTab?.kind)"
+      @explain="explainSelection"
     />
 
     <TranslatePopup

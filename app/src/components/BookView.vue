@@ -20,7 +20,7 @@ import { applyMarks } from '../book/marks'
 import { undoLabelText } from '../annotations/manager'
 
 const props = defineProps<{ tabId: number; source: 'pdf' | 'epub' | 'txt' }>()
-const emit = defineEmits<{ selection: [sel: SelectionInfo | null]; ocr: []; chrome: []; undo: []; redo: []; search: [] }>()
+const emit = defineEmits<{ selection: [sel: SelectionInfo | null]; ocr: []; chrome: []; undo: []; redo: []; search: []; ai: [] }>()
 
 const SECTION = 120
 
@@ -148,7 +148,10 @@ onMounted(async () => {
   await nextTick()
   document.addEventListener('selectionchange', onSelChange)
   window.addEventListener('keydown', onKey, { capture: true })
-  ro = new ResizeObserver(() => { if (layout.value === 'paged') void remeasure(true) })
+  ro = new ResizeObserver(() => {
+    hostW.value = host.value?.clientWidth ?? 0
+    if (layout.value === 'paged') void remeasure(true)
+  })
   if (host.value) ro.observe(host.value)
   await enterAt(tab.value?.currentPage ?? 1, tab.value?.bookBlock || undefined)
   // read-aloud reaches in here: it needs the blocks currently on screen and
@@ -384,11 +387,16 @@ function onScroll(): void {
 }
 
 // ── 翻页模式 ──
-const doublePage = computed(() => (host.value?.clientWidth ?? innerWidth) >= 900)
+/** host width as reactive state: clientWidth alone is not, so the column
+ *  style kept the old width when something other than the window resized
+ *  the reader (the Ask AI panel opening beside it) */
+const hostW = ref(0)
+const doublePage = computed(() => { void hostW.value; return (host.value?.clientWidth ?? innerWidth) >= 900 })
 function stepW(): number {
   return (host.value?.clientWidth ?? innerWidth)
 }
 const pagedStyle = computed(() => {
+  void hostW.value
   const w = stepW()
   const cols = doublePage.value ? 2 : 1
   // 列步进(colW+gap)乘每页列数必须恰好等于页宽 w,否则 translateX
@@ -708,6 +716,8 @@ function tocJump(chapter: number): void {
     </div>
 
     <button class="bk-chrome-btn" :title="t('bk.chrome')" @click.stop="emit('chrome')">‹</button>
+    <!-- Ask AI: only once the reader turned it on — a book view stays chrome-free otherwise -->
+    <button v-if="store.settings.ai.enabled" class="bk-ai-btn" :title="t('ai.open')" data-testid="bk-ai" @click.stop="emit('ai')">AI</button>
     <button v-if="!isMobile()" class="bk-fs-btn" :title="t('bk.fullscreen')" @click.stop="toggleFullscreen">⛶</button>
     <button v-if="tocEntries.length" class="bk-toc-btn" :title="t('bk.toc')" @click.stop="tocOpen = !tocOpen">☰</button>
     <button v-if="source === 'epub'" class="bk-search-btn" :title="t('bk.search')" data-testid="bk-search" @click.stop="emit('search')">

@@ -25,6 +25,7 @@ import {
   scanPdfAnnotations, buildImports, spliceImports, importSummary, importedRefs, needsLineFix, fixLineDirections,
   readCitationInput, extractCitation, formatCitation, fetchDoiMetadata, CITE_FORMATS, pageDeepLink,
   compareDocuments,
+  textFromItems, indexDocument, retrieve,
 } from '@solopdf/core'
 import { inflateSync } from 'node:zlib'
 // FB2 / TIFF go through the CLI's format module (same core parser as the app)
@@ -388,6 +389,36 @@ server.tool(
       })
       return { status: r.status, body: await r.text() }
     }))
+  },
+)
+
+server.tool(
+  'solopdf_retrieve',
+  '检索文档中与问题最相关的页段落（只读，不调用任何模型、不联网）：本地 BM25（中日韩按双字切分），' +
+    '返回 top-k 段落及其页码，供外部 LLM 回答时引用 [p.N]。与应用「问 AI」同一检索实现',
+  {
+    path: z.string(),
+    query: z.string(),
+    k: z.number().int().min(1).max(50).default(6),
+    password: z.string().optional(),
+  },
+  async ({ path, query, k, password }) => {
+    const doc = await open(path, password)
+    const pages = []
+    for (let p = 1; p <= doc.numPages; p++) {
+      const page = await doc.getPage(p)
+      pages.push({ page: p, text: textFromItems((await page.getTextContent()).items) })
+    }
+    const numPages = doc.numPages
+    await doc.destroy()
+    const idx = indexDocument(pages)
+    const hits = retrieve(idx.index, query, k)
+    return text({
+      pages: numPages,
+      chunks: idx.index.chunks.length,
+      // score 0 = no lexical match; these are the opening pages as a fallback
+      results: hits.map((h) => ({ page: h.chunk.page, score: +h.score.toFixed(3), text: h.chunk.text })),
+    })
   },
 )
 

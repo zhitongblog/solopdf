@@ -132,6 +132,18 @@ function fromDeepl(code: string | undefined): string | undefined {
   return c.split('-')[0].toLowerCase()
 }
 
+/** base URL (or a full …/chat/completions URL) → the chat completions URL */
+export function chatCompletionsUrl(baseUrl: string): string {
+  const base = baseUrl.trim().replace(/\/+$/, '')
+  return /\/chat\/completions$/.test(base) ? base : `${base}/chat/completions`
+}
+
+/** Authorization header for an OpenAI-compatible endpoint; none without a key
+ *  (a local Ollama / LM Studio server needs none) */
+export function bearerHeaders(apiKey: string | undefined): [string, string][] {
+  return apiKey?.trim() ? [['Authorization', `Bearer ${apiKey.trim()}`]] : []
+}
+
 export function providerReady(cfg: ProviderConfig | undefined): boolean {
   if (!cfg) return false
   if (cfg.kind === 'deepl') return !!cfg.deeplKey?.trim()
@@ -154,13 +166,12 @@ export function buildProviderRequest(cfg: ProviderConfig, text: string, target: 
   if (cfg.kind === 'openai') {
     const base = cfg.baseUrl?.trim().replace(/\/+$/, '')
     if (!base || !cfg.model?.trim()) throw new Error('endpoint or model missing')
-    const url = /\/chat\/completions$/.test(base) ? base : `${base}/chat/completions`
+    const url = chatCompletionsUrl(base)
     const into = languageName(target)
     const alt = fallback && baseLang(fallback) !== baseLang(target)
       ? ` If the text is already in ${into}, translate it into ${languageName(fallback)} instead.`
       : ''
-    const headers: [string, string][] = []
-    if (cfg.apiKey?.trim()) headers.push(['Authorization', `Bearer ${cfg.apiKey.trim()}`])
+    const headers = bearerHeaders(cfg.apiKey)
     return {
       url,
       headers,

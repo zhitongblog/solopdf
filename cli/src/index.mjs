@@ -19,6 +19,9 @@
  *   solopdf doc <…>                             # page ops, merge, compress, …
  *   solopdf cite <file.pdf> [--format bibtex|apa|gbt|json] [--online]
  *   solopdf compare old.pdf new.pdf [--json]    # text differences, page-aligned
+ *   solopdf ask <file.pdf> "question"           # Ask AI via your own endpoint
+ *   solopdf summarize <file.pdf> [--page N]     # AI summary (map-reduce)
+ *   solopdf retrieve <file.pdf> "query"         # top-k page chunks, no model
  *
  * Used by Claude/CI for self-testing (global rule #2) and by users for
  * scripting. Read-only EXCEPT the commands that name an explicit output
@@ -35,6 +38,8 @@ import {
   collectAttachments, uniqueNames, layerRows, findLockedOcgs, radioGroups,
   readCitationInput, extractCitation, formatCitation, fetchDoiMetadata, CITE_FORMATS, pageDeepLink,
   compareDocuments,
+  txtToBlocks, textFromItems, indexDocument, searchChunks, askDocument, summarizeDocument, summarizePage,
+  aiProviderReady, citedPages, uiLangToTarget,
 } from '@solopdf/core'
 import { formatOf, loadFb2, fb2InfoJson, tiffInfoJson, tiffPages } from './formats.mjs'
 
@@ -667,6 +672,128 @@ async function cmdLayers(file) {
   }, null, 2))
 }
 
+// ── Ask AI (bring-your-own OpenAI-compatible endpoint; nothing is sent
+//    unless --endpoint / SOLOPDF_AI_ENDPOINT names one) ──
+
+/** page texts of a PDF, or chapters of a TXT (same split the app uses) */
+async function docPages(file) {
+  if (/\.txt$/i.test(file)) {
+    if (!existsSync(file)) die(`文件不存在: ${file}`)
+    const bytes = require$readFileSync(file)
+    let text
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch { text = new TextDecoder('gb18030').decode(bytes) }
+    const by = new Map()
+    for (const b of txtToBlocks(text).blocks) by.set(b.page, [...(by.get(b.page) ?? []), b.text])
+    return { pages: [...by].map(([page, t]) => ({ page, text: t.join('\n\n') })), unit: 'chapter' }
+  }
+  const doc = await open(file)
+  const pages = []
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p)
+    pages.push({ page: p, text: textFromItems((await page.getTextContent()).items) })
+  }
+  await doc.destroy()
+  return { pages, unit: 'page' }
+}
+
+function aiProvider() {
+  const baseUrl = flag('endpoint') ?? process.env.SOLOPDF_AI_ENDPOINT ?? ''
+  const model = flag('model') ?? process.env.SOLOPDF_AI_MODEL ?? ''
+  const apiKey = flag('key') ?? process.env.SOLOPDF_AI_KEY ?? ''
+  const p = { baseUrl, model, apiKey }
+  if (!aiProviderReady(p)) {
+    die('未配置 AI 服务：用 --endpoint <url> --model <name> [--key k]，或设置环境变量 ' +
+      'SOLOPDF_AI_ENDPOINT / SOLOPDF_AI_MODEL / SOLOPDF_AI_KEY\n' +
+      '例：--endpoint http://localhost:11434/v1 --model qwen2.5:7b（本机 Ollama，无需密钥）', 2)
+  }
+  return p
+}
+
+/** Node fetch, body streamed */
+const nodeTransport = async (req, signal) => {
+  const r = await fetch(req.url, {
+    method: 'POST',
+    headers: Object.fromEntries([...req.headers, ['Content-Type', 'application/json']]),
+    body: req.body,
+    signal,
+  })
+  const dec = new TextDecoder()
+  return {
+    status: r.status,
+    chunks: (async function* () {
+      if (!r.body) return
+      for await (const c of r.body) yield dec.decode(c, { stream: true })
+      const tail = dec.decode()
+      if (tail) yield tail
+    })(),
+  }
+}
+
+/** run one AI task, streaming to stdout (or one JSON object with --json) */
+async function runAi(file, task) {
+  const provider = aiProvider()
+  const json = args.includes('--json')
+  const { pages, unit } = await docPages(file)
+  const max = pages.reduce((m, p) => Math.max(m, p.page), 0)
+  const doc = indexDocument(pages)
+  const sysLang = Intl.DateTimeFormat().resolvedOptions().locale || 'en'
+  const ctx = { docName: path.basename(file), unit, lang: flag('lang') ?? uiLangToTarget(sysLang) }
+  const ac = new AbortController()
+  process.on('SIGINT', () => ac.abort())
+  let printed = ''
+  const hooks = {
+    signal: ac.signal,
+    onText: json ? undefined : (t) => {
+      // stream: print only what is new (the text only ever grows)
+      if (t.startsWith(printed)) process.stdout.write(t.slice(printed.length))
+      printed = t
+    },
+    onProgress: (done, total) => { if (total > 1) process.stderr.write(`\r[${done}/${total}] `) },
+  }
+  const r = await task(provider, doc, ctx, hooks)
+  if (json) {
+    console.log(JSON.stringify({
+      answer: r.text ?? null,
+      citations: r.text ? citedPages(r.text, max) : [],
+      sources: r.sources,
+      truncated: r.truncated ?? false,
+      error: r.error ?? null,
+    }, null, 2))
+  } else {
+    if (r.text && !printed) process.stdout.write(r.text)
+    process.stdout.write('\n')
+    if (r.text) {
+      process.stderr.write(`\n引用: ${citedPages(r.text, max).map((p) => 'p.' + p).join(', ') || '—'}` +
+        `  ·  发送: ${r.sources.map((p) => 'p.' + p).join(', ')}${r.truncated ? '（已按预算缩短）' : ''}\n`)
+    }
+    if (r.error) process.stderr.write(`错误 [${r.error.code}]: ${r.error.message}\n`)
+  }
+  process.exit(r.error ? 2 : 0)
+}
+
+async function cmdAsk(file, question) {
+  if (!question) die('用法: solopdf ask <file.pdf> "问题" [--endpoint url --model m --key k] [--k 6] [--json]')
+  const k = parseInt(flag('k') ?? '6', 10)
+  await runAi(file, (p, doc, ctx, hooks) => askDocument(p, doc, question, ctx, nodeTransport, { ...hooks, k }))
+}
+
+async function cmdSummarize(file) {
+  const budget = parseInt(flag('budget') ?? '48000', 10)
+  const page = flag('page')
+  await runAi(file, (p, doc, ctx, hooks) => page
+    ? summarizePage(p, doc, parseInt(page, 10), ctx, nodeTransport, hooks)
+    : summarizeDocument(p, doc, ctx, nodeTransport, { ...hooks, budgetChars: budget }))
+}
+
+/** top-k page chunks for a query — no model call, nothing leaves the machine */
+async function cmdRetrieve(file, query) {
+  if (!query) die('用法: solopdf retrieve <file.pdf> "query" [--k 6]')
+  const { pages } = await docPages(file)
+  const doc = indexDocument(pages)
+  const hits = searchChunks(doc.index, query, parseInt(flag('k') ?? '6', 10))
+  console.log(JSON.stringify(hits.map((h) => ({ page: h.chunk.page, score: +h.score.toFixed(3), text: h.chunk.text })), null, 2))
+}
+
 /** Everything the native document driver does, forwarded verbatim. */
 async function cmdDoc(rest) {
   const { spawnSync } = await import('node:child_process')
@@ -863,6 +990,9 @@ switch (cmd) {
   case 'doc': await cmdDoc(args.slice(1)); break
   case 'cite': await cmdCite(file ?? die('用法: solopdf cite <file.pdf> [--format bibtex|apa|gbt|all|json] [--online]')); break
   case 'compare': await cmdCompare(file ?? die('用法: solopdf compare <old.pdf> <new.pdf> [--json]'), args[2]); break
+  case 'ask': await cmdAsk(file ?? die('用法: solopdf ask <file.pdf> "问题"'), args[2]); break
+  case 'summarize': await cmdSummarize(file ?? die('用法: solopdf summarize <file.pdf> [--page N]')); break
+  case 'retrieve': await cmdRetrieve(file ?? die('用法: solopdf retrieve <file.pdf> "query"'), args[2]); break
   case 'selftest': await cmdSelftest(file ?? die('用法: solopdf selftest <fixtures-dir>')); break
   default:
     console.log(`solopdf — SoloPDF 命令行工具（与应用同一渲染引擎）
@@ -888,6 +1018,10 @@ switch (cmd) {
                                                    引用信息（DOI/arXiv/标题/作者/年份；--online 才联网查 doi.org）
   solopdf doc <子命令> …                            页面/合并/拆分/压缩/加密（solopdf-doc）
   solopdf compare <old.pdf> <new.pdf> [--json]     比较两版文档：按页对齐，列出新增/删除/修改的文字
+  solopdf ask <file.pdf> "问题"                     问 AI：检索相关页 → 你的 OpenAI 兼容服务，带 [p.N] 引用
+  solopdf summarize <file.pdf> [--page N]          AI 摘要（长文档 map-reduce，--budget 字数上限）
+  solopdf retrieve <file.pdf> "query" [--k 6]      本地 BM25 检索最相关的页段落 → JSON（不调用模型）
+      AI 服务：--endpoint url --model m [--key k]，或 SOLOPDF_AI_ENDPOINT / SOLOPDF_AI_MODEL / SOLOPDF_AI_KEY
   solopdf selftest <fixtures-dir>                  标准测试集验收
 
   solopdf doc 的子命令：pages / merge / split / annotate / compress /
