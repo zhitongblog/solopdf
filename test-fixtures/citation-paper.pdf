@@ -1,0 +1,181 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [9 0 R 11 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Type /FontDescriptor /FontName /STSong-Light /Flags 6 /FontBBox [-25 -254 1000 880] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 880 /StemV 93 >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 4 >> /FontDescriptor 5 0 R /DW 1000 /W [1 95 500] >>
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light-UniGB-UCS2-H /Encoding /UniGB-UCS2-H /DescendantFonts [6 0 R] >>
+endobj
+8 0 obj
+<< /Length 6279 >>
+stream
+0 g BT /F1 8 Tf 72 768 Td (arXiv:1706.03762v5  [cs.CL]  6 Dec 2017) Tj ET
+0 g BT /F3 20 Tf 150 720 Td (Attention Is All You Need) Tj ET
+0 g BT /F1 10 Tf 90 690 Td (Ashish Vaswani*, Noam Shazeer*, Niki Parmar*, Jakob Uszkoreit*) Tj ET
+0 g BT /F1 10 Tf 90 676 Td (Llion Jones*, Aidan N. Gomez*, Lukasz Kaiser*, Illia Polosukhin*) Tj ET
+0 g BT /F1 8 Tf 90 662 Td (Google Brain, Google Research, University of Toronto) Tj ET
+0 g BT /F3 11 Tf 280 636 Td (Abstract) Tj ET
+0 g BT /F1 9.5 Tf 100 620 Td (This fixture reproduces only the bibliographic front matter of a well known preprint;) Tj ET
+0 g BT /F1 9.5 Tf 100 608.5 Td (the abstract and all body paragraphs are placeholder text written for testing. It is) Tj ET
+0 g BT /F1 9.5 Tf 100 597 Td (used to check that titles, authors and identifiers are recovered from the printed page) Tj ET
+0 g BT /F1 9.5 Tf 100 585.5 Td (when the document information dictionary is wrong.) Tj ET
+0 g BT /F3 11 Tf 72 555 Td (1  Introduction) Tj ET
+0 g BT /F1 10 Tf 72 540.5 Td (This document is a test fixture for SoloPDF.) Tj ET
+0 g BT /F1 10 Tf 72 528 Td (It imitates the front page of a machine) Tj ET
+0 g BT /F1 10 Tf 72 515.5 Td (learning preprint so that the citation) Tj ET
+0 g BT /F1 10 Tf 72 503 Td (extractor has something realistic to read: a) Tj ET
+0 g BT /F1 10 Tf 72 490.5 Td (large title, a list of authors with) Tj ET
+0 g BT /F1 10 Tf 72 478 Td (affiliation marks, an abstract and two) Tj ET
+0 g BT /F1 10 Tf 72 465.5 Td (columns of running text.) Tj ET
+0 g BT /F1 10 Tf 72 448 Td (The paragraphs below are filler. They exist) Tj ET
+0 g BT /F1 10 Tf 72 435.5 Td (so that the reading ruler has many lines to) Tj ET
+0 g BT /F1 10 Tf 72 423 Td (walk through, and so that those lines sit in) Tj ET
+0 g BT /F1 10 Tf 72 410.5 Td (two columns whose baselines do not quite) Tj ET
+0 g BT /F1 10 Tf 72 398 Td (agree. A reader moving down the left column) Tj ET
+0 g BT /F1 10 Tf 72 385.5 Td (should stay in the left column until it) Tj ET
+0 g BT /F1 10 Tf 72 373 Td (ends, and only then continue at the top of) Tj ET
+0 g BT /F1 10 Tf 72 360.5 Td (the right one.) Tj ET
+0 g BT /F1 10 Tf 72 343 Td (Line focus tools are an accessibility aid.) Tj ET
+0 g BT /F1 10 Tf 72 330.5 Td (People with dyslexia or attention) Tj ET
+0 g BT /F1 10 Tf 72 318 Td (difficulties often lose their place on a) Tj ET
+0 g BT /F1 10 Tf 72 305.5 Td (dense page; a band that brightens the) Tj ET
+0 g BT /F1 10 Tf 72 293 Td (current line and dims the rest keeps the eye) Tj ET
+0 g BT /F1 10 Tf 72 280.5 Td (anchored without changing the layout of the) Tj ET
+0 g BT /F1 10 Tf 72 268 Td (document itself.) Tj ET
+0 g BT /F3 11 Tf 72 250.5 Td (2  Background) Tj ET
+0 g BT /F1 10 Tf 72 236 Td (Desktop readers have offered a magnifying) Tj ET
+0 g BT /F1 10 Tf 72 223.5 Td (loupe for many years. Holding a key shows a) Tj ET
+0 g BT /F1 10 Tf 72 211 Td (circle that renders the area under the) Tj ET
+0 g BT /F1 10 Tf 72 198.5 Td (pointer at a higher resolution, which helps) Tj ET
+0 g BT /F1 10 Tf 72 186 Td (with small print in figures, footnotes and) Tj ET
+0 g BT /F1 10 Tf 72 173.5 Td (scanned tables.) Tj ET
+0 g BT /F1 10 Tf 72 156 Td (Reference managers made a different habit) Tj ET
+0 g BT /F1 10 Tf 72 143.5 Td (popular: copying a formatted citation) Tj ET
+0 g BT /F1 10 Tf 72 131 Td (straight from the document being read. The) Tj ET
+0 g BT /F1 10 Tf 72 118.5 Td (metadata is often incomplete, so a good) Tj ET
+0 g BT /F1 10 Tf 72 106 Td (reader combines the document information) Tj ET
+0 g BT /F1 10 Tf 72 93.5 Td (dictionary, embedded XMP and what is printed) Tj ET
+0 g BT /F1 10 Tf 72 81 Td (on the first page.) Tj ET
+0 g BT /F3 11 Tf 316 555 Td (3  Method) Tj ET
+0 g BT /F1 10 Tf 316 540.5 Td (We read the first two pages, group text runs) Tj ET
+0 g BT /F1 10 Tf 316 528 Td (into lines, and treat the largest type near) Tj ET
+0 g BT /F1 10 Tf 316 515.5 Td (the top of the first page as the title.) Tj ET
+0 g BT /F1 10 Tf 316 503 Td (Name-shaped lines directly underneath become) Tj ET
+0 g BT /F1 10 Tf 316 490.5 Td (the author list, and identifiers such as a) Tj ET
+0 g BT /F1 10 Tf 316 478 Td (DOI or an arXiv number are matched with) Tj ET
+0 g BT /F1 10 Tf 316 465.5 Td (conservative patterns.) Tj ET
+0 g BT /F1 10 Tf 316 448 Td (Online enrichment is never automatic. Only) Tj ET
+0 g BT /F1 10 Tf 316 435.5 Td (when the reader asks for exact metadata does) Tj ET
+0 g BT /F1 10 Tf 316 423 Td (the application contact the DOI resolver,) Tj ET
+0 g BT /F1 10 Tf 316 410.5 Td (which answers with structured data in the) Tj ET
+0 g BT /F1 10 Tf 316 398 Td (citation style language format.) Tj ET
+0 g BT /F3 11 Tf 316 380.5 Td (4  Evaluation) Tj ET
+0 g BT /F1 10 Tf 316 366 Td (The fixture deliberately ships a useless) Tj ET
+0 g BT /F1 10 Tf 316 353.5 Td (information dictionary: its title is the) Tj ET
+0 g BT /F1 10 Tf 316 341 Td (name of a word processor file and its author) Tj ET
+0 g BT /F1 10 Tf 316 328.5 Td (is an account name. Both must be ignored in) Tj ET
+0 g BT /F1 10 Tf 316 316 Td (favour of the printed front matter.) Tj ET
+0 g BT /F1 10 Tf 316 298.5 Td (The second page cites another work by its) Tj ET
+0 g BT /F1 10 Tf 316 286 Td (DOI. That identifier belongs to the cited) Tj ET
+0 g BT /F1 10 Tf 316 273.5 Td (work, not to this document, and must not be) Tj ET
+0 g BT /F1 10 Tf 316 261 Td (reported as the DOI of this paper.) Tj ET
+0 g BT /F1 10 Tf 316 243.5 Td (Further filler text follows to fill the) Tj ET
+0 g BT /F1 10 Tf 316 231 Td (right column. Reading aids are only useful) Tj ET
+0 g BT /F1 10 Tf 316 218.5 Td (when they are predictable, so the ruler) Tj ET
+0 g BT /F1 10 Tf 316 206 Td (snaps to real text lines rather than to) Tj ET
+0 g BT /F1 10 Tf 316 193.5 Td (fixed pixel steps, and it follows the) Tj ET
+0 g BT /F1 10 Tf 316 181 Td (reading order of columns.) Tj ET
+0 g BT /F1 10 Tf 316 163.5 Td (When the last line on a page is reached,) Tj ET
+0 g BT /F1 10 Tf 316 151 Td (moving further continues on the next page.) Tj ET
+0 g BT /F1 10 Tf 316 138.5 Td (In paged layouts this turns the page; in) Tj ET
+0 g BT /F1 10 Tf 316 126 Td (continuous layouts the view scrolls so that) Tj ET
+0 g BT /F1 10 Tf 316 113.5 Td (the band stays comfortably inside the) Tj ET
+0 g BT /F1 10 Tf 316 101 Td (window.) Tj ET
+0 g BT /F1 9 Tf 300 40 Td (1) Tj ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R /Resources << /Font << /F1 3 0 R /F2 7 0 R /F3 4 0 R >> >> >>
+endobj
+10 0 obj
+<< /Length 2583 >>
+stream
+0 g BT /F1 10 Tf 72 740 Td (This document is a test fixture for SoloPDF.) Tj ET
+0 g BT /F1 10 Tf 72 727.5 Td (It imitates the front page of a machine) Tj ET
+0 g BT /F1 10 Tf 72 715 Td (learning preprint so that the citation) Tj ET
+0 g BT /F1 10 Tf 72 702.5 Td (extractor has something realistic to read: a) Tj ET
+0 g BT /F1 10 Tf 72 690 Td (large title, a list of authors with) Tj ET
+0 g BT /F1 10 Tf 72 677.5 Td (affiliation marks, an abstract and two) Tj ET
+0 g BT /F1 10 Tf 72 665 Td (columns of running text.) Tj ET
+0 g BT /F1 10 Tf 72 647.5 Td (The paragraphs below are filler. They exist) Tj ET
+0 g BT /F1 10 Tf 72 635 Td (so that the reading ruler has many lines to) Tj ET
+0 g BT /F1 10 Tf 72 622.5 Td (walk through, and so that those lines sit in) Tj ET
+0 g BT /F1 10 Tf 72 610 Td (two columns whose baselines do not quite) Tj ET
+0 g BT /F1 10 Tf 72 597.5 Td (agree. A reader moving down the left column) Tj ET
+0 g BT /F1 10 Tf 72 585 Td (should stay in the left column until it) Tj ET
+0 g BT /F1 10 Tf 72 572.5 Td (ends, and only then continue at the top of) Tj ET
+0 g BT /F1 10 Tf 72 560 Td (the right one.) Tj ET
+0 g BT /F1 10 Tf 72 542.5 Td (Line focus tools are an accessibility aid.) Tj ET
+0 g BT /F1 10 Tf 72 530 Td (People with dyslexia or attention) Tj ET
+0 g BT /F1 10 Tf 72 517.5 Td (difficulties often lose their place on a) Tj ET
+0 g BT /F1 10 Tf 72 505 Td (dense page; a band that brightens the) Tj ET
+0 g BT /F1 10 Tf 72 492.5 Td (current line and dims the rest keeps the eye) Tj ET
+0 g BT /F1 10 Tf 72 480 Td (anchored without changing the layout of the) Tj ET
+0 g BT /F1 10 Tf 72 467.5 Td (document itself.) Tj ET
+0 g BT /F3 11 Tf 72 450 Td (2  Background) Tj ET
+0 g BT /F1 10 Tf 72 435.5 Td (Desktop readers have offered a magnifying) Tj ET
+0 g BT /F1 10 Tf 72 423 Td (loupe for many years. Holding a key shows a) Tj ET
+0 g BT /F1 10 Tf 72 410.5 Td (circle that renders the area under the) Tj ET
+0 g BT /F1 10 Tf 72 398 Td (pointer at a higher resolution, which helps) Tj ET
+0 g BT /F1 10 Tf 72 385.5 Td (with small print in figures, footnotes and) Tj ET
+0 g BT /F1 10 Tf 72 373 Td (scanned tables.) Tj ET
+0 g BT /F3 11 Tf 316 740 Td (References) Tj ET
+0 g BT /F1 10 Tf 316 725.5 Td ([1] A. Author and B. Author. Reading) Tj ET
+0 g BT /F1 10 Tf 316 713 Td (documents at scale. Journal of Tools,) Tj ET
+0 g BT /F1 10 Tf 316 700.5 Td (12\(3\):1-20, 2019. doi:10.1000/other.2019.001) Tj ET
+0 g BT /F1 10 Tf 316 683 Td ([2] C. Writer. A survey of PDF readers.) Tj ET
+0 g BT /F1 10 Tf 316 670.5 Td (Tech. report, 2020.) Tj ET
+0 g BT /F1 9 Tf 300 40 Td (2) Tj ET
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 10 0 R /Resources << /Font << /F1 3 0 R /F2 7 0 R /F3 4 0 R >> >> >>
+endobj
+12 0 obj
+<< /Title (Microsoft Word - nips2017_final.docx) /Author (admin) /Producer (SoloPDF gen-citation-fixture) /CreationDate (D:20171206120000Z) >>
+endobj
+xref
+0 13
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000128 00000 n 
+0000000225 00000 n 
+0000000327 00000 n 
+0000000499 00000 n 
+0000000693 00000 n 
+0000000828 00000 n 
+0000007158 00000 n 
+0000007304 00000 n 
+0000009939 00000 n 
+0000010087 00000 n 
+trailer
+<< /Size 13 /Root 1 0 R /Info 12 0 R >>
+startxref
+10246
+%%EOF

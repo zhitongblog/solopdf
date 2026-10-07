@@ -14,6 +14,7 @@
  *   solopdf dict <word>                         # bundled offline dictionary
  *   solopdf translate "text" [--to zh-Hans]     # on-device translation (macOS)
  *   solopdf doc <…>                             # page ops, merge, compress, …
+ *   solopdf cite <file.pdf> [--format bibtex|apa|gbt|json] [--online]
  *
  * Used by Claude/CI for self-testing (global rule #2) and by users for
  * scripting. Read-only EXCEPT the commands that name an explicit output
@@ -26,6 +27,7 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import {
   parse, orderLinesForReading, pageLinks, normalizePageLabels, formatPageLabelRanges, exportSpec,
   pickTarget, guessLang, providerReady, translateWithProvider,
+  readCitationInput, extractCitation, formatCitation, fetchDoiMetadata, CITE_FORMATS, pageDeepLink,
 } from '@solopdf/core'
 
 // piping into `head` etc. closes stdout early — exit quietly instead of crashing
@@ -529,6 +531,41 @@ async function cmdDoc(rest) {
   process.exit(r.status ?? 1)
 }
 
+/**
+ * Citation for a paper: offline from metadata + first pages; --online asks
+ * doi.org for the exact record (the ONLY network request, and only on this
+ * explicit flag). --format all|json prints every format / the raw fields.
+ */
+async function cmdCite(file) {
+  const fmt = flag('format') ?? 'all'
+  if (![...CITE_FORMATS, 'all', 'json'].includes(fmt)) die(`--format 取值: ${CITE_FORMATS.join(' | ')} | all | json`)
+  const doc = await open(file)
+  let meta = extractCitation(await readCitationInput(doc, path.basename(file)))
+  let onlineError = null
+  if (args.includes('--online')) {
+    try {
+      meta = await fetchDoiMetadata(meta, (url, init) => fetch(url, init))
+    } catch (e) {
+      onlineError = e.message
+      console.error(`联网获取失败（已退回离线结果）: ${e.message}`)
+    }
+  }
+  if (fmt === 'json') {
+    console.log(JSON.stringify({
+      file: path.resolve(file),
+      ...meta,
+      link: pageDeepLink(path.resolve(file), 1),
+      citations: Object.fromEntries(CITE_FORMATS.map((f) => [f, formatCitation(meta, f)])),
+      ...(onlineError ? { onlineError } : {}),
+    }, null, 2))
+  } else if (fmt === 'all') {
+    for (const f of CITE_FORMATS) console.log(`── ${f} ──\n${formatCitation(meta, f)}\n`)
+  } else {
+    console.log(formatCitation(meta, fmt))
+  }
+  await doc.destroy()
+}
+
 async function cmdSelftest(dir) {
   // acceptance sweep over the standard fixture set (design doc test plan)
   const cases = [
@@ -593,6 +630,7 @@ switch (cmd) {
   case 'dict': await cmdDict(file ?? die('用法: solopdf dict <词>')); break
   case 'translate': await cmdTranslate(file ?? die('用法: solopdf translate "文字"|- [--to zh-Hans] [--online] [--provider deepl|openai …]')); break
   case 'doc': await cmdDoc(args.slice(1)); break
+  case 'cite': await cmdCite(file ?? die('用法: solopdf cite <file.pdf> [--format bibtex|apa|gbt|all|json] [--online]')); break
   case 'selftest': await cmdSelftest(file ?? die('用法: solopdf selftest <fixtures-dir>')); break
   default:
     console.log(`solopdf — SoloPDF 命令行工具（与应用同一渲染引擎）
@@ -610,6 +648,8 @@ switch (cmd) {
   solopdf search <dir> <query>                     跨文件搜索（批注优先，再正文）
   solopdf dict <词>                                内置离线词典（CC-CEDICT）
   solopdf translate "文字" [--to zh-Hans]          翻译：macOS 用本机 Apple 翻译；可选 --provider deepl|openai
+  solopdf cite <file.pdf> [--format bibtex|apa|gbt|json] [--online]
+                                                   引用信息（DOI/arXiv/标题/作者/年份；--online 才联网查 doi.org）
   solopdf doc <子命令> …                            页面/合并/拆分/压缩/加密（solopdf-doc）
   solopdf selftest <fixtures-dir>                  标准测试集验收
 

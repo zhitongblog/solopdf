@@ -1400,3 +1400,72 @@ g.pv-hl-flash, .pv-textbox.pv-hl-flash { animation: drawflash 1.5s ease; }
 .pv-split > .pv-scroll.pv-focused { outline: 2px solid var(--split-focus); outline-offset: -2px; }
 :root { --split-focus: rgba(58, 109, 240, 0.45); }
 html.dark { --split-focus: rgba(107, 149, 255, 0.5); }
+
+/* ── reading aids: ruler (line focus), loupe, citation ── */
+.ruler-layer {
+  position: fixed; z-index: 30; overflow: hidden; pointer-events: none;
+}
+/* the band is a hole in the dimming: its huge shadow is the dim layer, so
+   the clipped overlay needs no second element and the band edge stays crisp */
+.ruler-band {
+  position: absolute; border-radius: 5px;
+  box-shadow: 0 0 0 200vmax rgba(0, 0, 0, var(--ruler-dim, 0.45));
+  outline: 1.5px solid rgba(58, 109, 240, 0.55);
+  transition: top 0.08s ease-out, height 0.08s ease-out, left 0.08s ease-out, width 0.08s ease-out;
+}
+html.dark .ruler-band { box-shadow: 0 0 0 200vmax rgba(0, 0, 0, calc(var(--ruler-dim, 0.45) + 0.1)); }
+/* grip: the one part that takes pointer input — drag the band on touch */
+.ruler-grip {
+  position: absolute; right: -22px; top: 50%; transform: translateY(-50%);
+  width: 18px; height: 34px; border-radius: 9px;
+  background: var(--accent); opacity: 0.85; pointer-events: auto; cursor: ns-resize;
+  touch-action: none;
+}
+.ruler-grip::after {
+  content: ''; position: absolute; left: 5px; right: 5px; top: 50%; height: 8px; margin-top: -4px;
+  border-top: 2px solid rgba(255, 255, 255, 0.85); border-bottom: 2px solid rgba(255, 255, 255, 0.85);
+}
+@media (pointer: coarse) {
+  .ruler-grip { right: -32px; width: 28px; height: 44px; border-radius: 14px; }
+}
+.loupe {
+  position: fixed; z-index: 90; pointer-events: none; border-radius: 50%; overflow: hidden;
+  border: 3px solid var(--bg-panel);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25), 0 8px 28px rgba(0, 0, 0, 0.35);
+  background: var(--bg);
+}
+.loupe canvas { display: block; }
+.loupe canvas.pv-inverted { filter: invert(0.93) hue-rotate(180deg); }
+.loupe-zoom {
+  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+  font-size: 10px; padding: 1px 6px; border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55); color: #fff;
+}
+.vm-ruler .vm-key { margin-left: auto; }
+.vm-loupe { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--fg-dim); }
+.vm-loupe .vm-seg { flex: 1; margin: 0; }
+.vm-cite { margin-top: 8px; }
+.cite-panel { width: 560px; }
+.ci-grid { display: grid; grid-template-columns: max-content 1fr; gap: 6px 10px; align-items: center; }
+.ci-grid > label { font-size: 12px; color: var(--fg-dim); text-align: right; }
+.ci-field { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ci-field input { flex: 1; min-width: 0; }
+.ci-short input { flex: 0 0 80px; }
+.ci-src { font-size: 10px; color: var(--fg-dim); white-space: nowrap; }
+.ci-id { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ci-link { padding: 1px 7px; }
+.ci-fmt { margin: 14px 0 6px; }
+.ci-out {
+  margin: 0; padding: 10px 12px; max-height: 220px; overflow: auto;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap; word-break: break-word; user-select: text;
+}
+.ci-online { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.ci-note { font-size: 11px; color: var(--fg-dim); line-height: 1.35; }
+@media (max-width: 700px) {
+  .ci-grid { grid-template-columns: 1fr; }
+  .ci-grid > label { text-align: left; }
+  .cite-panel .modal-actions { flex-wrap: wrap; }
+  .cite-panel button { min-height: 40px; }
+}

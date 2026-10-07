@@ -132,6 +132,23 @@ export interface Settings {
   splitDir: 'row' | 'col'
   /** selection translation */
   translate: TranslateSettings
+  /** reading aids: line-focus ruler, magnifier loupe, citation format */
+  aids: AidSettings
+}
+
+export interface AidSettings {
+  /** reading ruler (line focus) on */
+  ruler: boolean
+  /** lines kept bright: 1, 3 or 5 */
+  rulerLines: 1 | 3 | 5
+  /** opacity of the dimming outside the band, 0.15–0.85 */
+  rulerDim: number
+  /** the band follows the mouse pointer (keys always move it) */
+  rulerFollow: boolean
+  /** loupe magnification, 2–4 */
+  loupeZoom: number
+  /** last citation format picked */
+  citeFormat: 'bibtex' | 'apa' | 'gbt'
 }
 
 export interface TranslateSettings {
@@ -217,6 +234,8 @@ export const DEFAULT_SETTINGS: Settings = {
     target: '',
     provider: { kind: 'off', deeplKey: '', baseUrl: 'https://api.openai.com/v1', apiKey: '', model: '' },
   },
+  // no hover on a phone: there the band is dragged by its handle
+  aids: { ruler: false, rulerLines: 1, rulerDim: 0.45, rulerFollow: !MOBILE, loupeZoom: 3, citeFormat: 'bibtex' },
 }
 
 export function applyLanguage(): void {
@@ -275,6 +294,8 @@ export interface BookApi {
   blocks(): HTMLElement[]
   /** advance one screen/section; false when the book ends */
   advance(): Promise<boolean>
+  /** back one screen/section; false at the start */
+  retreat(): Promise<boolean>
 }
 export const bookApis = new Map<number, BookApi>()
 
@@ -313,6 +334,7 @@ export async function initStore(): Promise<void> {
     store.settings.tts = { ...DEFAULT_SETTINGS.tts, ...(s.settings.tts ?? {}) }
     store.settings.comic = { ...DEFAULT_SETTINGS.comic, ...(s.settings.comic ?? {}) }
     store.settings.draw = { ...DEFAULT_SETTINGS.draw, ...(s.settings.draw ?? {}) }
+    store.settings.aids = { ...DEFAULT_SETTINGS.aids, ...(s.settings.aids ?? {}) }
     store.settings.translate = {
       ...DEFAULT_SETTINGS.translate,
       ...(s.settings.translate ?? {}),

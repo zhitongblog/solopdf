@@ -70,6 +70,11 @@ export function genId(): string {
   return s
 }
 
+/** link to a page of a document (no annotation) — "Copy link to this page" */
+export function pageDeepLink(file: string, page: number): string {
+  return `solopdf://open?file=${encodeURIComponent(file)}&page=${page}`
+}
+
 export function deepLink(file: string, page: number, annot: string): string {
   return `solopdf://open?file=${encodeURIComponent(file)}&page=${page}&annot=${annot}`
 }

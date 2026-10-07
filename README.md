@@ -50,6 +50,13 @@ SoloPDF：秒开、零广告、零遥测（更新检查可完全关闭）、永�
   引擎:macOS/iOS 用系统 Vision(零体积),Windows/Linux 内置 PP-OCRv4 ONNX(离线模型)
 - **表单填写**：AcroForm 文本框/勾选/下拉直接填写，"保存已填表单"导出副本（原文件永不改动）
 - 打印（分批渲染，500 页不爆内存）
+- **阅读辅助**：阅读标尺（行聚焦，读障/注意力辅助）——高亮当前 1/3/5 行、其余调暗，
+  跟随鼠标或 ↑↓ / j/k 按**分栏顺序**逐行移动（双栏论文先读完左栏），到页尾自动翻页；
+  PDF 视图（含分屏）与图书模式都可用，手机上拖动把手，快捷键 L；
+  **放大镜**（桌面）：按住 Z 悬停页面，2–4× 高清重渲染而非放大模糊位图
+- **复制引用**：从 XMP / 文档属性 / 首页排版识别标题、作者、年份、DOI、arXiv 号，
+  一键复制 BibTeX / APA / GB/T 7714（字段可就地修改）；「获取精确元数据」才联网查
+  doi.org（永不自动）；「复制本页链接」给出 `solopdf://` 深链
 - **格式**：PDF · EPUB · TXT · MOBI/AZW3 · CBZ/CBR 漫画 · DjVu
 
 ## 结构
@@ -74,6 +81,7 @@ node cli/src/index.mjs annotate <file.pdf> --out x.pdf      # 伴生批注 → �
 node cli/src/index.mjs to-images <file.pdf> --out-dir d     # 页面 → PNG/JPEG
 node cli/src/index.mjs search <dir> <query>                 # 跨文件搜索
 node cli/src/index.mjs dict 汉字                             # 内置离线词典
+node cli/src/index.mjs cite paper.pdf --format bibtex       # 引用（bibtex|apa|gbt|all|json；--online 才查 doi.org）
 node cli/src/index.mjs ocr scan.pdf --out scan-ocr.pdf      # 本地 OCR → 可搜索 PDF
 node cli/src/index.mjs ocr scan.pdf --out scan.md           # 本地 OCR → Markdown
 node cli/src/index.mjs ocr photo.jpg                        # 图片 → 文字（stdout）
@@ -107,7 +115,7 @@ claude mcp add solopdf -- node /path/to/pdf/dev-mcp/src/index.mjs --allow-write
 只读工具：`solopdf_info` / `solopdf_extract_text` / `solopdf_search` /
 `solopdf_search_library`（跨文件夹）/ `solopdf_read_annotations` /
 `solopdf_page_image` / `solopdf_define`（离线词典）/ `solopdf_links` /
-`solopdf_translate`。
+`solopdf_translate` / `solopdf_cite`（引用信息，`online: true` 才联网）。
 
 写门控（`--allow-write`）：`solopdf_add_annotation` /
 `solopdf_export_annotated_pdf` / `solopdf_pages` / `solopdf_merge`。
