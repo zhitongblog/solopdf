@@ -1410,12 +1410,12 @@ const en: Dict = {
   'un.edit': 'Edit {kind}',
   'un.multi': '{n} annotation changes',
   'un.import': 'Import of {n} PDF annotations',
-  'imp.banner': 'This PDF has {n} annotations from another app',
+  'imp.banner': 'This PDF has {n} annotation{s:n} from another app',
   'imp.action': 'Import into notes',
   'imp.dismiss': "Don't show again (you can still import from the Annotations sidebar)",
-  'imp.sidebar': '{n} annotations in this PDF from another app are not in your notes yet',
+  'imp.sidebar': 'Not in your notes yet: {n} annotation{s:n} from another app',
   'imp.fromPdf': 'Imported from the PDF',
-  'imp.done': 'Imported {n} annotations → {file} (⌘Z to undo)',
+  'imp.done': 'Imported {n} annotation{s:n} → {file} (⌘Z to undo)',
   'imp.none': 'Nothing new to import',
   'un.annot': 'Annotation',
   'un.nothingUndo': 'Nothing to undo',
@@ -2519,7 +2519,11 @@ function adaptShortcuts(s: string): string {
 
 export function t(key: string, vars?: Record<string, string | number>): string {
   let s = DICTS[currentLocale.value][key] ?? DICTS['zh-CN'][key] ?? key
-  if (vars) for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, String(v))
+  if (vars) {
+    // English plural: "annotation{s:n}" → "annotation" when n is 1, else "annotations"
+    s = s.replace(/\{s:(\w+)\}/g, (_, k: string) => (Number(vars[k]) === 1 ? '' : 's'))
+    for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, String(v))
+  }
   return adaptShortcuts(s)
 }
 
