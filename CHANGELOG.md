@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 未发布
+## v0.8.0 — 导入别人的批注、比较两版文档、FB2 / TIFF、问 AI
 
 ### 导入其他应用的注释
 - 打开含 Acrobat / 预览 / PDF Expert / Zotero 等留下注释的 PDF 时提示「导入到笔记」：
