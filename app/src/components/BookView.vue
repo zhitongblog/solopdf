@@ -179,6 +179,19 @@ onMounted(async () => {
       await nextTick()
       return h.scrollTop > before
     },
+    retreat: async () => {
+      if (layout.value === 'paged') {
+        if (pageIdx.value <= 0 && secIdx.value <= 0) return false
+        await turn(-1)
+        return true
+      }
+      const h = host.value
+      if (!h) return false
+      const before = h.scrollTop
+      h.scrollTop = before - h.clientHeight * 0.9
+      await nextTick()
+      return h.scrollTop < before
+    },
   })
 })
 
@@ -560,6 +573,7 @@ function tocJump(chapter: number): void {
   <div
     ref="host"
     class="bk-scroll"
+    :data-book-tab="tabId"
     :class="{ 'bk-paged': layout === 'paged' }"
     :style="rootStyle"
     @scroll="onScroll"
@@ -690,6 +704,20 @@ function tocJump(chapter: number): void {
         <label>{{ t('bk.autoSpeed') }}</label>
         <input type="range" min="10" max="200" step="5" v-model.number="store.settings.bookAutoSpeed" />
         <span class="bk-val">{{ store.settings.bookAutoSpeed }}</span>
+      </div>
+      <div class="bk-row">
+        <label>{{ t('ra.ruler') }}</label>
+        <button class="bk-auto-btn bk-ruler-btn" :class="{ active: store.settings.aids.ruler }" @click="store.settings.aids.ruler = !store.settings.aids.ruler">
+          {{ store.settings.aids.ruler ? t('ra.on') : t('ra.off') }}
+        </button>
+      </div>
+      <div class="bk-row" v-if="store.settings.aids.ruler">
+        <label>{{ t('ra.linesLabel') }}</label>
+        <select v-model.number="store.settings.aids.rulerLines">
+          <option :value="1">{{ t('ra.lines', { n: 1 }) }}</option>
+          <option :value="3">{{ t('ra.lines', { n: 3 }) }}</option>
+          <option :value="5">{{ t('ra.lines', { n: 5 }) }}</option>
+        </select>
       </div>
       <div class="bk-row" v-if="layout === 'scroll'">
         <label>{{ t('bk.widthLabel') }}</label>

@@ -18,7 +18,7 @@ import { isMobile } from '../platform'
 import { splitAvailable } from '../viewer/split'
 
 defineProps<{ readingFs?: boolean }>()
-const emit = defineEmits<{ close: []; toast: [msg: string]; fullscreen: []; present: []; split: [dir: 'row' | 'col' | null] }>()
+const emit = defineEmits<{ close: []; toast: [msg: string]; fullscreen: []; present: []; split: [dir: 'row' | 'col' | null]; cite: [] }>()
 
 const tab = computed(() => store.activeTab)
 const ctrl = computed(() => { void store.docTick; return tab.value ? controllers.get(tab.value.id) : undefined })
@@ -239,6 +239,52 @@ const fsKey = isMac ? '⌃⌘F' : 'F11'
         <input type="checkbox" v-model="store.settings.keepAwake" />
         {{ t('vm.keepAwake') }}
       </label>
+
+      <h4>{{ t('ra.title') }}</h4>
+      <label class="vm-check vm-ruler">
+        <input type="checkbox" v-model="store.settings.aids.ruler" />
+        {{ t('ra.ruler') }}
+        <span class="vm-key" v-if="!isMobile()">L</span>
+      </label>
+      <template v-if="store.settings.aids.ruler">
+        <div class="vm-seg">
+          <button
+            v-for="n in ([1, 3, 5] as const)" :key="n"
+            :class="{ active: store.settings.aids.rulerLines === n }"
+            @click="store.settings.aids.rulerLines = n"
+          >{{ t('ra.lines', { n }) }}</button>
+        </div>
+        <div class="vm-slider">
+          <label>{{ t('ra.dim') }}</label>
+          <input
+            type="range" min="0.15" max="0.85" step="0.05"
+            :value="store.settings.aids.rulerDim"
+            @input="store.settings.aids.rulerDim = Number(($event.target as HTMLInputElement).value)"
+          />
+          <span class="vm-val">{{ pct(store.settings.aids.rulerDim) }}</span>
+        </div>
+        <label class="vm-check" v-if="!isMobile()">
+          <input type="checkbox" v-model="store.settings.aids.rulerFollow" />
+          {{ t('ra.follow') }}
+        </label>
+        <p class="vm-note">{{ isMobile() ? t('ra.hintTouch') : t('ra.hintKeys') }}</p>
+      </template>
+      <template v-if="!isMobile()">
+        <div class="vm-loupe">
+          <span>{{ t('ra.loupe') }}</span>
+          <div class="vm-seg">
+            <button
+              v-for="z in [2, 3, 4]" :key="z"
+              :class="{ active: store.settings.aids.loupeZoom === z }"
+              @click="store.settings.aids.loupeZoom = z"
+            >{{ z }}×</button>
+          </div>
+        </div>
+        <p class="vm-note">{{ t('ra.loupeHint') }}</p>
+      </template>
+      <div class="vm-row">
+        <button class="vm-cite" @click="emit('cite')">❝ {{ t('ra.cite') }}</button>
+      </div>
 
       <h4>{{ t('vm.autoScroll') }}</h4>
       <div class="vm-row">

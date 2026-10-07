@@ -13,7 +13,7 @@ defineProps<{ bookmarked?: boolean; tool?: 'none' | 'note' | 'region' | DrawTool
 defineEmits<{
   search: []; settings: []; print: []; saveFilled: []; exportMd: []; ocr: []
   book: []; view: []; rotate: []; bookmark: []; tool: [kind: 'note' | 'region' | 'draw']; docTools: []; speak: []
-  undo: []; redo: []; split: []
+  undo: []; redo: []; split: []; cite: []
 }>()
 
 const tab = computed(() => store.activeTab)
@@ -139,6 +139,7 @@ function zoom(dir: 1 | -1): void {
     <button v-if="isTauri()" :title="t('tb.docTools')" @click="$emit('docTools')">🛠</button>
     <button v-if="isTauri()" :title="t('tb.ocrTip')" @click="$emit('ocr')">{{ t('tb.ocr') }}</button>
     <button :title="t('tb.exportMdTip')" @click="$emit('exportMd')">MD↓</button>
+    <button class="cite-btn" :title="t('tb.cite')" @click="$emit('cite')">❝</button>
     <button :class="{ active: speaking }" :title="t('tb.speak')" @click="$emit('speak')">🔊</button>
     <button :title="t('tb.search')" @click="$emit('search')">🔍</button>
     <button v-if="!isMobile()" :title="t('tb.print')" @click="$emit('print')">🖨</button>

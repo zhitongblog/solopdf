@@ -57,6 +57,10 @@ import LibrarySearch from './components/LibrarySearch.vue'
 import ComicView from './components/ComicView.vue'
 import LinkPreview from './components/LinkPreview.vue'
 import PresentationView from './components/PresentationView.vue'
+import ReadingRuler from './components/ReadingRuler.vue'
+import MagnifierLoupe from './components/MagnifierLoupe.vue'
+import CitePanel from './components/CitePanel.vue'
+import { clipboardLog } from './clipboard'
 import { noteOpened, captureCover, addToLibrary } from './library'
 import { startStats, stopStats, noteTurn } from './stats'
 import { speaker, startReading, stopReading } from './readaloud'
@@ -88,6 +92,10 @@ const dictWord = ref<{ word: string; anchor: DOMRect | null } | null>(null)
  *  selection after clicks inside the panel collapse the live one */
 const translateReq = ref<{ text: string; anchor: DOMRect | null; sel: SelectionInfo | null; tabId: number } | null>(null)
 const statsOpen = ref(false)
+const citeOpen = ref(false)
+const rulerRef = ref<InstanceType<typeof ReadingRuler>>()
+const loupeRef = ref<InstanceType<typeof MagnifierLoupe>>()
+const citeRef = ref<InstanceType<typeof CitePanel>>()
 const librarySearchOpen = ref(false)
 const ocrOpen = ref(false)
 const imageOcrPath = ref('')
@@ -749,6 +757,9 @@ function onKey(e: KeyboardEvent): void {
     e.preventDefault()
     if (splitAvailable.value && tab?.kind === 'pdf' && !tab.bookMode) toggleSplit()
   }
+  else if (!mod && !e.altKey && (e.key === 'l' || e.key === 'L') && !isTyping(e)) {
+    if (rulerTarget.value.id) { e.preventDefault(); toggleRuler() }
+  }
   else if (!mod && e.key === 'Escape') {
     // Esc peels one layer: an open panel first, then full-screen reading
     if (searchOpen.value || settingsOpen.value || viewMenuOpen.value || translateReq.value) {
@@ -837,6 +848,22 @@ const pdfViewActive = computed(() => {
   return !!tab && tab.kind === 'pdf' && !tab.bookMode && !tab.loadError && controllers.has(tab.id)
 })
 const chromeHidden = computed(() => readingFs.value && pdfViewActive.value)
+
+// ── reading aids ──
+/** the ruler reads text: the PDF view (either pane) or the reflowed book view */
+const rulerTarget = computed(() => {
+  void store.docTick
+  const tab = store.activeTab
+  if (!tab || tab.loadError || tab.kind === 'comic' || tab.kind === 'djvu') return { id: 0, book: false }
+  return { id: tab.id, book: tab.bookMode || tab.kind !== 'pdf' }
+})
+function toggleRuler(): void {
+  const a = store.settings.aids
+  a.ruler = !a.ruler
+  showToast(t(a.ruler ? 'ra.rulerOn' : 'ra.rulerOff'))
+}
+/** the loupe magnifies rendered PDF pages, on a desktop, with no tool armed */
+const loupeEnabled = computed(() => !isMobile() && pdfViewActive.value && !presenting.value && tool.value === 'none')
 
 /** re-fit after the chrome around the scroll host appears/disappears — no
  *  window resize event fires for that, and the position must survive it */
@@ -1070,6 +1097,20 @@ onMounted(async () => {
     navState,
     preview,
     followPreview,
+    toggleRuler,
+    ruler: {
+      move: (dir: 1 | -1) => rulerRef.value?.move(dir),
+      snapAt: (x: number, y: number) => rulerRef.value?.snapAt(x, y),
+      info: () => rulerRef.value?.info(),
+    },
+    loupe: {
+      show: (x: number, y: number) => loupeRef.value?.show(x, y),
+      hide: () => loupeRef.value?.hide(),
+      info: () => loupeRef.value?.info(),
+    },
+    openCite: () => { citeOpen.value = true },
+    cite: () => citeRef.value,
+    clipboard: clipboardLog,
   }
 
   if (isTauri()) {
@@ -1191,6 +1232,7 @@ watch(() => store.settings.sidebarOpen, () => {
           @undo="undoAnnot('undo')"
           @redo="undoAnnot('redo')"
           @split="toggleSplit()"
+          @cite="citeOpen = true"
           :speaking="readAloud"
           @tool="onToolButton"
           :bookmarked="!!currentBookmark"
@@ -1284,6 +1326,14 @@ watch(() => store.settings.sidebarOpen, () => {
         >⤡</button>
       </div>
     </div>
+
+    <ReadingRuler
+      ref="rulerRef"
+      :tab-id="rulerTarget.id"
+      :book="rulerTarget.book"
+      :disabled="!!presenting"
+    />
+    <MagnifierLoupe ref="loupeRef" :tab-id="store.activeTabId" :enabled="loupeEnabled" />
 
     <HighlightPopover
       v-if="selection && tool === 'none' && !translateReq"
@@ -1389,6 +1439,7 @@ watch(() => store.settings.sidebarOpen, () => {
       @split="setSplit"
       @fullscreen="setReadingFs(!readingFs)"
       @present="startPresentation"
+      @cite="viewMenuOpen = false; citeOpen = true"
     />
     <PresentationView
       v-if="presenting"
@@ -1410,6 +1461,12 @@ watch(() => store.settings.sidebarOpen, () => {
       @close="librarySearchOpen = false"
       @toast="showToast"
       @open="(p, page, annot) => { librarySearchOpen = false; void openPath(p, { page, annot }) }"
+    />
+    <CitePanel
+      v-if="citeOpen && store.activeTab && documents.has(store.activeTab.id)"
+      ref="citeRef"
+      @close="citeOpen = false"
+      @toast="showToast"
     />
     <StatsPanel v-if="statsOpen" @close="statsOpen = false" @toast="showToast" />
     <SettingsPanel

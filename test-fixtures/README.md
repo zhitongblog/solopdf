@@ -12,6 +12,8 @@
 | `form-irs-w9.pdf` | 表单（AcroForm，v1 只读渲染） | 6 页 | IRS W-9 官方可填写表单 |
 | `chinese-wikipedia-hanzi.pdf` | 中文排版（数字文字层，文字提取已验证） | 28 页 | 中文维基百科「汉字」条目官方 PDF 导出（CC BY-SA） |
 | `smart-refs-paper.pdf` | 智能引用（无链接注释的论文：图/表/公式/参考文献 + 中文“图 3/表 1/公式 (2)”） | 4 页 / 6KB | 由 `scripts/gen-smartref-fixture.mjs` 手写生成（可复现），中文用非嵌入 STSong-Light |
+| `citation-paper.pdf` | 引用识别 + 阅读标尺（双栏正文）：Info 标题是 Word 占位名、作者是 admin，必须从首页排版取标题/8 位作者；arXiv 号在页眉；第 2 页参考文献里的 DOI 不能当成本文 DOI | 2 页 / 10KB | `node scripts/gen-citation-fixture.mjs` 生成；标题/作者为 arXiv:1706.03762 的书目信息（供 doi.org 联网补全对照），正文为自写占位文字 |
+| `citation-cn-paper.pdf` | 中文期刊首页：UTF-16 Info 标题/作者、页脚 DOI、收稿日期 → GB/T 7714 | 1 页 / 4KB | 同上脚本生成（非嵌入 STSong-Light） |
 | `encrypted-password-solopdf.pdf` | 加密 PDF（密码输入框 + 明文批注提示） | 28 页 / AES-256 | 由中文样本加密生成，**密码：`solopdf`** |
 | `page-labels-roman.pdf` | 页码标签（/PageLabels：封面 Cover、罗马数字前言 i–iv、正文从 1 重新起、附录 A-1–A-3） | 24 页 / 4KB | `node scripts/gen-page-labels-fixture.mjs` 手写 PDF 对象生成，可复现；每页印着“Physical page N - printed label X”，另有灰/蓝色块用于纸张颜色/反色检查 |
 | `annotated-by-other-apps.pdf` | 导入其他应用的注释（Highlight×3 含跨行与中文、Underline、StrikeOut、Squiggly、Text 便签+回复、FreeText、Ink、Square、Circle、带箭头的“\”斜线 Line、Line、Polygon；另有 Stamp（不支持→跳过）与 Hidden 高亮（不导入）） | 3 页 / 8KB | `node scripts/gen-annotated-fixture.mjs` 手写 PDF 对象生成，可复现；Courier/STSong 等宽排版，quadpoints 精确落在已知词上 |

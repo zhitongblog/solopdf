@@ -23,6 +23,7 @@ import {
   pickTarget, guessLang, providerReady, translateWithProvider,
   collectAttachments, uniqueNames, layerRows, findLockedOcgs, radioGroups,
   scanPdfAnnotations, buildImports, spliceImports, importSummary, importedRefs, needsLineFix, fixLineDirections,
+  readCitationInput, extractCitation, formatCitation, fetchDoiMetadata, CITE_FORMATS, pageDeepLink,
 } from '@solopdf/core'
 import { inflateSync } from 'node:zlib'
 
@@ -112,6 +113,34 @@ server.tool(
     }
     await doc.destroy()
     return text(out)
+  },
+)
+
+server.tool(
+  'solopdf_cite',
+  '论文引用信息（只读）：从 XMP/Info 元数据与前两页文字识别标题、作者、年份、DOI、arXiv 号，' +
+  '生成 BibTeX / APA / GB/T 7714 引用。online=true 时才联网向 doi.org 查精确元数据（默认完全离线）',
+  {
+    path: z.string(),
+    format: z.enum(['bibtex', 'apa', 'gbt', 'all']).default('all'),
+    online: z.boolean().default(false),
+    password: z.string().optional(),
+  },
+  async ({ path, format, online, password }) => {
+    const doc = await open(path, password)
+    let meta = extractCitation(await readCitationInput(doc, nodePath.basename(path)))
+    await doc.destroy()
+    let onlineError
+    if (online) {
+      try { meta = await fetchDoiMetadata(meta, (url, init) => fetch(url, init)) } catch (e) { onlineError = e.message }
+    }
+    const fmts = format === 'all' ? CITE_FORMATS : [format]
+    return text({
+      ...meta,
+      link: pageDeepLink(nodePath.resolve(path), 1),
+      citations: Object.fromEntries(fmts.map((f) => [f, formatCitation(meta, f)])),
+      ...(onlineError ? { onlineError } : {}),
+    })
   },
 )
 
