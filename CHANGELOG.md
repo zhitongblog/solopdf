@@ -2,6 +2,34 @@
 
 ## 未发布
 
+### 导入其他应用的注释
+- 打开含 Acrobat / 预览 / PDF Expert / Zotero 等留下注释的 PDF 时提示「导入到笔记」：
+  高亮、下划线、删除线、波浪线、便签（含回复）、文本框、手绘、矩形、椭圆、直线/箭头
+  全部转成 SoloPDF 批注写进伴生 Markdown（作者、日期、原文摘录保留），PDF 本身不改
+- 导入后原注释不再由 pdf.js 重复绘制；整次导入一步 ⌘Z 撤销；重复导入不会重复
+- CLI `import-annotations [--dry-run]`；MCP `solopdf_pdf_annotations` / `solopdf_import_annotations`（写门控）
+
+### 附件与图层
+- 「附件」侧栏：文档级附件 + 页面回形针；PDF/EPUB/图片直接在新标签打开，其他交给系统，
+  可执行文件只能另存
+- 「图层」侧栏（OCG）：开关图层，遵守单选组与锁定；分屏、缩略图、打印都跟随；按文档记忆
+- CLI `attachments [--extract dir]` / `layers`；MCP `solopdf_attachments` / `solopdf_layers` /
+  `solopdf_extract_attachment`（写门控）
+
+### 两文档并排 + 文档比较
+- 分屏右侧可以放另一份已打开的文档（视图菜单 / 标签右键 / 把标签拖到右半边），可同步滚动
+- 比较两版 PDF：按页对齐（插页、删页不会让后面全错位），逐词（中文逐字）标出新增/删除/修改，
+  侧栏「差异」列表可上一处/下一处；无文字层的页单独提示先 OCR
+- CLI `compare a.pdf b.pdf [--json]`；MCP `solopdf_compare`
+
+### 阅读辅助与引用
+- 阅读标尺（行聚焦，L 开关）：只亮当前 1/3/5 行，↑↓ / j/k 按分栏顺序逐行走，到页尾翻页；
+  PDF（含分屏）与图书模式都可用，手机上拖把手
+- 放大镜（桌面）：按住 Z 悬停，2–4× 高清重渲染
+- 复制引用：识别标题/作者/年份/DOI/arXiv，复制 BibTeX / APA / GB/T 7714；
+  「获取精确元数据」才联网查 doi.org
+- CLI `cite`；MCP `solopdf_cite`
+
 ### 新格式
 - **FB2（FictionBook）**：.fb2 / .fbz / .fb2.zip，走 EPUB 同一个图书视图——
   章节目录（嵌套 section）、内嵌 base64 图片、诗歌/题记/表格/脚注、封面进书架；
@@ -20,6 +48,8 @@
 - 漫画/DjVu 单页且旋转 90° 时图片被压成方形加黑边
 - CLI `search` 遇到加密 PDF 不再整体退出
 - MCP / CLI / 浏览器调试模式的伴生文件命名与应用一致（`书名.annotations.md`）
+- 打开「文档信息与引用」等对话框时，Esc 可关闭，阅读快捷键（L、j/k、⌘Z…）不再在背后触发
+
 ### 问 AI（默认关闭，自带服务）
 - 右侧面板（手机为底部抽屉，⌘J）：总结全文、总结本页/本章、自由提问；选区浮条加「AI 解释」
 - 本地检索：按页切块，BM25 排序（中日韩按双字切分），只把 top-k 相关段落连同页码发给模型；

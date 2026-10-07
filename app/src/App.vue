@@ -883,6 +883,12 @@ function onKey(e: KeyboardEvent): void {
   const tab = store.activeTab
   const ctrl = tab ? controllers.get(tab.id) : undefined
   if (presenting.value) return // PresentationView owns the keyboard
+  // modal dialogs: Esc closes them, and no reader shortcut (L, j/k, ⌘Z …)
+  // fires behind them
+  if (citeOpen.value || compareDialog.value) {
+    if (e.key === 'Escape') { citeOpen.value = false; compareDialog.value = null }
+    return
+  }
   // full screen: F11 (Windows/Linux habit) or ⌃⌘F (macOS standard) — checked
   // before ⌘F so the macOS chord doesn't open search
   if (e.key === 'F11' || (e.metaKey && e.ctrlKey && e.key.toLowerCase() === 'f')) {
