@@ -723,6 +723,168 @@ async fn pdf_remove_password(
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+async fn pdf_crop_pages(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    spec: pdfops::CropSpec,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-cropped", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::crop_pages(&pdf, password.as_deref(), &spec)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_watermark(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    mut spec: pdfops::WatermarkSpec,
+    image_path: Option<String>,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-watermarked", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        if let Some(ip) = image_path.filter(|s| !s.is_empty()) {
+            spec.image_png = fs::read(&ip).map_err(|e| format!("读取水印图片失败: {e}"))?;
+        }
+        write_out(dest, pdfops::watermark_pdf(&pdf, password.as_deref(), &spec)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_add_page_numbers(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    spec: pdfops::PageNumberSpec,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-numbered", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::add_page_numbers(&pdf, password.as_deref(), &spec)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize)]
+struct ExtractedImageOut {
+    path: String,
+    page: u32,
+    index: u32,
+    width: u32,
+    height: u32,
+    format: String,
+}
+
+#[tauri::command]
+async fn pdf_extract_images(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_dir: Option<String>,
+    password: Option<String>,
+    min_dim: u32,
+) -> Result<Vec<ExtractedImageOut>, String> {
+    let dir = match dest_dir {
+        Some(d) => PathBuf::from(d),
+        None => app.path().document_dir().map_err(|e| e.to_string())?,
+    };
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stem = Path::new(&src_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "document".into());
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        let imgs = pdfops::extract_images(&pdf, password.as_deref(), min_dim)?;
+        let mut out = Vec::new();
+        for img in imgs {
+            let fname = format!("{stem}-p{:03}-img{:03}.{}", img.page, img.index, img.ext);
+            let path = write_out(dir.join(fname), img.bytes)?;
+            out.push(ExtractedImageOut {
+                path,
+                page: img.page,
+                index: img.index,
+                width: img.width,
+                height: img.height,
+                format: img.format,
+            });
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize)]
+struct SanitizeResult {
+    path: String,
+    report: pdfops::SanitizeReport,
+}
+
+#[tauri::command]
+async fn pdf_sanitize(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    spec: pdfops::SanitizeSpec,
+) -> Result<SanitizeResult, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-sanitized", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        let (bytes, report) = pdfops::sanitize_pdf(&pdf, password.as_deref(), &spec)?;
+        Ok(SanitizeResult { path: write_out(dest, bytes)?, report })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_flatten(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-flattened", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::flatten_pdf(&pdf, password.as_deref())?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_redact(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    rects: Vec<pdfops::RedactRect>,
+    strip_metadata: bool,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-redacted", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::redact_pdf(&pdf, password.as_deref(), &rects, strip_metadata)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[derive(Serialize)]
 struct UserDict {
     name: String,
@@ -1451,6 +1613,13 @@ pub fn run() {
             pdf_stamp,
             pdf_set_password,
             pdf_remove_password,
+            pdf_crop_pages,
+            pdf_watermark,
+            pdf_add_page_numbers,
+            pdf_extract_images,
+            pdf_sanitize,
+            pdf_flatten,
+            pdf_redact,
             define_word,
             translate_text,
             translate_prepare,

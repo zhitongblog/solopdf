@@ -54,8 +54,13 @@ SoloPDF：秒开、零广告、零遥测（更新检查可完全关闭）、永�
 - **书架**：封面网格、阅读进度、收藏、标签、跨文档全文搜索（批注即时、
   正文按需建索引）
 - **阅读统计**：时长、连续天数、每本书进度——只存本机，可一键清空/导出
-- **文档工具**：页面管理（旋转/删除/提取/重排）、合并、拆分、
-  PDF ↔ 图片、压缩、手写签名与日期戳、设置/移除打开密码
+- **文档工具（全本地 Copy-out，原文件永不修改）**：
+  - **页面管理**：旋转、删除、提取、拖拽重排、**插入同尺寸空白页**、**复制页面**
+  - **永久裁切（Crop PDF）**：按边距或区域永久更新 `/CropBox` 与 `/MediaBox`；支持**一键自动检测全书白边**（含扫描件像素墨迹检测）及奇偶页对称装订边距
+  - **合并与拆分**：多文件排序合并；按页码范围、每 N 页、均分 N 份、或**按 PDF 目录书签章节自动拆分**
+  - **水印与页码**：文字水印（支持中文/CJK、满页平铺、旋转、置底）与透明 PNG 图片水印；页码与 **Bates 编号**（`{n}/{total}`、`DOC-{n:06}`、奇偶页外侧对齐）
+  - **转换与压缩**：PDF ↔ 图片、**无损提取 PDF 内嵌原图**（JPEG 直出 / PNG 透明通道合成）、**导出结构化 Markdown**（自动还原标题层级、列表、Markdown 表格）、重采样有损压缩
+  - **签名与安全隐私**：手写签名与日期戳、设置/移除 AES-256 打开密码、**密文涂黑真脱敏（Redact PDF：支持手机号/邮箱/身份证等预设扫描，从底层内容流彻底剔除文字并涂黑）**、**隐私与元数据清理（Sanitize：抹除 `/Info`/XMP/JS/附件/注释）**、**扁平化（Flatten：将批注与表单固化为静态页面）**
 - 暗色模式智能反色（纯文字页反色，含图片页保持原样）
 - 加密 PDF：会话内记住密码；批注可选"仅存批注不存原文摘录"隐私模式
 - 扫描版无文字层自动提示并禁用高亮
@@ -118,11 +123,22 @@ node cli/src/index.mjs retrieve paper.pdf "query" --k 6     # 本地检索最相
 #   AI 服务：--endpoint http://localhost:11434/v1 --model qwen2.5:7b [--key k]
 #   或环境变量 SOLOPDF_AI_ENDPOINT / SOLOPDF_AI_MODEL / SOLOPDF_AI_KEY；--json 输出结构化结果
 node cli/src/index.mjs selftest test-fixtures               # 标准测试集验收
+node cli/src/index.mjs export-md a.pdf --out a.md           # 导出结构化 Markdown（含标题/列表/表格）
+node cli/src/index.mjs auto-crop a.pdf --out a-cropped.pdf  # 自动检测全书白边并永久裁切
+node cli/src/index.mjs split-bookmarks a.pdf --out-dir dir  # 按目录书签章节拆分 PDF
+node cli/src/index.mjs redact-text a.pdf --terms "机密" --presets phone,email,idcard --out a-redacted.pdf
 
 # 文档操作（转发给原生驱动 solopdf-doc，全部写新文件）
-node cli/src/index.mjs doc pages a.pdf out.pdf --keep 1,3-5 --rotate 90
+node cli/src/index.mjs doc pages a.pdf out.pdf --keep 1,0,3-5 --rotate 90   # 0 = 插入空白页
 node cli/src/index.mjs doc merge out.pdf a.pdf b.pdf
 node cli/src/index.mjs doc split a.pdf outdir --ranges 1-3,4-10
+node cli/src/index.mjs doc watermark a.pdf out.pdf --text "机密" --pos tile --opacity 0.2
+node cli/src/index.mjs doc page-numbers a.pdf out.pdf --format "{n} / {total}" --pos bottom-outside
+node cli/src/index.mjs doc crop a.pdf out.pdf --margins 20,15,20,15
+node cli/src/index.mjs doc extract-images a.pdf outdir --min-dim 32
+node cli/src/index.mjs doc sanitize a.pdf out.pdf --annots 1 --attachments 1 --forms 1
+node cli/src/index.mjs doc flatten a.pdf out.pdf
+node cli/src/index.mjs doc redact a.pdf out.pdf rects.json
 node cli/src/index.mjs doc compress a.pdf out.pdf --max-dim 1600 --quality 72
 node cli/src/index.mjs doc protect a.pdf out.pdf --password pw
 node cli/src/index.mjs doc unprotect a.pdf out.pdf --password pw
@@ -151,10 +167,13 @@ claude mcp add solopdf -- node /path/to/pdf/dev-mcp/src/index.mjs --allow-write
 `solopdf_attachments`（嵌入附件）/ `solopdf_layers`（图层）/
 `solopdf_cite`（引用信息，`online: true` 才联网） /
 `solopdf_compare`（两版 PDF 的文字差异 + 页对齐） /
+`solopdf_export_markdown`（结构化 Markdown 导出） /
 `solopdf_retrieve`（本地 BM25 检索最相关的页段落，不调用模型、不联网——给外部 LLM 带页码引用作答用）。
 
 写门控（`--allow-write`）：`solopdf_add_annotation` /
 `solopdf_export_annotated_pdf` / `solopdf_import_annotations` / `solopdf_pages` / `solopdf_merge` /
+`solopdf_watermark` / `solopdf_page_numbers` / `solopdf_crop` / `solopdf_split_by_bookmarks` /
+`solopdf_extract_images` / `solopdf_sanitize` / `solopdf_flatten` / `solopdf_redact` / `solopdf_redact_by_text` /
 `solopdf_extract_attachment`（把附件写到目录）。
 
 ## 开发

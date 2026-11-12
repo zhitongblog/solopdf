@@ -26,6 +26,7 @@ import {
   readCitationInput, extractCitation, formatCitation, fetchDoiMetadata, CITE_FORMATS, pageDeepLink,
   compareDocuments,
   textFromItems, indexDocument, retrieve,
+  pdfToMarkdown, findRedactionRects, computeAutoCropMargins, splitByBookmarks,
 } from '@solopdf/core'
 import { inflateSync } from 'node:zlib'
 // FB2 / TIFF go through the CLI's format module (same core parser as the app)
@@ -574,6 +575,107 @@ server.tool(
   },
 )
 
+function itemsToLinesMcp(items, pageW, pageH) {
+  const frags = []
+  for (const it of items) {
+    if (!('str' in it) || !it.str || !it.str.trim()) continue
+    frags.push({
+      str: it.str,
+      x: it.transform[4],
+      yBase: it.transform[5],
+      w: it.width,
+      h: it.height || Math.abs(it.transform[3]) || 10,
+    })
+  }
+  frags.sort((a, b) => b.yBase - a.yBase || a.x - b.x)
+  const lines = []
+  let cur = []
+  const flush = () => {
+    if (!cur.length) return
+    cur.sort((a, b) => a.x - b.x)
+    let cell = [cur[0]]
+    const emitCell = (c) => {
+      let str = ''
+      let prevEnd = -1
+      for (const f of c) {
+        if (str && prevEnd >= 0) {
+          const gap = f.x - prevEnd
+          if (gap > f.h * 0.25 && !/[぀-ヿ㐀-鿿]$/.test(str) && !/^[぀-ヿ㐀-鿿]/.test(f.str)) str += ' '
+        }
+        str += f.str
+        prevEnd = f.x + f.w
+      }
+      const x0 = c[0].x
+      const x1 = Math.max(...c.map((f) => f.x + f.w))
+      const h = Math.max(...c.map((f) => f.h))
+      const yTopPdf = Math.max(...c.map((f) => f.yBase)) + h * 0.85
+      lines.push({
+        t: str,
+        x: x0 / pageW,
+        y: Math.min(Math.max(1 - yTopPdf / pageH, 0), 1),
+        w: (x1 - x0) / pageW,
+        h: h / pageH,
+        fontSize: h / pageH,
+      })
+    }
+    for (let i = 1; i < cur.length; i++) {
+      const prev = cur[i - 1]
+      const f = cur[i]
+      if (f.x - (prev.x + prev.w) > Math.max(f.h * 1.8, pageW * 0.03)) {
+        emitCell(cell)
+        cell = [f]
+      } else {
+        cell.push(f)
+      }
+    }
+    emitCell(cell)
+    cur = []
+  }
+  for (const f of frags) {
+    if (cur.length && Math.abs(f.yBase - cur[0].yBase) > Math.min(cur[0].h, f.h) * 0.5) flush()
+    cur.push(f)
+  }
+  flush()
+  return lines
+}
+
+server.tool(
+  'solopdf_export_markdown',
+  '将 PDF 转换为结构化 Markdown（只读）：自动识别标题层级（结合书签与字号）、段落、列表与对齐表格',
+  {
+    path: z.string(),
+    from: z.number().int().min(1).default(1),
+    to: z.number().int().min(1).optional(),
+    password: z.string().optional(),
+  },
+  async ({ path, from, to, password }) => {
+    const doc = await open(path, password)
+    const outline = []
+    const walk = async (items, depth) => {
+      for (const it of items ?? []) {
+        try {
+          let dest = it.dest
+          if (typeof dest === 'string') dest = await doc.getDestination(dest)
+          if (Array.isArray(dest) && dest[0]) outline.push({ title: it.title ?? '', page: (await doc.getPageIndex(dest[0])) + 1, depth })
+        } catch {}
+        if (it.items?.length) await walk(it.items, depth + 1)
+      }
+    }
+    await walk(await doc.getOutline().catch(() => null), 0)
+    const hi = Math.min(to ?? doc.numPages, doc.numPages)
+    const pages = []
+    for (let p = Math.min(from, hi); p <= hi; p++) {
+      const page = await doc.getPage(p)
+      const vp = page.getViewport({ scale: 1 })
+      const tc = await page.getTextContent()
+      pages.push({ page: p, lines: itemsToLinesMcp(tc.items, vp.width, vp.height) })
+    }
+    await doc.destroy()
+    const stem = nodePath.basename(path).replace(/\.pdf$/i, '')
+    return text(pdfToMarkdown(pages, outline, { title: stem }))
+  },
+)
+
 if (ALLOW_WRITE) {
   server.tool(
     'solopdf_extract_attachment',
@@ -689,6 +791,254 @@ if (ALLOW_WRITE) {
     async ({ out, inputs }) => {
       execFileSync(docBin(), ['merge', out, ...inputs])
       return text({ written: out, merged: inputs.length })
+    },
+  )
+
+  server.tool(
+    'solopdf_watermark',
+    '为 PDF 添加文字水印（支持中文/CJK、平铺 tile、旋转、置底）或 PNG 图片水印并另存为新文件（需 --allow-write）',
+    {
+      path: z.string(),
+      out: z.string(),
+      text: z.string().optional(),
+      image: z.string().optional(),
+      position: z.string().default('tile'),
+      opacity: z.number().min(0.02).max(1).default(0.22),
+      rotate: z.number().default(45),
+      fontSize: z.number().default(42),
+      under: z.boolean().default(false),
+      pages: z.string().optional(),
+      password: z.string().optional(),
+    },
+    async ({ path, out, text: wmText, image, position, opacity, rotate, fontSize, under, pages, password }) => {
+      const argv = [
+        'watermark', path, out,
+        '--pos', position,
+        '--opacity', String(opacity),
+        '--rotate', String(rotate),
+        '--font-size', String(fontSize),
+        '--under', under ? '1' : '0',
+      ]
+      if (wmText) argv.push('--text', wmText)
+      if (image) argv.push('--image', image)
+      if (pages) argv.push('--pages', pages)
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ written: out })
+    },
+  )
+
+  server.tool(
+    'solopdf_page_numbers',
+    '为 PDF 添加页码或 Bates 编号（支持 {n}、{n}/{total}、DOC-{n:06} 及奇偶页外侧对齐）并另存为新文件（需 --allow-write）',
+    {
+      path: z.string(),
+      out: z.string(),
+      format: z.string().default('{n} / {total}'),
+      position: z.string().default('bottom-center'),
+      start: z.number().int().min(1).default(1),
+      from: z.number().int().min(1).default(1),
+      to: z.number().int().min(0).default(0),
+      fontSize: z.number().default(10),
+      margin: z.number().default(28),
+      password: z.string().optional(),
+    },
+    async ({ path, out, format, position, start, from, to, fontSize, margin, password }) => {
+      const argv = [
+        'page-numbers', path, out,
+        '--format', format,
+        '--pos', position,
+        '--start', String(start),
+        '--from', String(from),
+        '--to', String(to),
+        '--font-size', String(fontSize),
+        '--margin', String(margin),
+      ]
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ written: out })
+    },
+  )
+
+  server.tool(
+    'solopdf_crop',
+    '永久裁切 PDF 页面边距（同时更新 /CropBox 与 /MediaBox）并另存为新文件（需 --allow-write）',
+    {
+      path: z.string(),
+      out: z.string(),
+      margins: z.string().describe('上,右,下,左（单位 pt，如 "20,15,20,15"）或单个统一数值'),
+      pages: z.string().optional(),
+      password: z.string().optional(),
+    },
+    async ({ path, out, margins, pages, password }) => {
+      const argv = ['crop', path, out, '--margins', margins]
+      if (pages) argv.push('--pages', pages)
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ written: out })
+    },
+  )
+
+  server.tool(
+    'solopdf_extract_images',
+    '从 PDF 无损提取内嵌原始图片（JPEG 直出 / PNG 含透明通道）到指定目录（需 --allow-write）',
+    {
+      path: z.string(),
+      outDir: z.string(),
+      minDim: z.number().int().min(1).default(32),
+      password: z.string().optional(),
+    },
+    async ({ path, outDir, minDim, password }) => {
+      const argv = ['extract-images', path, outDir, '--min-dim', String(minDim)]
+      if (password) argv.push('--password', password)
+      const stdout = execFileSync(docBin(), argv).toString()
+      return text(JSON.parse(stdout))
+    },
+  )
+
+  server.tool(
+    'solopdf_sanitize',
+    '清理 PDF 隐私元数据（/Info、XMP）、JavaScript 脚本、注释、内嵌附件或表单并另存为新文件（需 --allow-write）',
+    {
+      path: z.string(),
+      out: z.string(),
+      annotations: z.boolean().default(false),
+      attachments: z.boolean().default(false),
+      forms: z.boolean().default(false),
+      password: z.string().optional(),
+    },
+    async ({ path, out, annotations, attachments, forms, password }) => {
+      const argv = [
+        'sanitize', path, out,
+        '--annots', annotations ? '1' : '0',
+        '--attachments', attachments ? '1' : '0',
+        '--forms', forms ? '1' : '0',
+      ]
+      if (password) argv.push('--password', password)
+      const stdout = execFileSync(docBin(), argv).toString()
+      return text({ written: out, report: JSON.parse(stdout) })
+    },
+  )
+
+  server.tool(
+    'solopdf_flatten',
+    '将 PDF 中的注释、签名与表单外观固化到页面内容流中，移除可编辑控件并另存为新文件（需 --allow-write）',
+    {
+      path: z.string(),
+      out: z.string(),
+      password: z.string().optional(),
+    },
+    async ({ path, out, password }) => {
+      const argv = ['flatten', path, out]
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ written: out })
+    },
+  )
+
+  server.tool(
+    'solopdf_redact',
+    '密文涂黑真脱敏：指定 PDF 物理坐标矩形列表，从底层内容流剔除区域内文字、绘制黑框并清理元数据（需 --allow-write）',
+    {
+      path: z.string(),
+      out: z.string(),
+      rects: z.array(
+        z.object({
+          page: z.number().int().min(1),
+          rect: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+        }),
+      ).min(1),
+      password: z.string().optional(),
+    },
+    async ({ path, out, rects, password }) => {
+      const tmp = await mkdtemp(nodePath.join(os.tmpdir(), 'solopdf-redact-'))
+      try {
+        const json = nodePath.join(tmp, 'rects.json')
+        await writeFile(json, JSON.stringify(rects))
+        const argv = ['redact', path, out, json]
+        if (password) argv.push('--password', password)
+        execFileSync(docBin(), argv)
+        return text({ written: out, redactedRects: rects.length })
+      } finally {
+        await rm(tmp, { recursive: true, force: true })
+      }
+    },
+  )
+
+  server.tool(
+    'solopdf_split_by_bookmarks',
+    '按 PDF 目录书签章节自动拆分为多个独立 PDF 文件（需 --allow-write）',
+    {
+      path: z.string(),
+      outDir: z.string(),
+      maxDepth: z.number().int().min(0).max(2).default(0),
+      password: z.string().optional(),
+    },
+    async ({ path, outDir, maxDepth, password }) => {
+      const doc = await open(path, password)
+      const outline = []
+      const walk = async (items, depth) => {
+        for (const it of items ?? []) {
+          try {
+            let dest = it.dest
+            if (typeof dest === 'string') dest = await doc.getDestination(dest)
+            if (Array.isArray(dest) && dest[0]) outline.push({ title: it.title ?? '', page: (await doc.getPageIndex(dest[0])) + 1, depth })
+          } catch {}
+          if (it.items?.length) await walk(it.items, depth + 1)
+        }
+      }
+      await walk(await doc.getOutline().catch(() => null), 0)
+      const chapters = splitByBookmarks(outline, doc.numPages, { maxDepth })
+      await doc.destroy()
+      if (!chapters.length) throw new Error('该 PDF 没有可用的目录书签')
+      await mkdir(outDir, { recursive: true })
+      const argv = ['split', path, outDir, '--ranges', chapters.map((c) => c.rangeSpec).join(',')]
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ outDir, chapters })
+    },
+  )
+
+  server.tool(
+    'solopdf_redact_by_text',
+    '按敏感词或隐私预设（phone/email/idcard/bankcard/ipv4）在 PDF 中定位坐标并执行真脱敏涂黑（需 --allow-write）',
+    {
+      path: z.string(),
+      out: z.string(),
+      terms: z.array(z.string()).default([]),
+      presets: z.array(z.enum(['phone', 'email', 'idcard', 'bankcard', 'ipv4'])).default(['phone', 'email', 'idcard']),
+      regex: z.string().optional(),
+      password: z.string().optional(),
+    },
+    async ({ path, out, terms, presets, regex, password }) => {
+      const doc = await open(path, password)
+      const pages = []
+      for (let p = 1; p <= doc.numPages; p++) {
+        const page = await doc.getPage(p)
+        const vp = page.getViewport({ scale: 1 })
+        const tc = await page.getTextContent()
+        const lines = itemsToLinesMcp(tc.items, vp.width, vp.height)
+        pages.push({
+          page: p,
+          width: vp.width,
+          height: vp.height,
+          spans: lines.map((l) => ({ text: l.t, x: l.x, y: l.y, w: l.w, h: l.h })),
+        })
+      }
+      await doc.destroy()
+      const matches = findRedactionRects(pages, { terms, presets, regex })
+      if (!matches.length) return text({ count: 0, written: null })
+      const tmp = await mkdtemp(nodePath.join(os.tmpdir(), 'solopdf-redact-'))
+      try {
+        const json = nodePath.join(tmp, 'rects.json')
+        await writeFile(json, JSON.stringify(matches.map((m) => ({ page: m.page, rect: m.rect, color: [0, 0, 0], label: '' }))))
+        const argv = ['redact', path, out, json]
+        if (password) argv.push('--password', password)
+        execFileSync(docBin(), argv)
+        return text({ written: out, count: matches.length, matches })
+      } finally {
+        await rm(tmp, { recursive: true, force: true })
+      }
     },
   )
 }

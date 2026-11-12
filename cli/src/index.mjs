@@ -40,6 +40,7 @@ import {
   compareDocuments,
   txtToBlocks, textFromItems, indexDocument, searchChunks, askDocument, summarizeDocument, summarizePage,
   aiProviderReady, citedPages, uiLangToTarget,
+  pdfToMarkdown, splitByBookmarks, findRedactionRects, computeAutoCropMargins,
 } from '@solopdf/core'
 import { formatOf, loadFb2, fb2InfoJson, tiffInfoJson, tiffPages } from './formats.mjs'
 
@@ -247,9 +248,74 @@ async function cmdFormFields(file) {
   console.log(JSON.stringify({ file, count: Object.keys(out).length, fields: out }, null, 2))
 }
 
+function itemsToReflowLines(items, pageW, pageH) {
+  const frags = []
+  for (const it of items) {
+    if (!('str' in it) || !it.str || !it.str.trim()) continue
+    frags.push({
+      str: it.str,
+      x: it.transform[4],
+      yBase: it.transform[5],
+      w: it.width,
+      h: it.height || Math.abs(it.transform[3]) || 10,
+    })
+  }
+  frags.sort((a, b) => b.yBase - a.yBase || a.x - b.x)
+  const lines = []
+  let cur = []
+  const flush = () => {
+    if (!cur.length) return
+    cur.sort((a, b) => a.x - b.x)
+    // Emit horizontally separated cells as distinct ReflowLines so pdfToMarkdown can reconstruct tables
+    let cell = [cur[0]]
+    const emitCell = (c) => {
+      let text = ''
+      let prevEnd = -1
+      for (const f of c) {
+        if (text && prevEnd >= 0) {
+          const gap = f.x - prevEnd
+          if (gap > f.h * 0.25 && !/[぀-ヿ㐀-鿿]$/.test(text) && !/^[぀-ヿ㐀-鿿]/.test(f.str)) text += ' '
+        }
+        text += f.str
+        prevEnd = f.x + f.w
+      }
+      const x0 = c[0].x
+      const x1 = Math.max(...c.map((f) => f.x + f.w))
+      const h = Math.max(...c.map((f) => f.h))
+      const yTopPdf = Math.max(...c.map((f) => f.yBase)) + h * 0.85
+      lines.push({
+        t: text,
+        x: x0 / pageW,
+        y: Math.min(Math.max(1 - yTopPdf / pageH, 0), 1),
+        w: (x1 - x0) / pageW,
+        h: h / pageH,
+        fontSize: h / pageH,
+      })
+    }
+    for (let i = 1; i < cur.length; i++) {
+      const prev = cur[i - 1]
+      const f = cur[i]
+      if (f.x - (prev.x + prev.w) > Math.max(f.h * 1.8, pageW * 0.03)) {
+        emitCell(cell)
+        cell = [f]
+      } else {
+        cell.push(f)
+      }
+    }
+    emitCell(cell)
+    cur = []
+  }
+  for (const f of frags) {
+    if (cur.length && Math.abs(f.yBase - cur[0].yBase) > Math.min(cur[0].h, f.h) * 0.5) flush()
+    cur.push(f)
+  }
+  flush()
+  return lines
+}
+
 async function cmdExportMd(file) {
+  const { writeFile } = await import('node:fs/promises')
   const doc = await open(file)
-  // outline -> headings
   const outline = []
   const walk = async (items, depth) => {
     for (const it of items ?? []) {
@@ -262,18 +328,22 @@ async function cmdExportMd(file) {
     }
   }
   await walk(await doc.getOutline().catch(() => null), 0)
-  const byPage = new Map()
-  for (const o of outline.sort((a,b) => a.page - b.page)) {
-    if (!byPage.has(o.page)) byPage.set(o.page, [])
-    byPage.get(o.page).push(o)
+  const pages = []
+  const [a, b] = parsePages(flag('pages'), doc.numPages)
+  for (let p = a; p <= b; p++) {
+    const page = await doc.getPage(p)
+    const vp = page.getViewport({ scale: 1 })
+    const tc = await page.getTextContent()
+    pages.push({ page: p, lines: itemsToReflowLines(tc.items, vp.width, vp.height) })
   }
-  const name = path.basename(file)
-  process.stdout.write(`# ${name.replace(/\.pdf$/i, '')}\n\n> Source: ${name} · Pages: ${doc.numPages}\n\n`)
-  for (let p = 1; p <= doc.numPages; p++) {
-    for (const h of byPage.get(p) ?? []) process.stdout.write(`${'#'.repeat(Math.min(h.depth + 2, 6))} ${h.title}\n\n`)
-    process.stdout.write(`<!-- p.${p} -->\n`)
-    const t = await pageText(doc, p)
-    if (t.trim()) process.stdout.write(t.trim() + '\n\n')
+  const stem = path.basename(file).replace(/\.pdf$/i, '')
+  const md = pdfToMarkdown(pages, outline, { title: stem, includePageComments: true })
+  const out = flag('out')
+  if (out) {
+    await writeFile(out, md, 'utf-8')
+    console.error(`✓ ${out}`)
+  } else {
+    process.stdout.write(md)
   }
 }
 
@@ -801,6 +871,105 @@ async function cmdDoc(rest) {
   process.exit(r.status ?? 1)
 }
 
+/** Auto-detect whitespace margins across pages and crop into a new PDF. */
+async function cmdAutoCrop(file) {
+  const { execFileSync } = await import('node:child_process')
+  const out = flag('out') ?? file.replace(/\.pdf$/i, '') + '-cropped.pdf'
+  const paddingPt = Number(flag('padding') ?? 12)
+  const doc = await open(file)
+  const inputs = []
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p)
+    const vp = page.getViewport({ scale: 1 })
+    const tc = await page.getTextContent()
+    const lines = itemsToReflowLines(tc.items, vp.width, vp.height)
+    if (lines.length) {
+      inputs.push({ page: p, width: vp.width, height: vp.height, boxes: lines })
+    }
+  }
+  await doc.destroy()
+  const res = computeAutoCropMargins(inputs, { paddingPt })
+  const argv = ['crop', file, out, '--margins', res.margins.join(',')]
+  if (flag('password')) argv.push('--password', flag('password'))
+  execFileSync(docBin(), argv, { stdio: 'inherit' })
+  console.log(JSON.stringify({ file: path.resolve(file), out: path.resolve(out), ...res }, null, 2))
+}
+
+/** Split a PDF by its outline bookmarks into chapter PDFs. */
+async function cmdSplitBookmarks(file) {
+  const { execFileSync } = await import('node:child_process')
+  const { mkdir } = await import('node:fs/promises')
+  const outDir = flag('out-dir') ?? path.dirname(path.resolve(file))
+  const maxDepth = Math.max(0, Number(flag('level') ?? 1) - 1)
+  const doc = await open(file)
+  const outline = []
+  const walk = async (items, depth) => {
+    for (const it of items ?? []) {
+      try {
+        let dest = it.dest
+        if (typeof dest === 'string') dest = await doc.getDestination(dest)
+        if (Array.isArray(dest) && dest[0]) outline.push({ title: it.title ?? '', page: (await doc.getPageIndex(dest[0])) + 1, depth })
+      } catch {}
+      if (it.items?.length) await walk(it.items, depth + 1)
+    }
+  }
+  await walk(await doc.getOutline().catch(() => null), 0)
+  const chapters = splitByBookmarks(outline, doc.numPages, { maxDepth })
+  await doc.destroy()
+  if (!chapters.length) die('该 PDF 没有可用的目录书签')
+  await mkdir(outDir, { recursive: true })
+  const argv = ['split', file, outDir, '--ranges', chapters.map((c) => c.rangeSpec).join(',')]
+  if (flag('password')) argv.push('--password', flag('password'))
+  execFileSync(docBin(), argv, { stdio: 'inherit' })
+  console.log(JSON.stringify({ file: path.resolve(file), outDir: path.resolve(outDir), chapters }, null, 2))
+}
+
+/** Locate sensitive text (presets/terms/regex) and permanently redact from PDF streams. */
+async function cmdRedactText(file) {
+  const { execFileSync } = await import('node:child_process')
+  const { writeFile, mkdtemp, rm } = await import('node:fs/promises')
+  const os = await import('node:os')
+  const out = flag('out') ?? file.replace(/\.pdf$/i, '') + '-redacted.pdf'
+  const terms = (flag('terms') ?? '').split(/[,，]/).map((s) => s.trim()).filter(Boolean)
+  const presets = (flag('presets') ?? 'phone,email,idcard').split(/[,，]/).map((s) => s.trim()).filter(Boolean)
+  const regex = flag('regex')
+  const doc = await open(file)
+  const pages = []
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p)
+    const vp = page.getViewport({ scale: 1 })
+    const tc = await page.getTextContent()
+    const lines = itemsToReflowLines(tc.items, vp.width, vp.height)
+    pages.push({
+      page: p,
+      width: vp.width,
+      height: vp.height,
+      spans: lines.map((l) => ({ text: l.t, x: l.x, y: l.y, w: l.w, h: l.h })),
+    })
+  }
+  await doc.destroy()
+  const matches = findRedactionRects(pages, { terms, presets, regex })
+  if (args.includes('--dry-run')) {
+    console.log(JSON.stringify({ count: matches.length, matches }, null, 2))
+    return
+  }
+  if (!matches.length) {
+    console.log(JSON.stringify({ count: 0, written: null }))
+    return
+  }
+  const tmp = await mkdtemp(path.join(os.tmpdir(), 'solopdf-redact-'))
+  try {
+    const json = path.join(tmp, 'rects.json')
+    await writeFile(json, JSON.stringify(matches.map((m) => ({ page: m.page, rect: m.rect, color: [0, 0, 0], label: '' }))))
+    const argv = ['redact', file, out, json]
+    if (flag('password')) argv.push('--password', flag('password'))
+    execFileSync(docBin(), argv, { stdio: 'inherit' })
+    console.log(JSON.stringify({ count: matches.length, written: path.resolve(out), matches }, null, 2))
+  } finally {
+    await rm(tmp, { recursive: true, force: true })
+  }
+}
+
 /**
  * Citation for a paper: offline from metadata + first pages; --online asks
  * doi.org for the exact record (the ONLY network request, and only on this
@@ -988,6 +1157,9 @@ switch (cmd) {
   case 'dict': await cmdDict(file ?? die('用法: solopdf dict <词>')); break
   case 'translate': await cmdTranslate(file ?? die('用法: solopdf translate "文字"|- [--to zh-Hans] [--online] [--provider deepl|openai …]')); break
   case 'doc': await cmdDoc(args.slice(1)); break
+  case 'auto-crop': await cmdAutoCrop(file ?? die('用法: solopdf auto-crop <file.pdf> [--out x.pdf] [--padding 12]')); break
+  case 'split-bookmarks': await cmdSplitBookmarks(file ?? die('用法: solopdf split-bookmarks <file.pdf> [--out-dir d] [--level 1|2]')); break
+  case 'redact-text': await cmdRedactText(file ?? die('用法: solopdf redact-text <file.pdf> [--out x.pdf] [--terms a,b] [--presets phone,email,idcard] [--dry-run]')); break
   case 'cite': await cmdCite(file ?? die('用法: solopdf cite <file.pdf> [--format bibtex|apa|gbt|all|json] [--online]')); break
   case 'compare': await cmdCompare(file ?? die('用法: solopdf compare <old.pdf> <new.pdf> [--json]'), args[2]); break
   case 'ask': await cmdAsk(file ?? die('用法: solopdf ask <file.pdf> "问题"'), args[2]); break
@@ -1025,6 +1197,7 @@ switch (cmd) {
   solopdf selftest <fixtures-dir>                  标准测试集验收
 
   solopdf doc 的子命令：pages / merge / split / annotate / compress /
-  images-to-pdf / protect / unprotect / info / djvu-info / djvu-page`)
+  images-to-pdf / protect / unprotect / watermark / page-numbers / crop /
+  extract-images / sanitize / flatten / redact / info / djvu-info / djvu-page`)
     process.exit(cmd ? 1 : 0)
 }

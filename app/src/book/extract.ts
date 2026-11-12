@@ -74,7 +74,7 @@ function itemsToLines(items: RawItem[], pageW: number, pageH: number): ReflowLin
   return lines
 }
 
-async function flattenOutline(doc: PDFDocumentProxy): Promise<OutlineEntry[]> {
+export async function flattenOutline(doc: PDFDocumentProxy): Promise<OutlineEntry[]> {
   const raw = await doc.getOutline().catch(() => null)
   if (!raw) return []
   const out: OutlineEntry[] = []
@@ -92,6 +92,31 @@ async function flattenOutline(doc: PDFDocumentProxy): Promise<OutlineEntry[]> {
   }
   await walk(raw, 0)
   return out
+}
+
+export interface PageGeomExtract {
+  page: number
+  width: number
+  height: number
+  lines: ReflowLine[]
+}
+
+export async function extractPagesWithGeom(
+  doc: PDFDocumentProxy,
+  onProgress?: (done: number, total: number) => void,
+): Promise<{ pages: PageGeomExtract[]; outline: OutlineEntry[] }> {
+  const outline = await flattenOutline(doc)
+  const pages: PageGeomExtract[] = []
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p)
+    const vp = page.getViewport({ scale: 1 })
+    const tc = await page.getTextContent()
+    const lines = itemsToLines(tc.items as RawItem[], vp.width, vp.height)
+    pages.push({ page: p, width: vp.width, height: vp.height, lines })
+    onProgress?.(p, doc.numPages)
+    if (p % 20 === 0) await new Promise((r) => setTimeout(r, 0))
+  }
+  return { pages, outline }
 }
 
 export interface BookExtractResult {

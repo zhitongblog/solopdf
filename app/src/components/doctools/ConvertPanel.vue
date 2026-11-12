@@ -1,14 +1,12 @@
 <script setup lang="ts">
 /**
- * PDF → images, images → PDF, and shrink-this-file.
- *
- * Page rendering happens in the WebView (pdf.js is already there and is the
- * same engine that drew the page you are looking at); only the PDF writing
- * side goes to Rust. That keeps "export at 300 dpi" honest — what you export
- * is what you saw.
+ * PDF → images, lossless extract embedded images, PDF → Markdown,
+ * images → PDF, and shrink-this-file.
  */
 import { computed, ref } from 'vue'
-import { store, controllers } from '../../store'
+import { pdfToMarkdown } from '@solopdf/core'
+import { store, controllers, documents } from '../../store'
+import { extractPagesWithGeom } from '../../book/extract'
 import { docOps, mobileNoDialogs, pickDirectory, pickOpenPaths, pickSavePath } from '../../platform/docops'
 import { t } from '../../i18n'
 
@@ -16,6 +14,7 @@ const emit = defineEmits<{ toast: [msg: string]; open: [path: string] }>()
 
 const tab = computed(() => store.activeTab)
 const ctrl = computed(() => { void store.docTick; return tab.value ? controllers.get(tab.value.id) : undefined })
+const doc = computed(() => { void store.docTick; return tab.value ? documents.get(tab.value.id) : undefined })
 const busy = ref(false)
 const progress = ref({ done: 0, total: 0 })
 
@@ -60,8 +59,6 @@ async function exportImages(): Promise<void> {
       if (!blob) continue
       const bytes = new Uint8Array(await blob.arrayBuffer())
       const name = `${stem}-${String(p).padStart(3, '0')}.${format.value === 'png' ? 'png' : 'jpg'}`
-      // reuse the signature writer's raw-body path? no — images belong beside
-      // the document, so go through the generic save
       await saveBytes(dir ? `${dir}/${name}` : null, name, bytes)
       progress.value = { ...progress.value, done: progress.value.done + 1 }
     }
@@ -80,6 +77,56 @@ async function saveBytes(dest: string | null, name: string, bytes: Uint8Array): 
     await invoke('save_pdf_bytes', bytes, { headers: { 'x-dest': encodeURIComponent(dest) } })
   } else {
     await invoke('save_bytes_to_documents', bytes, { headers: { 'x-name': encodeURIComponent(name) } })
+  }
+}
+
+// ── Extract embedded original images ──
+const minImgDim = ref(32)
+
+async function extractEmbeddedImages(): Promise<void> {
+  const src = tab.value?.path
+  if (!src) return
+  const dir = mobileNoDialogs() ? null : await pickDirectory()
+  if (!mobileNoDialogs() && !dir) return
+  busy.value = true
+  try {
+    const imgs = await docOps.extractImages(src, dir, null, minImgDim.value)
+    emit('toast', t('dt.cv.extractedEmbedded', { n: imgs.length }))
+  } catch (err) {
+    emit('toast', String((err as Error).message ?? err))
+  } finally {
+    busy.value = false
+  }
+}
+
+// ── Native PDF → Structured Markdown ──
+async function exportMarkdown(): Promise<void> {
+  const d = doc.value
+  const src = tab.value
+  if (!d || !src) return
+  const stem = (src.name ?? 'document').replace(/\.pdf$/i, '')
+  const suggested = `${stem}.md`
+  const dest = await pickSavePath(suggested, 'md')
+  if (dest === undefined) return
+  busy.value = true
+  progress.value = { done: 0, total: d.numPages }
+  try {
+    const { pages, outline } = await extractPagesWithGeom(d, (done, total) => {
+      progress.value = { done, total }
+    })
+    const md = pdfToMarkdown(
+      pages.map((p) => ({ page: p.page, lines: p.lines })),
+      outline,
+      { title: stem },
+    )
+    const bytes = new TextEncoder().encode(md)
+    await saveBytes(dest, suggested, bytes)
+    emit('toast', t('dt.saved', { file: dest ? dest.split('/').pop() ?? suggested : suggested }))
+  } catch (err) {
+    emit('toast', String((err as Error).message ?? err))
+  } finally {
+    busy.value = false
+    progress.value = { done: 0, total: 0 }
   }
 }
 
@@ -154,6 +201,26 @@ async function compress(): Promise<void> {
     <div class="dt-actions">
       <button class="primary" :disabled="busy" @click="exportImages">
         {{ busy && progress.total ? `${progress.done}/${progress.total}` : t('dt.cv.doExport') }}
+      </button>
+    </div>
+
+    <h4>{{ t('dt.cv.extractEmbedded') }}</h4>
+    <p class="dt-hint">{{ t('dt.cv.extractEmbeddedHint') }}</p>
+    <div class="dt-field">
+      <label>{{ t('dt.cv.minDim') }}</label>
+      <input type="number" min="1" max="500" step="8" v-model.number="minImgDim" />
+    </div>
+    <div class="dt-actions">
+      <button class="primary" :disabled="busy" @click="extractEmbeddedImages">
+        {{ busy ? t('dt.working') : t('dt.cv.doExtractEmbedded') }}
+      </button>
+    </div>
+
+    <h4>{{ t('dt.cv.toMarkdown') }}</h4>
+    <p class="dt-hint">{{ t('dt.cv.toMarkdownHint') }}</p>
+    <div class="dt-actions">
+      <button class="primary" :disabled="busy" @click="exportMarkdown">
+        {{ busy ? t('dt.working') : t('dt.cv.doMarkdown') }}
       </button>
     </div>
 

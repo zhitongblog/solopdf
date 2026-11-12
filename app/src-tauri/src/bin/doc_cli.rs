@@ -83,9 +83,9 @@ fn ok<T>(r: Result<T, String>) -> T {
 
 fn usage() -> ! {
     eprintln!(
-        "solopdf-doc — SoloPDF 文档操作（页面/合并/拆分/标注/压缩/加密）
+        "solopdf-doc — SoloPDF 文档操作（页面/合并/拆分/标注/压缩/加密/水印/页码/裁切/原图/脱敏/扁平化）
 
-  pages <src.pdf> <dest.pdf> --keep 1,3-5 [--rotate 90] [--password pw]
+  pages <src.pdf> <dest.pdf> --keep 1,0,3-5 [--rotate 90] [--password pw]   (0 = 插入空白页)
   merge <dest.pdf> <a.pdf> <b.pdf> …
   split <src.pdf> <dest-dir> --ranges 1-3,4-10 [--password pw]
   annotate <src.pdf> <dest.pdf> <annots.json> [--password pw]
@@ -93,6 +93,13 @@ fn usage() -> ! {
   images-to-pdf <dest.pdf> <a.png> … [--dpi 150]
   protect <src.pdf> <dest.pdf> --password pw [--owner pw]
   unprotect <src.pdf> <dest.pdf> --password pw
+  watermark <src.pdf> <dest.pdf> [--text txt] [--image img.png] [--pos center|tile|…] [--opacity 0.22] [--rotate 45] [--font-size 48] [--under 1] [--pages 1-3]
+  page-numbers <src.pdf> <dest.pdf> [--format \"{{n}} / {{total}}\"] [--pos bottom-center] [--start 1] [--from 1] [--to 0] [--font-size 10] [--margin 28]
+  crop <src.pdf> <dest.pdf> [--margins top,right,bottom,left] [--box x1,y1,x2,y2] [--pages 1-5]
+  extract-images <src.pdf> <dest-dir> [--min-dim 32] [--password pw]
+  sanitize <src.pdf> <dest.pdf> [--annots 1] [--attachments 1] [--forms 1] [--password pw]
+  flatten <src.pdf> <dest.pdf> [--password pw]
+  redact <src.pdf> <dest.pdf> <rects.json> [--password pw]
   info <src.pdf> [--password pw]
   djvu-info <src.djvu>
   djvu-page <src.djvu> <dest.png> [--page 1] [--width 1400]
@@ -208,6 +215,146 @@ fn main() {
             let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
             let pw = arg(&args, "--password").unwrap_or_else(|| die("需要 --password"));
             write(dest, ok(pdfops::remove_password(&read(src), pw)));
+        }
+        "watermark" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            let mut spec = pdfops::WatermarkSpec::default();
+            if let Some(t) = arg(&args, "--text") {
+                spec.text = t.to_string();
+            }
+            if let Some(ip) = arg(&args, "--image") {
+                spec.image_png = read(ip);
+            }
+            if let Some(pos) = arg(&args, "--pos") {
+                spec.position = pos.to_string();
+            }
+            if let Some(op) = arg(&args, "--opacity").and_then(|v| v.parse().ok()) {
+                spec.opacity = op;
+            }
+            if let Some(rot) = arg(&args, "--rotate").and_then(|v| v.parse().ok()) {
+                spec.rotate = rot;
+            }
+            if let Some(fs) = arg(&args, "--font-size").and_then(|v| v.parse().ok()) {
+                spec.font_size = fs;
+            }
+            if let Some(sp) = arg(&args, "--spacing").and_then(|v| v.parse().ok()) {
+                spec.tile_spacing = sp;
+            }
+            if let Some(sc) = arg(&args, "--scale").and_then(|v| v.parse().ok()) {
+                spec.scale = sc;
+            }
+            if let Some(u) = arg(&args, "--under") {
+                spec.under = u == "1" || u == "true";
+            }
+            if let Some(pg) = arg(&args, "--pages") {
+                spec.pages = parse_list(pg);
+            }
+            write(dest, ok(pdfops::watermark_pdf(&read(src), pw, &spec)));
+        }
+        "page-numbers" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            let mut spec = pdfops::PageNumberSpec::default();
+            if let Some(f) = arg(&args, "--format") {
+                spec.format = f.to_string();
+            }
+            if let Some(pos) = arg(&args, "--pos") {
+                spec.position = pos.to_string();
+            }
+            if let Some(s) = arg(&args, "--start").and_then(|v| v.parse().ok()) {
+                spec.start_number = s;
+            }
+            if let Some(fr) = arg(&args, "--from").and_then(|v| v.parse().ok()) {
+                spec.from_page = fr;
+            }
+            if let Some(to) = arg(&args, "--to").and_then(|v| v.parse().ok()) {
+                spec.to_page = to;
+            }
+            if let Some(fs) = arg(&args, "--font-size").and_then(|v| v.parse().ok()) {
+                spec.font_size = fs;
+            }
+            if let Some(m) = arg(&args, "--margin").and_then(|v| v.parse().ok()) {
+                spec.margin = m;
+            }
+            write(dest, ok(pdfops::add_page_numbers(&read(src), pw, &spec)));
+        }
+        "crop" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            let mut spec = pdfops::CropSpec::default();
+            if let Some(m) = arg(&args, "--margins") {
+                let v: Vec<f32> = m.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                if v.len() == 4 {
+                    spec.margins = [v[0], v[1], v[2], v[3]];
+                } else if v.len() == 1 {
+                    spec.margins = [v[0]; 4];
+                } else {
+                    die("--margins 需要 4 个数值（上,右,下,左）或 1 个统一数值");
+                }
+            }
+            if let Some(b) = arg(&args, "--box") {
+                let v: Vec<f32> = b.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                if v.len() == 4 {
+                    spec.box_rect = Some([v[0], v[1], v[2], v[3]]);
+                } else {
+                    die("--box 需要 4 个数值 x1,y1,x2,y2");
+                }
+            }
+            if let Some(pg) = arg(&args, "--pages") {
+                spec.pages = parse_list(pg);
+            }
+            write(dest, ok(pdfops::crop_pages(&read(src), pw, &spec)));
+        }
+        "extract-images" => {
+            let (Some(src), Some(dir)) = (positional.first(), positional.get(1)) else { usage() };
+            let min_dim = arg(&args, "--min-dim").and_then(|v| v.parse().ok()).unwrap_or(32);
+            std::fs::create_dir_all(dir).ok();
+            let pdf = read(src);
+            let stem = std::path::Path::new(src.as_str())
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "document".into());
+            let imgs = ok(pdfops::extract_images(&pdf, pw, min_dim));
+            let mut list = Vec::new();
+            for img in imgs {
+                let path = format!("{dir}/{stem}-p{:03}-img{:03}.{}", img.page, img.index, img.ext);
+                write(&path, img.bytes);
+                list.push(serde_json::json!({
+                    "path": path,
+                    "page": img.page,
+                    "index": img.index,
+                    "width": img.width,
+                    "height": img.height,
+                    "format": img.format,
+                }));
+            }
+            println!("{}", serde_json::json!({ "count": list.len(), "images": list }));
+        }
+        "sanitize" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            let spec = pdfops::SanitizeSpec {
+                metadata: arg(&args, "--metadata").map(|v| v != "0" && v != "false").unwrap_or(true),
+                annotations: arg(&args, "--annots").map(|v| v == "1" || v == "true").unwrap_or(false),
+                attachments: arg(&args, "--attachments").map(|v| v == "1" || v == "true").unwrap_or(false),
+                javascript_actions: arg(&args, "--actions").map(|v| v != "0" && v != "false").unwrap_or(true),
+                forms: arg(&args, "--forms").map(|v| v == "1" || v == "true").unwrap_or(false),
+            };
+            let (bytes, report) = ok(pdfops::sanitize_pdf(&read(src), pw, &spec));
+            write(dest, bytes);
+            println!("{}", serde_json::to_string(&report).unwrap_or_default());
+        }
+        "flatten" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            write(dest, ok(pdfops::flatten_pdf(&read(src), pw)));
+        }
+        "redact" => {
+            let (Some(src), Some(dest), Some(json)) =
+                (positional.first(), positional.get(1), positional.get(2))
+            else {
+                usage()
+            };
+            let rects: Vec<pdfops::RedactRect> = serde_json::from_slice(&read(json))
+                .unwrap_or_else(|e| die(&format!("rects.json 解析失败: {e}")));
+            let strip_meta = arg(&args, "--strip-metadata").map(|v| v != "0" && v != "false").unwrap_or(true);
+            write(dest, ok(pdfops::redact_pdf(&read(src), pw, &rects, strip_meta)));
         }
         "info" => {
             let Some(src) = positional.first() else { usage() };

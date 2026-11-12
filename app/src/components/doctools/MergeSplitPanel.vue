@@ -1,18 +1,22 @@
 <script setup lang="ts">
 /**
- * Merge several PDFs into one, or split this one into parts.
- *
- * Split accepts either explicit ranges ("1-3, 4-10, 11") or "every N pages",
- * because those are the two ways people actually describe the job.
+ * Merge several PDFs into one, or split this one into parts:
+ *  - by explicit page ranges ("1-3, 4-10, 11")
+ *  - every N pages
+ *  - into N equal parts
+ *  - by PDF bookmarks / chapter outline (level 1 or level 1+2)
  */
-import { computed, ref } from 'vue'
-import { store } from '../../store'
+import { computed, onMounted, ref, watch } from 'vue'
+import { splitByBookmarks, splitIntoChunks, type OutlineEntry, type SplitChapterRange } from '@solopdf/core'
+import { store, documents } from '../../store'
+import { flattenOutline } from '../../book/extract'
 import { docOps, pickDirectory, pickOpenPaths, pickSavePath } from '../../platform/docops'
 import { t } from '../../i18n'
 
 const emit = defineEmits<{ toast: [msg: string]; open: [path: string] }>()
 
 const tab = computed(() => store.activeTab)
+const doc = computed(() => { void store.docTick; return tab.value ? documents.get(tab.value.id) : undefined })
 const busy = ref(false)
 
 // ── merge ──
@@ -57,9 +61,36 @@ async function doMerge(): Promise<void> {
 }
 
 // ── split ──
-const mode = ref<'ranges' | 'every'>('ranges')
+const mode = ref<'ranges' | 'every' | 'parts' | 'bookmarks'>('ranges')
 const rangeText = ref('')
 const everyN = ref(10)
+const partsCount = ref(2)
+
+const outline = ref<OutlineEntry[]>([])
+const bmMaxDepth = ref(0)
+const bmIncludeFront = ref(true)
+
+async function loadOutline(): Promise<void> {
+  const d = doc.value
+  if (!d) {
+    outline.value = []
+    return
+  }
+  outline.value = await flattenOutline(d)
+}
+
+onMounted(loadOutline)
+watch(() => tab.value?.id, loadOutline)
+
+const chapterRanges = computed<SplitChapterRange[]>(() => {
+  const total = tab.value?.numPages ?? 0
+  if (!total) return []
+  return splitByBookmarks(outline.value, total, {
+    maxDepth: bmMaxDepth.value,
+    includeFrontMatter: bmIncludeFront.value,
+    frontMatterTitle: t('dt.ms.frontMatter'),
+  })
+})
 
 /** "1-3, 5, 8-12" → [[1,3],[5,5],[8,12]], clamped to the document */
 function parseRanges(text: string, total: number): [number, number][] {
@@ -78,10 +109,13 @@ const previewRanges = computed<[number, number][]>(() => {
   const total = tab.value?.numPages ?? 0
   if (!total) return []
   if (mode.value === 'every') {
-    const n = Math.max(1, Math.floor(everyN.value))
-    const out: [number, number][] = []
-    for (let p = 1; p <= total; p += n) out.push([p, Math.min(total, p + n - 1)])
-    return out
+    return splitIntoChunks(total, { pagesPerFile: everyN.value }).map((c) => [c.from, c.to])
+  }
+  if (mode.value === 'parts') {
+    return splitIntoChunks(total, { parts: partsCount.value }).map((c) => [c.from, c.to])
+  }
+  if (mode.value === 'bookmarks') {
+    return chapterRanges.value.map((c) => [c.from, c.to])
   }
   return parseRanges(rangeText.value, total)
 })
@@ -131,14 +165,42 @@ async function doSplit(): Promise<void> {
     <div class="vm-seg">
       <button :class="{ active: mode === 'ranges' }" @click="mode = 'ranges'">{{ t('dt.ms.byRanges') }}</button>
       <button :class="{ active: mode === 'every' }" @click="mode = 'every'">{{ t('dt.ms.byEvery') }}</button>
+      <button :class="{ active: mode === 'parts' }" @click="mode = 'parts'">{{ t('dt.ms.byParts') }}</button>
+      <button :class="{ active: mode === 'bookmarks' }" @click="mode = 'bookmarks'">{{ t('dt.ms.byBookmarks') }}</button>
     </div>
+
     <div v-if="mode === 'ranges'" class="dt-field">
       <input v-model="rangeText" :placeholder="t('dt.ms.rangesPlaceholder')" />
     </div>
-    <div v-else class="dt-field">
+    <div v-else-if="mode === 'every'" class="dt-field">
       <label>{{ t('dt.ms.everyLabel') }}</label>
       <input type="number" min="1" :max="tab?.numPages ?? 1" v-model.number="everyN" />
     </div>
+    <div v-else-if="mode === 'parts'" class="dt-field">
+      <label>{{ t('dt.ms.partsLabel') }}</label>
+      <input type="number" min="2" :max="tab?.numPages ?? 2" v-model.number="partsCount" />
+    </div>
+    <div v-else class="dt-field">
+      <label>{{ t('dt.ms.bmLevel') }}</label>
+      <select v-model.number="bmMaxDepth">
+        <option :value="0">{{ t('dt.ms.bmLevel1') }}</option>
+        <option :value="1">{{ t('dt.ms.bmLevel2') }}</option>
+      </select>
+      <label class="dt-check">
+        <input type="checkbox" v-model="bmIncludeFront" />
+        {{ t('dt.ms.bmFront') }}
+      </label>
+    </div>
+
+    <div v-if="mode === 'bookmarks'" class="dt-list">
+      <div v-for="(ch, idx) in chapterRanges" :key="idx" class="dt-list-row">
+        <span class="dt-list-idx">{{ idx + 1 }}</span>
+        <span class="dt-list-name">{{ ch.title }}</span>
+        <span class="dt-ranges">p.{{ ch.rangeSpec }}</span>
+      </div>
+      <div v-if="!chapterRanges.length" class="dt-empty">{{ t('dt.ms.noBookmarks') }}</div>
+    </div>
+
     <p class="dt-hint" v-if="previewRanges.length">
       {{ t('dt.ms.willMake', { n: previewRanges.length }) }}
       <span class="dt-ranges">{{ previewRanges.map((r) => (r[0] === r[1] ? r[0] : `${r[0]}–${r[1]}`)).join(' · ') }}</span>

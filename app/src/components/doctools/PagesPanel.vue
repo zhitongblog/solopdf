@@ -44,7 +44,7 @@ async function renderThumbs(): Promise<void> {
   if (!d) return
   for (let i = 0; i < plan.value.length; i++) {
     const item = plan.value[i]
-    if (item.thumb) continue
+    if (item.thumb || item.src === 0) continue
     try {
       const page = await d.getPage(item.src)
       const vp = page.getViewport({ scale: 0.16 })
@@ -100,6 +100,30 @@ function removeSelected(): void {
   }
   plan.value = plan.value.filter((_, i) => !selected.value.has(i))
   selected.value = new Set()
+}
+
+function insertBlank(): void {
+  const next = [...plan.value]
+  const sel = [...selected.value].sort((a, b) => a - b)
+  const insertAt = sel.length ? sel[sel.length - 1] + 1 : next.length
+  next.splice(insertAt, 0, { src: 0, rot: 0, thumb: null })
+  plan.value = next
+  selected.value = new Set([insertAt])
+}
+
+function duplicateSelected(): void {
+  if (!anySelected.value) return
+  const next: PagePlan[] = []
+  const newSel = new Set<number>()
+  plan.value.forEach((p, i) => {
+    next.push(p)
+    if (selected.value.has(i)) {
+      newSel.add(next.length)
+      next.push({ ...p })
+    }
+  })
+  plan.value = next
+  selected.value = newSel
 }
 
 function move(dir: -1 | 1): void {
@@ -188,6 +212,8 @@ async function saveAs(onlySelected: boolean): Promise<void> {
       <button @click="rotate(90)">⟳ {{ t('vm.cw') }}</button>
       <button :disabled="!anySelected" @click="move(-1)">←</button>
       <button :disabled="!anySelected" @click="move(1)">→</button>
+      <button @click="insertBlank">＋ {{ t('dt.pages.insertBlank') }}</button>
+      <button :disabled="!anySelected" @click="duplicateSelected">⧉ {{ t('dt.pages.duplicate') }}</button>
       <button :disabled="!anySelected" class="danger" @click="removeSelected">{{ t('dt.pages.remove') }}</button>
     </div>
 
@@ -203,10 +229,10 @@ async function saveAs(onlySelected: boolean): Promise<void> {
       >
         <div class="dt-thumb" :style="{ transform: `rotate(${p.rot}deg)` }">
           <img v-if="p.thumb" :src="p.thumb" alt="" />
-          <div v-else class="dt-thumb-ph"></div>
+          <div v-else class="dt-thumb-ph">{{ p.src === 0 ? t('dt.pages.blankTag') : '' }}</div>
         </div>
         <div class="dt-page-no">
-          {{ i + 1 }}<span v-if="p.src !== i + 1" class="dt-orig">←{{ p.src }}</span>
+          {{ i + 1 }}<span v-if="p.src === 0" class="dt-orig">· {{ t('dt.pages.blankTag') }}</span><span v-else-if="p.src !== i + 1" class="dt-orig">←{{ p.src }}</span>
         </div>
       </div>
     </div>

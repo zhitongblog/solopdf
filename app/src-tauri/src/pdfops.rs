@@ -15,7 +15,7 @@
 
 use lopdf::content::{Content, Operation};
 use lopdf::{dictionary, Dictionary, Document, Object, ObjectId, Stream};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 type R<T> = Result<T, String>;
 
@@ -630,9 +630,10 @@ pub fn rotate_pages(pdf: &[u8], password: Option<&str>, pages: &[u32], degrees: 
     save(&mut doc)
 }
 
-/// Keep exactly `order` (1-based page numbers), in that order.
-/// One primitive covers delete, extract and reorder — they are all "which
-/// pages, in what sequence" and doing them separately invites three bugs.
+/// Keep exactly `order` (1-based page numbers, or `0` for an inserted blank
+/// page), in that order.
+/// One primitive covers delete, extract, reorder, duplicate and blank-page
+/// insertion — they are all "which pages, in what sequence".
 pub fn arrange_pages(pdf: &[u8], password: Option<&str>, order: &[u32]) -> R<Vec<u8>> {
     if order.is_empty() {
         return Err("至少要保留一页".into());
@@ -640,21 +641,78 @@ pub fn arrange_pages(pdf: &[u8], password: Option<&str>, order: &[u32]) -> R<Vec
     let mut doc = load(pdf, password)?;
     let ids = page_ids(&doc);
     for p in order {
-        if *p < 1 || (*p as usize) > ids.len() {
+        if (*p as usize) > ids.len() {
             return Err(format!("页码 {p} 超出范围"));
         }
     }
-    let keep: Vec<ObjectId> = order.iter().map(|p| ids[*p as usize - 1]).collect();
     let pages_id = doc
         .catalog()
         .and_then(|c| c.get(b"Pages"))
         .and_then(Object::as_reference)
         .map_err(e("找不到页面树"))?;
-    // flatten the tree: every kept page becomes a direct child of the root
-    // Pages node, which is legal and sidesteps intermediate-node bookkeeping
-    for id in &keep {
-        if let Ok(d) = doc.get_dictionary_mut(*id) {
-            d.set("Parent", Object::Reference(pages_id));
+
+    // Copy down inherited attributes before flattening the page tree
+    for &id in &ids {
+        for key in [&b"MediaBox"[..], b"Resources", b"Rotate", b"CropBox"] {
+            if doc.get_dictionary(id).map(|d| d.has(key)).unwrap_or(false) {
+                continue;
+            }
+            if let Some(v) = inherited(&doc, id, key) {
+                if let Ok(d) = doc.get_dictionary_mut(id) {
+                    d.set(key.to_vec(), v);
+                }
+            }
+        }
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut keep: Vec<ObjectId> = Vec::with_capacity(order.len());
+    for (idx, &p) in order.iter().enumerate() {
+        if p == 0 {
+            // Blank page: inherit MediaBox and Rotate from nearest neighbor
+            let ref_src = order[..idx]
+                .iter()
+                .rev()
+                .chain(order[idx + 1..].iter())
+                .find(|&&x| x >= 1)
+                .map(|&x| ids[x as usize - 1])
+                .or_else(|| ids.first().copied());
+            let mb = ref_src
+                .and_then(|id| doc.get_dictionary(id).ok())
+                .and_then(|d| d.get(b"MediaBox").ok().cloned())
+                .unwrap_or_else(|| nums(&[0.0, 0.0, 595.28, 841.89]));
+            let rot = ref_src
+                .and_then(|id| doc.get_dictionary(id).ok())
+                .and_then(|d| d.get(b"Rotate").ok().cloned())
+                .unwrap_or(Object::Integer(0));
+            let empty_stream = doc.add_object(Stream::new(dictionary! {}, Vec::new()));
+            let blank_id = doc.add_object(dictionary! {
+                "Type" => "Page",
+                "Parent" => pages_id,
+                "MediaBox" => mb,
+                "Rotate" => rot,
+                "Contents" => empty_stream,
+                "Resources" => dictionary! {},
+            });
+            keep.push(blank_id);
+        } else {
+            let orig_id = ids[p as usize - 1];
+            if seen.insert(orig_id) {
+                if let Ok(d) = doc.get_dictionary_mut(orig_id) {
+                    d.set("Parent", Object::Reference(pages_id));
+                }
+                keep.push(orig_id);
+            } else {
+                // Duplicate page: clone dictionary into a distinct ObjectId so
+                // /Kids never holds two references to the same page object
+                let mut cloned = doc
+                    .get_dictionary(orig_id)
+                    .map_err(e("页面结构异常"))?
+                    .clone();
+                cloned.set("Parent", Object::Reference(pages_id));
+                let dup_id = doc.add_object(Object::Dictionary(cloned));
+                keep.push(dup_id);
+            }
         }
     }
     let kids: Vec<Object> = keep.iter().map(|id| Object::Reference(*id)).collect();
@@ -1083,20 +1141,1261 @@ pub fn page_sizes(pdf: &[u8], password: Option<&str>) -> R<Vec<(f32, f32)>> {
     let doc = load(pdf, password)?;
     let mut out = Vec::new();
     for id in page_ids(&doc) {
-        let mb = inherited(&doc, id, b"MediaBox")
-            .and_then(|o| o.as_array().ok().map(|a| a.to_vec()))
-            .unwrap_or_default();
-        let v: Vec<f32> = mb
+        let [x1, y1, x2, y2] = page_box(&doc, id);
+        out.push(((x2 - x1).abs(), (y2 - y1).abs()));
+    }
+    Ok(out)
+}
+
+/// Effective visible box of a page (`CropBox` if present, else `MediaBox`),
+/// normalized to `[x_min, y_min, x_max, y_max]`.
+fn page_box(doc: &Document, page_id: ObjectId) -> [f32; 4] {
+    for key in [&b"CropBox"[..], b"MediaBox"] {
+        if let Some(arr) = inherited(doc, page_id, key).and_then(|o| o.as_array().ok().cloned()) {
+            let v: Vec<f32> = arr
+                .iter()
+                .map(|o| o.as_float().unwrap_or_else(|_| o.as_i64().unwrap_or(0) as f32))
+                .collect();
+            if v.len() == 4 {
+                return [v[0].min(v[2]), v[1].min(v[3]), v[0].max(v[2]), v[1].max(v[3])];
+            }
+        }
+    }
+    [0.0, 0.0, 612.0, 792.0]
+}
+
+// ── crop pages ───────────────────────────────────────────────────────────
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct CropSpec {
+    /// Inset margins `[top, right, bottom, left]` in PDF points
+    #[serde(default)]
+    pub margins: [f32; 4],
+    /// Optional separate margins for odd pages (1, 3, 5…)
+    #[serde(default)]
+    pub odd_margins: Option<[f32; 4]>,
+    /// Optional separate margins for even pages (2, 4, 6…)
+    #[serde(default)]
+    pub even_margins: Option<[f32; 4]>,
+    /// Optional explicit `[x1, y1, x2, y2]` box in PDF points
+    #[serde(default)]
+    pub box_rect: Option<[f32; 4]>,
+    /// Optional per-page explicit `[x1, y1, x2, y2]` boxes (e.g. auto-crop)
+    #[serde(default)]
+    pub per_page: Vec<(u32, [f32; 4])>,
+    /// 1-based target pages; empty = every page
+    #[serde(default)]
+    pub pages: Vec<u32>,
+}
+
+/// Permanently crop pages by updating both `/CropBox` and `/MediaBox`.
+pub fn crop_pages(pdf: &[u8], password: Option<&str>, spec: &CropSpec) -> R<Vec<u8>> {
+    let mut doc = load(pdf, password)?;
+    let ids = page_ids(&doc);
+    let per_map: std::collections::HashMap<u32, [f32; 4]> =
+        spec.per_page.iter().copied().collect();
+    let targets: Vec<u32> = if !per_map.is_empty() {
+        per_map.keys().copied().collect()
+    } else if spec.pages.is_empty() {
+        (1..=ids.len() as u32).collect()
+    } else {
+        spec.pages
             .iter()
-            .map(|o| o.as_float().unwrap_or(0.0))
-            .collect();
-        if v.len() == 4 {
-            out.push(((v[2] - v[0]).abs(), (v[3] - v[1]).abs()));
+            .copied()
+            .filter(|&p| p >= 1 && (p as usize) <= ids.len())
+            .collect()
+    };
+    if targets.is_empty() {
+        return Err("没有匹配的页码".into());
+    }
+    for p in targets {
+        let page_id = ids[p as usize - 1];
+        let [bx1, by1, bx2, by2] = page_box(&doc, page_id);
+        let [mut nx1, mut ny1, mut nx2, mut ny2] = if let Some(&r) = per_map.get(&p) {
+            [r[0].min(r[2]), r[1].min(r[3]), r[0].max(r[2]), r[1].max(r[3])]
+        } else if let Some(r) = spec.box_rect {
+            [r[0].min(r[2]), r[1].min(r[3]), r[0].max(r[2]), r[1].max(r[3])]
         } else {
-            out.push((612.0, 792.0));
+            let [top, right, bottom, left] = if p % 2 == 1 {
+                spec.odd_margins.unwrap_or(spec.margins)
+            } else {
+                spec.even_margins.unwrap_or(spec.margins)
+            };
+            [bx1 + left, by1 + bottom, bx2 - right, by2 - top]
+        };
+        // Clamp inside original box and ensure at least 36x36 pt remains
+        nx1 = nx1.clamp(bx1, (bx2 - 36.0).max(bx1));
+        ny1 = ny1.clamp(by1, (by2 - 36.0).max(by1));
+        nx2 = nx2.clamp((nx1 + 36.0).min(bx2), bx2);
+        ny2 = ny2.clamp((ny1 + 36.0).min(by2), by2);
+        let d = doc.get_dictionary_mut(page_id).map_err(e("页面结构异常"))?;
+        d.set("MediaBox", nums(&[nx1, ny1, nx2, ny2]));
+        d.set("CropBox", nums(&[nx1, ny1, nx2, ny2]));
+    }
+    save(&mut doc)
+}
+
+// ── watermark & page numbers ─────────────────────────────────────────────
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct WatermarkSpec {
+    #[serde(default)]
+    pub text: String,
+    #[serde(skip)]
+    pub image_png: Vec<u8>,
+    #[serde(default = "default_wm_font_size")]
+    pub font_size: f32,
+    #[serde(default = "default_wm_color")]
+    pub color: [f32; 3],
+    #[serde(default = "default_wm_opacity")]
+    pub opacity: f32,
+    #[serde(default = "default_wm_rotate")]
+    pub rotate: f32,
+    /// center | tile | top-left | top-center | top-right |
+    /// middle-left | middle-right | bottom-left | bottom-center | bottom-right
+    #[serde(default = "default_wm_pos")]
+    pub position: String,
+    #[serde(default = "default_wm_spacing")]
+    pub tile_spacing: f32,
+    #[serde(default = "default_wm_scale")]
+    pub scale: f32,
+    #[serde(default)]
+    pub under: bool,
+    #[serde(default)]
+    pub pages: Vec<u32>,
+}
+
+fn default_wm_font_size() -> f32 { 48.0 }
+fn default_wm_color() -> [f32; 3] { [0.55, 0.55, 0.55] }
+fn default_wm_opacity() -> f32 { 0.22 }
+fn default_wm_rotate() -> f32 { 45.0 }
+fn default_wm_pos() -> String { "center".into() }
+fn default_wm_spacing() -> f32 { 180.0 }
+fn default_wm_scale() -> f32 { 0.3 }
+
+impl Default for WatermarkSpec {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            image_png: Vec::new(),
+            font_size: default_wm_font_size(),
+            color: default_wm_color(),
+            opacity: default_wm_opacity(),
+            rotate: default_wm_rotate(),
+            position: default_wm_pos(),
+            tile_spacing: default_wm_spacing(),
+            scale: default_wm_scale(),
+            under: false,
+            pages: Vec::new(),
+        }
+    }
+}
+
+fn text_advance(text: &str, latin_font: bool, fs: f32) -> f32 {
+    text.chars().map(|c| char_width(c, latin_font, fs)).sum()
+}
+
+fn anchor_coords(box_rect: [f32; 4], pos: &str, item_w: f32, item_h: f32, margin: f32) -> (f32, f32) {
+    let [x1, y1, x2, y2] = box_rect;
+    let (w, h) = (x2 - x1, y2 - y1);
+    let cx = match pos {
+        "top-left" | "middle-left" | "bottom-left" => x1 + margin + item_w / 2.0,
+        "top-right" | "middle-right" | "bottom-right" => x2 - margin - item_w / 2.0,
+        _ => x1 + w / 2.0,
+    };
+    let cy = match pos {
+        "top-left" | "top-center" | "top-right" => y2 - margin - item_h / 2.0,
+        "bottom-left" | "bottom-center" | "bottom-right" => y1 + margin + item_h / 2.0,
+        _ => y1 + h / 2.0,
+    };
+    (cx, cy)
+}
+
+/// Attach a Form XObject to `page_id` and draw it either under or over existing page contents.
+fn attach_form_layer(
+    doc: &mut Document,
+    page_id: ObjectId,
+    name: &str,
+    form_id: ObjectId,
+    under: bool,
+) -> R<()> {
+    doc.add_xobject(page_id, name.to_string(), form_id)
+        .map_err(e("写入图层资源失败"))?;
+    let mut contents = doc.get_page_contents(page_id);
+    if under {
+        let pre = doc.add_object(Stream::new(
+            dictionary! {},
+            format!("q\n/{name} Do\nQ\nq\n").into_bytes(),
+        ));
+        let post = doc.add_object(Stream::new(dictionary! {}, b"Q\n".to_vec()));
+        contents.insert(0, pre);
+        contents.push(post);
+    } else {
+        let pre = doc.add_object(Stream::new(dictionary! {}, b"q\n".to_vec()));
+        let post = doc.add_object(Stream::new(
+            dictionary! {},
+            format!("Q\nq\n/{name} Do\nQ\n").into_bytes(),
+        ));
+        contents.insert(0, pre);
+        contents.push(post);
+    }
+    doc.get_dictionary_mut(page_id)
+        .map_err(e("页面结构异常"))?
+        .set("Contents", Object::Array(contents.into_iter().map(Object::Reference).collect()));
+    Ok(())
+}
+
+/// Stamp a text or image watermark onto target pages.
+pub fn watermark_pdf(pdf: &[u8], password: Option<&str>, spec: &WatermarkSpec) -> R<Vec<u8>> {
+    let is_img = !spec.image_png.is_empty();
+    if !is_img && spec.text.trim().is_empty() {
+        return Err("水印内容不能为空".into());
+    }
+    let mut doc = load(pdf, password)?;
+    let ids = page_ids(&doc);
+    let targets: Vec<usize> = if spec.pages.is_empty() {
+        (0..ids.len()).collect()
+    } else {
+        spec.pages
+            .iter()
+            .filter(|&&p| p >= 1 && (p as usize) <= ids.len())
+            .map(|&p| p as usize - 1)
+            .collect()
+    };
+    if targets.is_empty() {
+        return Err("没有匹配的页码".into());
+    }
+
+    let opacity = spec.opacity.clamp(0.02, 1.0);
+    let rad = spec.rotate.to_radians();
+    let (cos_a, sin_a) = (rad.cos(), rad.sin());
+
+    // Pre-build image XObject once if this is an image watermark
+    let img_entry = if is_img {
+        let dims = image::load_from_memory(&spec.image_png).map_err(e("水印图片解码失败"))?;
+        let (iw, ih) = (dims.width().max(1) as f32, dims.height().max(1) as f32);
+        let (mut xobj, smask) = image_xobject(&spec.image_png)?;
+        if let Some(m) = smask {
+            let mid = doc.add_object(m);
+            xobj.dict.set("SMask", Object::Reference(mid));
+        }
+        let img_id = doc.add_object(xobj);
+        Some((img_id, iw, ih))
+    } else {
+        None
+    };
+
+    for (idx, &page_idx) in targets.iter().enumerate() {
+        let page_id = ids[page_idx];
+        let b = page_box(&doc, page_id);
+        let (pw, _ph) = ((b[2] - b[0]).max(1.0), (b[3] - b[1]).max(1.0));
+        let mut ops: Vec<Operation> = vec![
+            op("q", &[]),
+            Operation::new("gs", vec![Object::Name(b"GS1".to_vec())]),
+        ];
+        let mut res = dictionary! {
+            "ExtGState" => dictionary! {
+                "GS1" => dictionary! {
+                    "Type" => "ExtGState",
+                    "ca" => Object::Real(opacity),
+                    "CA" => Object::Real(opacity),
+                }
+            }
+        };
+
+        if let Some((img_id, iw, ih)) = img_entry {
+            let scale = spec.scale.clamp(0.05, 1.0);
+            let draw_w = pw * scale;
+            let draw_h = draw_w * (ih / iw);
+            res.set("XObject", Object::Dictionary(dictionary! { "WmImg" => img_id }));
+            let centers: Vec<(f32, f32)> = if spec.position == "tile" {
+                let step_x = (draw_w + spec.tile_spacing.max(40.0)).max(80.0);
+                let step_y = (draw_h + spec.tile_spacing.max(40.0)).max(80.0);
+                let mut pts = Vec::new();
+                let mut y = b[1] + step_y * 0.5;
+                while y < b[3] + step_y * 0.5 {
+                    let mut x = b[0] + step_x * 0.5;
+                    while x < b[2] + step_x * 0.5 {
+                        pts.push((x, y));
+                        x += step_x;
+                    }
+                    y += step_y;
+                }
+                pts
+            } else {
+                vec![anchor_coords(b, &spec.position, draw_w, draw_h, 36.0)]
+            };
+            for (cx, cy) in centers {
+                ops.push(op("q", &[]));
+                ops.push(op("cm", &[1.0, 0.0, 0.0, 1.0, cx, cy]));
+                ops.push(op("cm", &[cos_a, sin_a, -sin_a, cos_a, 0.0, 0.0]));
+                ops.push(op("cm", &[draw_w, 0.0, 0.0, draw_h, -draw_w / 2.0, -draw_h / 2.0]));
+                ops.push(Operation::new("Do", vec![Object::Name(b"WmImg".to_vec())]));
+                ops.push(op("Q", &[]));
+            }
+        } else {
+            let fs = spec.font_size.clamp(8.0, 240.0);
+            let text = spec.text.trim();
+            let latin_font = text.chars().all(is_latin);
+            let tw = text_advance(text, latin_font, fs);
+            let th = fs;
+            let [r, g, bl] = spec.color;
+            res.set("Font", Object::Dictionary(dictionary! { "F1" => text_font(latin_font) }));
+            let centers: Vec<(f32, f32)> = if spec.position == "tile" {
+                let step_x = (tw + spec.tile_spacing.max(60.0)).max(120.0);
+                let step_y = (th + spec.tile_spacing.max(60.0)).max(100.0);
+                let mut pts = Vec::new();
+                let mut row = 0i32;
+                let mut y = b[1] - step_y * 0.5;
+                while y <= b[3] + step_y {
+                    let offset = if row % 2 != 0 { step_x * 0.5 } else { 0.0 };
+                    let mut x = b[0] - step_x * 0.5 + offset;
+                    while x <= b[2] + step_x {
+                        pts.push((x, y));
+                        x += step_x;
+                    }
+                    y += step_y;
+                    row += 1;
+                }
+                pts
+            } else {
+                vec![anchor_coords(b, &spec.position, tw, th, 36.0)]
+            };
+            let encoded = text_bytes(text, latin_font);
+            for (cx, cy) in centers {
+                ops.push(op("q", &[]));
+                ops.push(op("cm", &[cos_a, sin_a, -sin_a, cos_a, cx, cy]));
+                ops.push(op("BT", &[]));
+                ops.push(Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), Object::Real(fs)]));
+                ops.push(op("rg", &[r, g, bl]));
+                ops.push(op("Td", &[-tw / 2.0, -fs * 0.35]));
+                ops.push(Operation::new("Tj", vec![encoded.clone()]));
+                ops.push(op("ET", &[]));
+                ops.push(op("Q", &[]));
+            }
+        }
+        ops.push(op("Q", &[]));
+        let content = Content { operations: ops }.encode().unwrap_or_default();
+        let form = dictionary! {
+            "Type" => "XObject",
+            "Subtype" => "Form",
+            "BBox" => nums(&b),
+            "Resources" => res,
+        };
+        let form_id = doc.add_object(Stream::new(form, content));
+        attach_form_layer(&mut doc, page_id, &format!("SoloWm{idx}"), form_id, spec.under)?;
+    }
+    save(&mut doc)
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct PageNumberSpec {
+    /// Format template: `{n}`, `{n} / {total}`, `第 {n} 页`, `DOC-{n:06}` (Bates)
+    #[serde(default = "default_pn_format")]
+    pub format: String,
+    /// bottom-center | bottom-left | bottom-right | top-center | top-left |
+    /// top-right | bottom-outside | top-outside | bottom-inside | top-inside
+    #[serde(default = "default_pn_pos")]
+    pub position: String,
+    #[serde(default = "default_pn_one")]
+    pub start_number: u32,
+    #[serde(default = "default_pn_one")]
+    pub from_page: u32,
+    /// 0 = through the last page
+    #[serde(default)]
+    pub to_page: u32,
+    #[serde(default = "default_pn_fs")]
+    pub font_size: f32,
+    #[serde(default = "default_pn_margin")]
+    pub margin: f32,
+    #[serde(default = "default_pn_color")]
+    pub color: [f32; 3],
+}
+
+fn default_pn_format() -> String { "{n}".into() }
+fn default_pn_pos() -> String { "bottom-center".into() }
+fn default_pn_one() -> u32 { 1 }
+fn default_pn_fs() -> f32 { 10.0 }
+fn default_pn_margin() -> f32 { 28.0 }
+fn default_pn_color() -> [f32; 3] { [0.25, 0.25, 0.25] }
+
+impl Default for PageNumberSpec {
+    fn default() -> Self {
+        Self {
+            format: default_pn_format(),
+            position: default_pn_pos(),
+            start_number: 1,
+            from_page: 1,
+            to_page: 0,
+            font_size: 10.0,
+            margin: 28.0,
+            color: default_pn_color(),
+        }
+    }
+}
+
+/// Format a page number or Bates label from a template string.
+pub fn format_page_number(tpl: &str, n: u32, total: u32, page: u32, pages: u32) -> String {
+    let mut s = tpl
+        .replace("{n}", &n.to_string())
+        .replace("{total}", &total.to_string())
+        .replace("{page}", &page.to_string())
+        .replace("{pages}", &pages.to_string());
+    // Support Bates zero-padding `{n:03}` .. `{n:09}`
+    for width in 2..=9usize {
+        let token = format!("{{n:0{width}}}");
+        if s.contains(&token) {
+            s = s.replace(&token, &format!("{n:0>width$}", width = width));
+        }
+    }
+    s
+}
+
+/// Stamp page numbers (or headers/footers/Bates numbers) onto pages.
+pub fn add_page_numbers(pdf: &[u8], password: Option<&str>, spec: &PageNumberSpec) -> R<Vec<u8>> {
+    let mut doc = load(pdf, password)?;
+    let ids = page_ids(&doc);
+    let total_pages = ids.len() as u32;
+    if total_pages == 0 {
+        return Err("PDF 没有页面".into());
+    }
+    let from = spec.from_page.max(1).min(total_pages);
+    let to = if spec.to_page == 0 {
+        total_pages
+    } else {
+        spec.to_page.max(from).min(total_pages)
+    };
+    let count = to - from + 1;
+    let fs = spec.font_size.clamp(6.0, 72.0);
+    let margin = spec.margin.clamp(6.0, 200.0);
+    let [r, g, bl] = spec.color;
+    let tpl = if spec.format.trim().is_empty() { "{n}" } else { spec.format.as_str() };
+
+    for p in from..=to {
+        let n = spec.start_number + (p - from);
+        let label = format_page_number(tpl, n, count, p, total_pages);
+        let latin_font = label.chars().all(is_latin);
+        let tw = text_advance(&label, latin_font, fs);
+        let page_id = ids[p as usize - 1];
+        let b = page_box(&doc, page_id);
+        let resolved_pos = match spec.position.as_str() {
+            "bottom-outside" => if p % 2 == 1 { "bottom-right" } else { "bottom-left" },
+            "bottom-inside" => if p % 2 == 1 { "bottom-left" } else { "bottom-right" },
+            "top-outside" => if p % 2 == 1 { "top-right" } else { "top-left" },
+            "top-inside" => if p % 2 == 1 { "top-left" } else { "top-right" },
+            other => other,
+        };
+        let (cx, cy) = anchor_coords(b, resolved_pos, tw, fs, margin);
+        let ops = vec![
+            op("q", &[]),
+            op("BT", &[]),
+            Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), Object::Real(fs)]),
+            op("rg", &[r, g, bl]),
+            op("Td", &[cx - tw / 2.0, cy - fs * 0.35]),
+            Operation::new("Tj", vec![text_bytes(&label, latin_font)]),
+            op("ET", &[]),
+            op("Q", &[]),
+        ];
+        let content = Content { operations: ops }.encode().unwrap_or_default();
+        let form = dictionary! {
+            "Type" => "XObject",
+            "Subtype" => "Form",
+            "BBox" => nums(&b),
+            "Resources" => dictionary! {
+                "Font" => dictionary! { "F1" => text_font(latin_font) }
+            },
+        };
+        let form_id = doc.add_object(Stream::new(form, content));
+        attach_form_layer(&mut doc, page_id, &format!("SoloPn{p}"), form_id, false)?;
+    }
+    save(&mut doc)
+}
+
+// ── extract embedded images ──────────────────────────────────────────────
+
+#[derive(Serialize, Clone, Debug)]
+pub struct ExtractedImage {
+    /// 1-based page where the image first appears
+    pub page: u32,
+    /// 1-based index across the document
+    pub index: u32,
+    pub width: u32,
+    pub height: u32,
+    /// "jpeg" | "png"
+    pub format: String,
+    /// "jpg" | "png"
+    pub ext: String,
+    #[serde(skip)]
+    pub bytes: Vec<u8>,
+}
+
+/// Extract embedded image XObjects from a PDF without lossy re-encoding.
+/// `min_dim` skips tiny spacer/decor images smaller than `min_dim` px.
+pub fn extract_images(pdf: &[u8], password: Option<&str>, min_dim: u32) -> R<Vec<ExtractedImage>> {
+    let doc = load(pdf, password)?;
+    let ids = page_ids(&doc);
+    let mut visited = std::collections::HashSet::new();
+    let mut out = Vec::new();
+
+    for (pi, &page_id) in ids.iter().enumerate() {
+        let page_no = (pi + 1) as u32;
+        let Some(res_obj) = inherited(&doc, page_id, b"Resources") else { continue };
+        let mut queue = vec![res_obj];
+        while let Some(r_obj) = queue.pop() {
+            let res_dict = match r_obj {
+                Object::Dictionary(d) => d,
+                Object::Reference(id) => match doc.get_dictionary(id) {
+                    Ok(d) => d.clone(),
+                    Err(_) => continue,
+                },
+                _ => continue,
+            };
+            let Ok(xobj_entry) = res_dict.get(b"XObject") else { continue };
+            let xobj_dict = match xobj_entry {
+                Object::Dictionary(d) => d.clone(),
+                Object::Reference(id) => match doc.get_dictionary(*id) {
+                    Ok(d) => d.clone(),
+                    Err(_) => continue,
+                },
+                _ => continue,
+            };
+            for (_, val) in xobj_dict.iter() {
+                let Object::Reference(xid) = val else { continue };
+                if !visited.insert(*xid) {
+                    continue;
+                }
+                let Ok(stream) = doc.get_object(*xid).and_then(|o| o.as_stream()) else { continue };
+                let subtype = stream.dict.get(b"Subtype").and_then(Object::as_name).unwrap_or(b"");
+                if subtype == b"Form" {
+                    if let Ok(sub_res) = stream.dict.get(b"Resources") {
+                        queue.push(sub_res.clone());
+                    }
+                    continue;
+                }
+                if subtype != b"Image" {
+                    continue;
+                }
+                let w = stream.dict.get(b"Width").and_then(Object::as_i64).unwrap_or(0) as u32;
+                let h = stream.dict.get(b"Height").and_then(Object::as_i64).unwrap_or(0) as u32;
+                if w < min_dim || h < min_dim || w == 0 || h == 0 {
+                    continue;
+                }
+                if let Some((fmt, ext, bytes)) = decode_pdf_image(&doc, stream, w, h) {
+                    let index = (out.len() + 1) as u32;
+                    out.push(ExtractedImage {
+                        page: page_no,
+                        index,
+                        width: w,
+                        height: h,
+                        format: fmt.into(),
+                        ext: ext.into(),
+                        bytes,
+                    });
+                }
+            }
         }
     }
     Ok(out)
+}
+
+fn decode_pdf_image(
+    doc: &Document,
+    stream: &Stream,
+    w: u32,
+    h: u32,
+) -> Option<(&'static str, &'static str, Vec<u8>)> {
+    let filters = stream.filters().unwrap_or_default();
+    let is_jpeg = filters.iter().any(|f| *f == b"DCTDecode");
+    let smask_stream = stream
+        .dict
+        .get(b"SMask")
+        .and_then(Object::as_reference)
+        .and_then(|id| doc.get_object(id))
+        .and_then(|o| o.as_stream())
+        .ok();
+
+    // Direct lossless JPEG passthrough when there is no soft mask
+    if is_jpeg && smask_stream.is_none() {
+        return Some(("jpeg", "jpg", stream.content.clone()));
+    }
+
+    let dyn_img = if is_jpeg {
+        image::load_from_memory(&stream.content).ok()?
+    } else {
+        let bpc = stream.dict.get(b"BitsPerComponent").and_then(Object::as_i64).unwrap_or(8);
+        if bpc != 8 {
+            return None;
+        }
+        let cs = stream.dict.get(b"ColorSpace").and_then(Object::as_name).unwrap_or(b"DeviceRGB");
+        let raw = stream.decompressed_content().ok()?;
+        if cs == b"DeviceGray" {
+            let need = (w * h) as usize;
+            if raw.len() < need {
+                return None;
+            }
+            image::DynamicImage::ImageLuma8(image::GrayImage::from_raw(w, h, raw[..need].to_vec())?)
+        } else if cs == b"DeviceRGB" {
+            let need = (w * h * 3) as usize;
+            if raw.len() < need {
+                return None;
+            }
+            image::DynamicImage::ImageRgb8(image::RgbImage::from_raw(w, h, raw[..need].to_vec())?)
+        } else {
+            return None;
+        }
+    };
+
+    let mut png_bytes = Vec::new();
+    if let Some(sm) = smask_stream {
+        if let Ok(alpha) = sm.decompressed_content() {
+            if alpha.len() >= (w * h) as usize {
+                let mut rgba = dyn_img.to_rgba8();
+                for (i, p) in rgba.pixels_mut().enumerate() {
+                    p.0[3] = alpha[i];
+                }
+                image::DynamicImage::ImageRgba8(rgba)
+                    .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+                    .ok()?;
+                return Some(("png", "png", png_bytes));
+            }
+        }
+    }
+    dyn_img
+        .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+        .ok()?;
+    Some(("png", "png", png_bytes))
+}
+
+// ── sanitize / flatten / redact ──────────────────────────────────────────
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct SanitizeSpec {
+    #[serde(default = "default_true")]
+    pub metadata: bool,
+    #[serde(default)]
+    pub annotations: bool,
+    #[serde(default)]
+    pub attachments: bool,
+    #[serde(default = "default_true")]
+    pub javascript_actions: bool,
+    #[serde(default)]
+    pub forms: bool,
+}
+
+fn default_true() -> bool { true }
+
+impl Default for SanitizeSpec {
+    fn default() -> Self {
+        Self {
+            metadata: true,
+            annotations: false,
+            attachments: false,
+            javascript_actions: true,
+            forms: false,
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct SanitizeReport {
+    pub removed_metadata: bool,
+    pub removed_annotations: usize,
+    pub removed_attachments: bool,
+    pub removed_actions: usize,
+    pub removed_forms: bool,
+}
+
+/// Strip metadata, XMP streams, scripts, annotations, attachments or forms.
+pub fn sanitize_pdf(
+    pdf: &[u8],
+    password: Option<&str>,
+    spec: &SanitizeSpec,
+) -> R<(Vec<u8>, SanitizeReport)> {
+    let mut doc = load(pdf, password)?;
+    let mut report = SanitizeReport::default();
+
+    if spec.metadata {
+        if doc.trailer.remove(b"Info").is_some() {
+            report.removed_metadata = true;
+        }
+        let all_ids: Vec<ObjectId> = doc.objects.keys().copied().collect();
+        for id in all_ids {
+            if let Ok(Object::Dictionary(d)) = doc.get_object_mut(id) {
+                for key in [&b"Metadata"[..], b"PieceInfo", b"SpiderInfo", b"StructTreeRoot", b"MarkInfo"] {
+                    if d.remove(key).is_some() {
+                        report.removed_metadata = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if spec.javascript_actions {
+        let all_ids: Vec<ObjectId> = doc.objects.keys().copied().collect();
+        for id in all_ids {
+            if let Ok(Object::Dictionary(d)) = doc.get_object_mut(id) {
+                for key in [&b"OpenAction"[..], b"AA", b"JS", b"JavaScript", b"Launch"] {
+                    if d.remove(key).is_some() {
+                        report.removed_actions += 1;
+                    }
+                }
+            }
+        }
+        if let Ok(cat) = doc.catalog_mut() {
+            if let Ok(Object::Dictionary(names)) = cat.get_mut(b"Names") {
+                if names.remove(b"JavaScript").is_some() {
+                    report.removed_actions += 1;
+                }
+            }
+        }
+    }
+
+    if spec.attachments {
+        if let Ok(cat) = doc.catalog_mut() {
+            if cat.remove(b"AF").is_some() {
+                report.removed_attachments = true;
+            }
+            if let Ok( names_ref ) = cat.get(b"Names").cloned() {
+                match names_ref {
+                    Object::Dictionary(mut nd) => {
+                        if nd.remove(b"EmbeddedFiles").is_some() {
+                            report.removed_attachments = true;
+                        }
+                        cat.set("Names", Object::Dictionary(nd));
+                    }
+                    Object::Reference(nid) => {
+                        if let Ok(Object::Dictionary(nd)) = doc.get_object_mut(nid) {
+                            if nd.remove(b"EmbeddedFiles").is_some() {
+                                report.removed_attachments = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if spec.forms {
+        if let Ok(cat) = doc.catalog_mut() {
+            if cat.remove(b"AcroForm").is_some() {
+                report.removed_forms = true;
+            }
+        }
+    }
+
+    let pages = page_ids(&doc);
+    for page_id in pages {
+        if spec.annotations {
+            if let Ok(annots) = doc.get_page_annotations(page_id) {
+                report.removed_annotations += annots.len();
+            }
+            if let Ok(d) = doc.get_dictionary_mut(page_id) {
+                d.remove(b"Annots");
+            }
+        } else if spec.attachments || spec.forms {
+            // Selective filter of /Annots
+            let existing = doc
+                .get_dictionary(page_id)
+                .ok()
+                .and_then(|d| d.get(b"Annots").ok().cloned());
+            let list: Vec<Object> = match existing {
+                Some(Object::Array(v)) => v,
+                Some(Object::Reference(r)) => match doc.get_object(r) {
+                    Ok(Object::Array(v)) => v.clone(),
+                    _ => Vec::new(),
+                },
+                _ => Vec::new(),
+            };
+            if !list.is_empty() {
+                let mut kept = Vec::new();
+                for item in list {
+                    let sub = match &item {
+                        Object::Reference(aid) => doc
+                            .get_dictionary(*aid)
+                            .ok()
+                            .and_then(|d| d.get(b"Subtype").and_then(Object::as_name).ok())
+                            .map(|b| b.to_vec()),
+                        Object::Dictionary(d) => d
+                            .get(b"Subtype")
+                            .and_then(Object::as_name)
+                            .ok()
+                            .map(|b| b.to_vec()),
+                        _ => None,
+                    };
+                    let drop = (spec.attachments && sub.as_deref() == Some(b"FileAttachment"))
+                        || (spec.forms && sub.as_deref() == Some(b"Widget"));
+                    if drop {
+                        if sub.as_deref() == Some(b"FileAttachment") {
+                            report.removed_attachments = true;
+                        } else {
+                            report.removed_forms = true;
+                        }
+                    } else {
+                        kept.push(item);
+                    }
+                }
+                if let Ok(d) = doc.get_dictionary_mut(page_id) {
+                    if kept.is_empty() {
+                        d.remove(b"Annots");
+                    } else {
+                        d.set("Annots", Object::Array(kept));
+                    }
+                }
+            }
+        }
+    }
+
+    doc.prune_objects();
+    doc.renumber_objects();
+    Ok((save(&mut doc)?, report))
+}
+
+/// Flatten interactive annotations and form widgets into static page content
+/// so they can no longer be edited or removed separately.
+pub fn flatten_pdf(pdf: &[u8], password: Option<&str>) -> R<Vec<u8>> {
+    let mut doc = load(pdf, password)?;
+    let pages = page_ids(&doc);
+    let mut seq = 0usize;
+
+    for page_id in pages {
+        let pbox = page_box(&doc, page_id);
+        let annots: Vec<Dictionary> = doc
+            .get_page_annotations(page_id)
+            .map(|v| v.into_iter().cloned().collect())
+            .unwrap_or_default();
+        if annots.is_empty() {
+            continue;
+        }
+        let mut draw_ops: Vec<Operation> = vec![op("q", &[])];
+        let mut xobjects = Dictionary::new();
+
+        for ad in annots {
+            let subtype = ad.get(b"Subtype").and_then(Object::as_name).unwrap_or(b"");
+            if subtype == b"Link" || subtype == b"Popup" {
+                continue;
+            }
+            let rect = ad
+                .get(b"Rect")
+                .and_then(Object::as_array)
+                .map(|a| {
+                    let v: Vec<f32> = a
+                        .iter()
+                        .map(|o| o.as_float().unwrap_or_else(|_| o.as_i64().unwrap_or(0) as f32))
+                        .collect();
+                    if v.len() == 4 {
+                        [v[0].min(v[2]), v[1].min(v[3]), v[0].max(v[2]), v[1].max(v[3])]
+                    } else {
+                        [0.0; 4]
+                    }
+                })
+                .unwrap_or([0.0; 4]);
+            let (rw, rh) = (rect[2] - rect[0], rect[3] - rect[1]);
+            if rw <= 0.0 || rh <= 0.0 {
+                continue;
+            }
+
+            // 1. Check if the annotation has an appearance stream (/AP -> /N)
+            let ap_n_id = ad
+                .get(b"AP")
+                .ok()
+                .and_then(|o| match o {
+                    Object::Dictionary(d) => Some(d),
+                    Object::Reference(id) => doc.get_dictionary(*id).ok(),
+                    _ => None,
+                })
+                .and_then(|ap| ap.get(b"N").ok())
+                .and_then(|n| match n {
+                    Object::Reference(id) => match doc.get_object(*id) {
+                        Ok(Object::Stream(_)) => Some(*id),
+                        Ok(Object::Dictionary(states)) => {
+                            let state = ad.get(b"AS").and_then(Object::as_name).unwrap_or(b"Off");
+                            states.get(state).and_then(Object::as_reference).ok()
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                });
+
+            if let Some(ap_id) = ap_n_id {
+                let bbox = doc
+                    .get_object(ap_id)
+                    .and_then(|o| o.as_stream())
+                    .and_then(|s| s.dict.get(b"BBox"))
+                    .and_then(Object::as_array)
+                    .map(|a| {
+                        let v: Vec<f32> = a
+                            .iter()
+                            .map(|o| o.as_float().unwrap_or_else(|_| o.as_i64().unwrap_or(0) as f32))
+                            .collect();
+                        if v.len() == 4 { [v[0], v[1], v[2], v[3]] } else { rect }
+                    })
+                    .unwrap_or(rect);
+                let bw = (bbox[2] - bbox[0]).abs().max(0.001);
+                let bh = (bbox[3] - bbox[1]).abs().max(0.001);
+                let sx = rw / bw;
+                let sy = rh / bh;
+                let tx = rect[0] - bbox[0].min(bbox[2]) * sx;
+                let ty = rect[1] - bbox[1].min(bbox[3]) * sy;
+                let xname = format!("FlatAp{seq}");
+                seq += 1;
+                xobjects.set(xname.clone(), Object::Reference(ap_id));
+                draw_ops.push(op("q", &[]));
+                draw_ops.push(op("cm", &[sx, 0.0, 0.0, sy, tx, ty]));
+                draw_ops.push(Operation::new("Do", vec![Object::Name(xname.into_bytes())]));
+                draw_ops.push(op("Q", &[]));
+                continue;
+            }
+
+            // 2. Synthesize appearance for standard markup without /AP
+            let color: [f32; 3] = ad
+                .get(b"C")
+                .and_then(Object::as_array)
+                .map(|a| {
+                    let v: Vec<f32> = a.iter().map(|o| o.as_float().unwrap_or(0.0)).collect();
+                    if v.len() == 3 { [v[0], v[1], v[2]] } else { [1.0, 0.85, 0.2] }
+                })
+                .unwrap_or([1.0, 0.85, 0.2]);
+            draw_ops.push(op("q", &[]));
+            if subtype == b"Highlight" {
+                // Light tint rectangle
+                let [r, g, b] = [
+                    1.0 - (1.0 - color[0]) * 0.35,
+                    1.0 - (1.0 - color[1]) * 0.35,
+                    1.0 - (1.0 - color[2]) * 0.35,
+                ];
+                draw_ops.push(op("rg", &[r, g, b]));
+                draw_ops.push(op("re", &[rect[0], rect[1], rw, rh]));
+                draw_ops.push(op("f", &[]));
+            } else if subtype == b"Underline" || subtype == b"StrikeOut" || subtype == b"Squiggly" {
+                let y = if subtype == b"StrikeOut" { rect[1] + rh * 0.5 } else { rect[1] + 1.0 };
+                draw_ops.push(op("RG", &color));
+                draw_ops.push(op("w", &[1.2]));
+                draw_ops.push(op("m", &[rect[0], y]));
+                draw_ops.push(op("l", &[rect[2], y]));
+                draw_ops.push(op("S", &[]));
+            } else if subtype == b"Square" {
+                draw_ops.push(op("RG", &color));
+                draw_ops.push(op("w", &[1.5]));
+                draw_ops.push(op("re", &[rect[0], rect[1], rw, rh]));
+                draw_ops.push(op("S", &[]));
+            }
+            draw_ops.push(op("Q", &[]));
+        }
+
+        draw_ops.push(op("Q", &[]));
+        if draw_ops.len() > 2 {
+            let content = Content { operations: draw_ops }.encode().unwrap_or_default();
+            let mut form = dictionary! {
+                "Type" => "XObject",
+                "Subtype" => "Form",
+                "BBox" => nums(&pbox),
+            };
+            if !xobjects.is_empty() {
+                form.set("Resources", Object::Dictionary(dictionary! { "XObject" => xobjects }));
+            }
+            let form_id = doc.add_object(Stream::new(form, content));
+            attach_form_layer(&mut doc, page_id, &format!("SoloFlatPage{seq}"), form_id, false)?;
+            seq += 1;
+        }
+        if let Ok(d) = doc.get_dictionary_mut(page_id) {
+            d.remove(b"Annots");
+        }
+    }
+
+    if let Ok(cat) = doc.catalog_mut() {
+        cat.remove(b"AcroForm");
+    }
+    doc.prune_objects();
+    doc.renumber_objects();
+    save(&mut doc)
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct RedactRect {
+    /// 1-based page number
+    pub page: u32,
+    /// `[x1, y1, x2, y2]` in PDF user-space points
+    pub rect: [f32; 4],
+    #[serde(default)]
+    pub color: [f32; 3],
+    #[serde(default)]
+    pub label: String,
+}
+
+fn rects_overlap(a: [f32; 4], b: [f32; 4]) -> bool {
+    let (ax1, ay1, ax2, ay2) = (a[0].min(a[2]), a[1].min(a[3]), a[0].max(a[2]), a[1].max(a[3]));
+    let (bx1, by1, bx2, by2) = (b[0].min(b[2]), b[1].min(b[3]), b[0].max(b[2]), b[1].max(b[3]));
+    ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1
+}
+
+fn mat_mul(m1: [f32; 6], m2: [f32; 6]) -> [f32; 6] {
+    [
+        m1[0] * m2[0] + m1[1] * m2[2],
+        m1[0] * m2[1] + m1[1] * m2[3],
+        m1[2] * m2[0] + m1[3] * m2[2],
+        m1[2] * m2[1] + m1[3] * m2[3],
+        m1[4] * m2[0] + m1[5] * m2[2] + m2[4],
+        m1[4] * m2[1] + m1[5] * m2[3] + m2[5],
+    ]
+}
+
+fn op_floats(op: &Operation) -> Vec<f32> {
+    op.operands
+        .iter()
+        .map(|o| o.as_float().unwrap_or_else(|_| o.as_i64().unwrap_or(0) as f32))
+        .collect()
+}
+
+/// Remove text-showing operations from `raw_content` whose position overlaps any `boxes`.
+fn strip_text_in_rects(raw_content: &[u8], boxes: &[[f32; 4]]) -> Option<Vec<u8>> {
+    let decoded = Content::decode(raw_content).ok()?;
+    let mut ctm = [1.0f32, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let mut ctm_stack: Vec<[f32; 6]> = Vec::new();
+    let mut tm = [1.0f32, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let mut tlm = [1.0f32, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let mut font_size = 12.0f32;
+    let mut leading = 14.0f32;
+    let mut out_ops = Vec::with_capacity(decoded.operations.len());
+
+    for op in decoded.operations {
+        match op.operator.as_str() {
+            "q" => {
+                ctm_stack.push(ctm);
+                out_ops.push(op);
+            }
+            "Q" => {
+                if let Some(prev) = ctm_stack.pop() {
+                    ctm = prev;
+                }
+                out_ops.push(op);
+            }
+            "cm" => {
+                let v = op_floats(&op);
+                if v.len() == 6 {
+                    ctm = mat_mul([v[0], v[1], v[2], v[3], v[4], v[5]], ctm);
+                }
+                out_ops.push(op);
+            }
+            "BT" => {
+                tm = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+                tlm = tm;
+                out_ops.push(op);
+            }
+            "Tf" => {
+                if let Some(fs) = op.operands.get(1) {
+                    font_size = fs.as_float().unwrap_or_else(|_| fs.as_i64().unwrap_or(12) as f32).abs().max(1.0);
+                }
+                out_ops.push(op);
+            }
+            "TL" => {
+                let v = op_floats(&op);
+                if let Some(&tl) = v.first() {
+                    leading = tl;
+                }
+                out_ops.push(op);
+            }
+            "Tm" => {
+                let v = op_floats(&op);
+                if v.len() == 6 {
+                    tm = [v[0], v[1], v[2], v[3], v[4], v[5]];
+                    tlm = tm;
+                }
+                out_ops.push(op);
+            }
+            "Td" | "TD" => {
+                let v = op_floats(&op);
+                if v.len() == 2 {
+                    if op.operator == "TD" {
+                        leading = -v[1];
+                    }
+                    tlm = mat_mul([1.0, 0.0, 0.0, 1.0, v[0], v[1]], tlm);
+                    tm = tlm;
+                }
+                out_ops.push(op);
+            }
+            "T*" => {
+                tlm = mat_mul([1.0, 0.0, 0.0, 1.0, 0.0, -leading], tlm);
+                tm = tlm;
+                out_ops.push(op);
+            }
+            "Tj" | "TJ" | "'" | "\"" => {
+                if op.operator == "'" || op.operator == "\"" {
+                    tlm = mat_mul([1.0, 0.0, 0.0, 1.0, 0.0, -leading], tlm);
+                    tm = tlm;
+                }
+                let m = mat_mul(tm, ctm);
+                let scale_y = (m[2].hypot(m[3])).max(1.0);
+                let scale_x = (m[0].hypot(m[1])).max(1.0);
+                let h = (font_size * scale_y).max(6.0);
+                // Estimate character count of the shown string(s)
+                let char_count: usize = op
+                    .operands
+                    .iter()
+                    .map(|o| match o {
+                        Object::String(b, _) => b.len().max(1),
+                        Object::Array(arr) => arr
+                            .iter()
+                            .map(|it| match it {
+                                Object::String(b, _) => b.len(),
+                                _ => 0,
+                            })
+                            .sum(),
+                        _ => 0,
+                    })
+                    .sum();
+                let w = (char_count.max(1) as f32) * font_size * scale_x * 0.55;
+                let tx = m[4];
+                let ty = m[5];
+                let text_box = [tx, ty - h * 0.25, tx + w, ty + h * 0.85];
+                let hit = boxes.iter().any(|r| rects_overlap(text_box, *r));
+                if !hit {
+                    out_ops.push(op);
+                }
+                // Advance horizontal position so subsequentTj on the same line stays in place
+                tm[4] += (char_count as f32) * font_size * 0.5 * tm[0];
+            }
+            _ => out_ops.push(op),
+        }
+    }
+    Content { operations: out_ops }.encode().ok()
+}
+
+/// True redaction: strips underlying text-showing operations overlapping the
+/// redaction rectangles, removes overlapping annotations, paints opaque boxes,
+/// and optionally sanitizes document metadata.
+pub fn redact_pdf(
+    pdf: &[u8],
+    password: Option<&str>,
+    rects: &[RedactRect],
+    strip_metadata: bool,
+) -> R<Vec<u8>> {
+    if rects.is_empty() {
+        return Err("没有指定脱敏区域".into());
+    }
+    let mut doc = load(pdf, password)?;
+    let ids = page_ids(&doc);
+    let mut by_page: std::collections::BTreeMap<u32, Vec<&RedactRect>> = Default::default();
+    for r in rects {
+        if r.page >= 1 && (r.page as usize) <= ids.len() {
+            by_page.entry(r.page).or_default().push(r);
+        }
+    }
+    if by_page.is_empty() {
+        return Err("脱敏区域页码超出范围".into());
+    }
+
+    for (page_no, list) in by_page {
+        let page_id = ids[page_no as usize - 1];
+        let pbox = page_box(&doc, page_id);
+        let boxes: Vec<[f32; 4]> = list
+            .iter()
+            .map(|r| {
+                let q = r.rect;
+                [q[0].min(q[2]), q[1].min(q[3]), q[0].max(q[2]), q[1].max(q[3])]
+            })
+            .collect();
+
+        // 1. Strip underlying text operations inside the redaction boxes
+        if let Ok(raw) = doc.get_page_content(page_id) {
+            if let Some(cleaned) = strip_text_in_rects(&raw, &boxes) {
+                let new_stream = doc.add_object(Stream::new(dictionary! {}, cleaned));
+                if let Ok(d) = doc.get_dictionary_mut(page_id) {
+                    d.set("Contents", Object::Reference(new_stream));
+                }
+            }
+        }
+
+        // 2. Drop annotations overlapping any redaction box
+        let existing_annots = doc
+            .get_dictionary(page_id)
+            .ok()
+            .and_then(|d| d.get(b"Annots").ok().cloned());
+        if let Some(Object::Array(arr)) = existing_annots {
+            let mut kept = Vec::new();
+            for item in arr {
+                let arect = match &item {
+                    Object::Reference(aid) => doc.get_dictionary(*aid).ok().and_then(|d| d.get(b"Rect").ok()),
+                    Object::Dictionary(d) => d.get(b"Rect").ok(),
+                    _ => None,
+                }
+                .and_then(|o| o.as_array().ok())
+                .map(|a| {
+                    let v: Vec<f32> = a.iter().map(|x| x.as_float().unwrap_or(0.0)).collect();
+                    if v.len() == 4 { Some([v[0], v[1], v[2], v[3]]) } else { None }
+                })
+                .flatten();
+                let overlaps = arect.map_or(false, |ar| boxes.iter().any(|br| rects_overlap(ar, *br)));
+                if !overlaps {
+                    kept.push(item);
+                }
+            }
+            if let Ok(d) = doc.get_dictionary_mut(page_id) {
+                if kept.is_empty() {
+                    d.remove(b"Annots");
+                } else {
+                    d.set("Annots", Object::Array(kept));
+                }
+            }
+        }
+
+        // 3. Draw opaque redaction boxes (plus optional label)
+        let mut ops: Vec<Operation> = vec![op("q", &[])];
+        let mut need_font = None;
+        for (i, r) in list.iter().enumerate() {
+            let [x1, y1, x2, y2] = boxes[i];
+            let (w, h) = (x2 - x1, y2 - y1);
+            let [cr, cg, cb] = r.color;
+            ops.push(op("rg", &[cr, cg, cb]));
+            ops.push(op("re", &[x1, y1, w, h]));
+            ops.push(op("f", &[]));
+            let lbl = r.label.trim();
+            if !lbl.is_empty() && w > 16.0 && h > 6.0 {
+                let latin = lbl.chars().all(is_latin);
+                need_font = Some(latin);
+                let fs = (h * 0.65).clamp(6.0, 14.0);
+                let tw = text_advance(lbl, latin, fs);
+                // Contrasting text color (white on dark box, black on light box)
+                let lum = 0.299 * cr + 0.587 * cg + 0.114 * cb;
+                let tc = if lum < 0.5 { 1.0 } else { 0.0 };
+                ops.push(op("BT", &[]));
+                ops.push(Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), Object::Real(fs)]));
+                ops.push(op("rg", &[tc, tc, tc]));
+                ops.push(op("Td", &[x1 + (w - tw).max(2.0) / 2.0, y1 + (h - fs * 0.75) / 2.0]));
+                ops.push(Operation::new("Tj", vec![text_bytes(lbl, latin)]));
+                ops.push(op("ET", &[]));
+            }
+        }
+        ops.push(op("Q", &[]));
+        let content = Content { operations: ops }.encode().unwrap_or_default();
+        let mut form = dictionary! {
+            "Type" => "XObject",
+            "Subtype" => "Form",
+            "BBox" => nums(&pbox),
+        };
+        if let Some(latin) = need_font {
+            form.set(
+                "Resources",
+                Object::Dictionary(dictionary! { "Font" => dictionary! { "F1" => text_font(latin) } }),
+            );
+        }
+        let form_id = doc.add_object(Stream::new(form, content));
+        attach_form_layer(&mut doc, page_id, &format!("SoloRedact{page_no}"), form_id, false)?;
+    }
+
+    if strip_metadata {
+        doc.trailer.remove(b"Info");
+        let all_ids: Vec<ObjectId> = doc.objects.keys().copied().collect();
+        for id in all_ids {
+            if let Ok(Object::Dictionary(d)) = doc.get_object_mut(id) {
+                d.remove(b"Metadata");
+                d.remove(b"PieceInfo");
+            }
+        }
+    }
+    doc.prune_objects();
+    doc.renumber_objects();
+    save(&mut doc)
 }
 
 #[cfg(test)]
@@ -1526,6 +2825,231 @@ mod tests {
             Document::load_mem(&out).unwrap().get_pages().len(),
             Document::load_mem(&src).unwrap().get_pages().len()
         );
+    }
+
+    #[test]
+    fn arrange_supports_blank_page_and_duplicate_page() {
+        let src = sample();
+        let orig_sizes = page_sizes(&src, None).unwrap();
+        // [1, 0, 1]: page 1, a blank page matching page 1's size, then a cloned page 1
+        let out = arrange_pages(&src, None, &[1, 0, 1]).unwrap();
+        let doc = Document::load_mem(&out).unwrap();
+        let pages: Vec<_> = doc.get_pages().into_values().collect();
+        assert_eq!(pages.len(), 3);
+        // Distinct ObjectIds so duplicating a page never aliases in /Kids
+        assert_ne!(pages[0], pages[1]);
+        assert_ne!(pages[0], pages[2]);
+        assert_ne!(pages[1], pages[2]);
+        let new_sizes = page_sizes(&out, None).unwrap();
+        assert_eq!(new_sizes[0], orig_sizes[0]);
+        assert_eq!(new_sizes[1], orig_sizes[0], "blank page inherits neighbor size");
+        assert!(doc.get_page_content(pages[1]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn crop_pages_shrinks_boxes_and_honours_odd_even() {
+        let src = sample();
+        let orig = page_sizes(&src, None).unwrap();
+        let spec = CropSpec {
+            margins: [20.0, 10.0, 30.0, 15.0],
+            odd_margins: Some([40.0, 10.0, 20.0, 10.0]),
+            even_margins: Some([10.0, 20.0, 10.0, 30.0]),
+            ..Default::default()
+        };
+        let out = crop_pages(&src, None, &spec).unwrap();
+        let cropped = page_sizes(&out, None).unwrap();
+        // Page 1 (odd): width - (10+10)=20, height - (40+20)=60
+        assert!((cropped[0].0 - (orig[0].0 - 20.0)).abs() < 0.5);
+        assert!((cropped[0].1 - (orig[0].1 - 60.0)).abs() < 0.5);
+        // Page 2 (even): width - (20+30)=50, height - (10+10)=20
+        assert!((cropped[1].0 - (orig[1].0 - 50.0)).abs() < 0.5);
+        assert!((cropped[1].1 - (orig[1].1 - 20.0)).abs() < 0.5);
+    }
+
+    #[test]
+    fn watermark_text_and_tile_and_under_mode() {
+        let src = sample();
+        let spec = WatermarkSpec {
+            text: "机密 CONFIDENTIAL".into(),
+            font_size: 36.0,
+            opacity: 0.25,
+            rotate: 45.0,
+            position: "tile".into(),
+            tile_spacing: 160.0,
+            under: true,
+            pages: vec![1, 2],
+            ..Default::default()
+        };
+        let out = watermark_pdf(&src, None, &spec).unwrap();
+        let doc = Document::load_mem(&out).unwrap();
+        let p1 = *doc.get_pages().get(&1).unwrap();
+        let content = String::from_utf8_lossy(&doc.get_page_content(p1).unwrap()).into_owned();
+        assert!(content.starts_with("q\n/SoloWm0 Do"), "under=true must prepend watermark: {content}");
+    }
+
+    #[test]
+    fn page_numbers_and_bates_formatting() {
+        assert_eq!(
+            format_page_number("第 {n} 页 / 共 {total} 页", 3, 10, 4, 12),
+            "第 3 页 / 共 10 页"
+        );
+        assert_eq!(
+            format_page_number("BATES-{n:06}", 42, 100, 42, 100),
+            "BATES-000042"
+        );
+        let src = sample();
+        let spec = PageNumberSpec {
+            format: "Page {n} of {total}".into(),
+            position: "bottom-outside".into(),
+            start_number: 1,
+            from_page: 2,
+            to_page: 3,
+            ..Default::default()
+        };
+        let out = add_page_numbers(&src, None, &spec).unwrap();
+        let doc = Document::load_mem(&out).unwrap();
+        let p1 = *doc.get_pages().get(&1).unwrap();
+        let p2 = *doc.get_pages().get(&2).unwrap();
+        assert!(!String::from_utf8_lossy(&doc.get_page_content(p1).unwrap()).contains("/SoloPn"));
+        assert!(String::from_utf8_lossy(&doc.get_page_content(p2).unwrap()).contains("/SoloPn2 Do"));
+    }
+
+    #[test]
+    fn extract_embedded_images_losslessly() {
+        let mut png = Vec::new();
+        let img = image::RgbImage::from_pixel(80, 60, image::Rgb([40, 120, 200]));
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let pdf = images_to_pdf(&[png], 72.0).unwrap();
+        let extracted = extract_images(&pdf, None, 32).unwrap();
+        assert_eq!(extracted.len(), 1);
+        assert_eq!(extracted[0].width, 80);
+        assert_eq!(extracted[0].height, 60);
+        assert_eq!(extracted[0].page, 1);
+        assert!(!extracted[0].bytes.is_empty());
+    }
+
+    #[test]
+    fn sanitize_strips_metadata_and_annotations() {
+        let annotated = write_annotations(
+            &sample(),
+            None,
+            &[AnnotSpec {
+                page: 1,
+                kind: "highlight".into(),
+                quads: vec![[50.0, 50.0, 120.0, 65.0]],
+                color: [1.0, 0.9, 0.2],
+                contents: "secret note".into(),
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+        let (clean, report) = sanitize_pdf(
+            &annotated,
+            None,
+            &SanitizeSpec {
+                metadata: true,
+                annotations: true,
+                attachments: true,
+                javascript_actions: true,
+                forms: true,
+            },
+        )
+        .unwrap();
+        assert!(report.removed_annotations >= 1);
+        let doc = Document::load_mem(&clean).unwrap();
+        assert!(doc.trailer.get(b"Info").is_err(), "/Info must be gone");
+        let p1 = *doc.get_pages().get(&1).unwrap();
+        assert!(doc.get_dictionary(p1).unwrap().get(b"Annots").is_err());
+    }
+
+    #[test]
+    fn flatten_bakes_annotations_and_removes_annots_dict() {
+        let annotated = write_annotations(
+            &sample(),
+            None,
+            &[
+                AnnotSpec {
+                    page: 1,
+                    kind: "rect".into(),
+                    quads: vec![[100.0, 100.0, 200.0, 180.0]],
+                    color: [0.9, 0.1, 0.1],
+                    width: 2.0,
+                    ..Default::default()
+                },
+                AnnotSpec {
+                    page: 1,
+                    kind: "highlight".into(),
+                    quads: vec![[100.0, 300.0, 200.0, 315.0]],
+                    color: [1.0, 0.9, 0.2],
+                    ..Default::default()
+                },
+            ],
+        )
+        .unwrap();
+        let flat = flatten_pdf(&annotated, None).unwrap();
+        let doc = Document::load_mem(&flat).unwrap();
+        let p1 = *doc.get_pages().get(&1).unwrap();
+        assert!(doc.get_dictionary(p1).unwrap().get(b"Annots").is_err(), "/Annots must be removed after flatten");
+        let content = String::from_utf8_lossy(&doc.get_page_content(p1).unwrap()).into_owned();
+        assert!(content.contains("/SoloFlatPage"), "flattened layer must be drawn in page content");
+    }
+
+    #[test]
+    fn redact_strips_underlying_text_and_paints_opaque_box() {
+        // Build a synthetic PDF with two text strings at known coordinates:
+        // "KEEP_ME" at (72, 700) and "SECRET_42" at (72, 500)
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let ops = vec![
+            op("BT", &[]),
+            Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), Object::Real(12.0)]),
+            op("Td", &[72.0, 700.0]),
+            Operation::new("Tj", vec![Object::string_literal("KEEP_ME")]),
+            op("Td", &[0.0, -200.0]),
+            Operation::new("Tj", vec![Object::string_literal("SECRET_42")]),
+            op("ET", &[]),
+        ];
+        let content_id = doc.add_object(Stream::new(dictionary! {}, Content { operations: ops }.encode().unwrap()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => nums(&[0.0, 0.0, 612.0, 792.0]),
+            "Contents" => content_id,
+            "Resources" => dictionary! { "Font" => dictionary! { "F1" => text_font(true) } },
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![Object::Reference(page_id)],
+                "Count" => 1,
+            }),
+        );
+        let cat_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", cat_id);
+        let src = save(&mut doc).unwrap();
+
+        // Redact the box around (72, 500) where SECRET_42 sits
+        let out = redact_pdf(
+            &src,
+            None,
+            &[RedactRect {
+                page: 1,
+                rect: [65.0, 490.0, 200.0, 520.0],
+                color: [0.0, 0.0, 0.0],
+                label: "REDACTED".into(),
+            }],
+            true,
+        )
+        .unwrap();
+        let res_doc = Document::load_mem(&out).unwrap();
+        let rp1 = *res_doc.get_pages().get(&1).unwrap();
+        let raw_after = String::from_utf8_lossy(&res_doc.get_page_content(rp1).unwrap()).into_owned();
+        assert!(raw_after.contains("KEEP_ME"), "unredacted text must survive: {raw_after}");
+        assert!(!raw_after.contains("SECRET_42"), "redacted text must be stripped from stream: {raw_after}");
+        assert!(raw_after.contains("/SoloRedact1 Do"), "opaque redaction layer must be drawn");
     }
 }
 

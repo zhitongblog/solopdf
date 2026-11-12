@@ -15,7 +15,9 @@ import { store } from '../../store'
 import { isMobile } from '../../platform'
 import { t } from '../../i18n'
 import PagesPanel from './PagesPanel.vue'
+import CropPanel from './CropPanel.vue'
 import MergeSplitPanel from './MergeSplitPanel.vue'
+import WatermarkPanel from './WatermarkPanel.vue'
 import ConvertPanel from './ConvertPanel.vue'
 import SignPanel from './SignPanel.vue'
 import SecurityPanel from './SecurityPanel.vue'
@@ -23,10 +25,12 @@ import AnnotExportPanel from './AnnotExportPanel.vue'
 
 const emit = defineEmits<{ close: []; toast: [msg: string]; open: [path: string] }>()
 
-type Section = 'pages' | 'mergesplit' | 'convert' | 'sign' | 'security' | 'annots'
+type Section = 'pages' | 'crop' | 'mergesplit' | 'watermark' | 'convert' | 'sign' | 'security' | 'annots'
 const SECTIONS: { key: Section; icon: string }[] = [
   { key: 'pages', icon: '▤' },
+  { key: 'crop', icon: '✂' },
   { key: 'mergesplit', icon: '⇹' },
+  { key: 'watermark', icon: '💧' },
   { key: 'convert', icon: '⇄' },
   { key: 'sign', icon: '✍' },
   { key: 'security', icon: '🔒' },
@@ -60,7 +64,9 @@ const phone = computed(() => isMobile() || window.innerWidth < 700)
 
         <div class="dt-panel">
           <PagesPanel v-if="section === 'pages'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
+          <CropPanel v-else-if="section === 'crop'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
           <MergeSplitPanel v-else-if="section === 'mergesplit'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
+          <WatermarkPanel v-else-if="section === 'watermark'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
           <ConvertPanel v-else-if="section === 'convert'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
           <SignPanel v-else-if="section === 'sign'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
           <SecurityPanel v-else-if="section === 'security'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />

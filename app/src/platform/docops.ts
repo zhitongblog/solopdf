@@ -29,6 +29,76 @@ export interface CompressResult {
   after: number
 }
 
+export interface CropSpec {
+  margins?: [number, number, number, number]
+  odd_margins?: [number, number, number, number] | null
+  even_margins?: [number, number, number, number] | null
+  box_rect?: [number, number, number, number] | null
+  per_page?: Array<[number, [number, number, number, number]]>
+  pages?: number[]
+}
+
+export interface WatermarkSpec {
+  text?: string
+  font_size?: number
+  color?: [number, number, number]
+  opacity?: number
+  rotate?: number
+  position?: string
+  tile_spacing?: number
+  scale?: number
+  under?: boolean
+  pages?: number[]
+}
+
+export interface PageNumberSpec {
+  format?: string
+  position?: string
+  start_number?: number
+  from_page?: number
+  to_page?: number
+  font_size?: number
+  margin?: number
+  color?: [number, number, number]
+}
+
+export interface ExtractedImageOut {
+  path: string
+  page: number
+  index: number
+  width: number
+  height: number
+  format: string
+}
+
+export interface SanitizeSpec {
+  metadata: boolean
+  annotations: boolean
+  attachments: boolean
+  javascript_actions: boolean
+  forms: boolean
+}
+
+export interface SanitizeReport {
+  removed_metadata: boolean
+  removed_annotations: number
+  removed_attachments: boolean
+  removed_actions: number
+  removed_forms: boolean
+}
+
+export interface SanitizeResult {
+  path: string
+  report: SanitizeReport
+}
+
+export interface RedactRectInput {
+  page: number
+  rect: [number, number, number, number]
+  color?: [number, number, number]
+  label?: string
+}
+
 async function call<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   const { invoke } = await import('@tauri-apps/api/core')
   return await invoke<T>(cmd, args)
@@ -71,6 +141,37 @@ export const docOps = {
 
   removePassword: (srcPath: string, destPath: string | null, password: string) =>
     call<string>('pdf_remove_password', { srcPath, destPath, password }),
+
+  cropPages: (srcPath: string, destPath: string | null, password: string | null, spec: CropSpec) =>
+    call<string>('pdf_crop_pages', { srcPath, destPath, password, spec }),
+
+  watermark: (
+    srcPath: string,
+    destPath: string | null,
+    password: string | null,
+    spec: WatermarkSpec,
+    imagePath?: string | null,
+  ) => call<string>('pdf_watermark', { srcPath, destPath, password, spec, imagePath: imagePath ?? null }),
+
+  addPageNumbers: (srcPath: string, destPath: string | null, password: string | null, spec: PageNumberSpec) =>
+    call<string>('pdf_add_page_numbers', { srcPath, destPath, password, spec }),
+
+  extractImages: (srcPath: string, destDir: string | null, password: string | null, minDim = 32) =>
+    call<ExtractedImageOut[]>('pdf_extract_images', { srcPath, destDir, password, minDim }),
+
+  sanitize: (srcPath: string, destPath: string | null, password: string | null, spec: SanitizeSpec) =>
+    call<SanitizeResult>('pdf_sanitize', { srcPath, destPath, password, spec }),
+
+  flatten: (srcPath: string, destPath: string | null, password: string | null) =>
+    call<string>('pdf_flatten', { srcPath, destPath, password }),
+
+  redact: (
+    srcPath: string,
+    destPath: string | null,
+    password: string | null,
+    rects: RedactRectInput[],
+    stripMetadata = true,
+  ) => call<string>('pdf_redact', { srcPath, destPath, password, rects, stripMetadata }),
 
   // ── signature library (appData, never beside a document) ──
   async saveSignature(name: string, bytes: Uint8Array): Promise<string> {
