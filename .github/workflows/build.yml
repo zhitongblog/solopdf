@@ -14,7 +14,7 @@ jobs:
           # The ARM legs match the UTM VMs on the maintainer's Apple Silicon
           # machine, which is where hands-on testing happens. The x64 legs are
           # CI-only — they cover the architecture most users actually run.
-          - os: macos-14            # one universal dmg: arm64 + x86_64
+          - os: macos-latest        # one universal dmg: arm64 + x86_64
             target: mac-universal
           - os: windows-11-arm      # matches UTM Win11-ARM VM
             target: win-aarch64
