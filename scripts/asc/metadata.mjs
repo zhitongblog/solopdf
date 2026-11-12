@@ -24,12 +24,11 @@ const zhHans = {
   keywords: 'pdf,阅读器,无广告,批注,高亮,笔记,markdown,表单填写,pdf阅读,本地',
   promotionalText: '干净、快速、本地运行的 PDF 阅读器 —— 高亮自动变成 Markdown 笔记。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `• 导入其他应用的批注:Acrobat、预览、PDF Expert 里做的高亮和便签一键转成 SoloPDF 笔记
-• 比较两版文档:按页对齐,逐词标出新增、删除、修改;两个文档可以并排阅读
-• PDF 附件与图层:打开 PDF 里嵌的文件;工程图、地图的图层可开关
-• 阅读标尺、放大镜;一键复制 BibTeX / APA / GB/T 7714 引用
-• 新格式:FB2 电子书、多页 TIFF;书内搜索
-• 问 AI(默认关闭):总结、提问,回答带页码可跳回原文;需在设置里自己配置服务,可用本机模型`,
+  whatsNew: `• 水印与页码/Bates 编号:支持斜排文字水印、页码模板({n}/{total})、Bates 连续编号与图片印章
+• 一键自动裁白边:智能检测全文边距并支持奇偶页分别预览与永久物理裁切(桌面端)或非破坏性设置
+• 页面与拆分增强:在任意页后插入空白页、原地复制当前页;按目录大纲(Bookmarks)自动拆分为独立章节 PDF
+• 格式转换与无损提图:PDF 转结构化 Markdown(自动识别标题与段落);无损提取 PDF 内嵌 JPEG/PNG 原图
+• 隐私脱敏与净化:真涂黑脱敏(Redact,从底层清除敏感文字对象)、一键清理元数据/批注/脚本(Sanitize)、表单与批注扁平化固化(Flatten)`,
 };
 
 const zhHant = {
@@ -46,12 +45,11 @@ const zhHant = {
   keywords: 'pdf,閱讀器,無廣告,批註,螢光筆,筆記,markdown,表單填寫,pdf閱讀,本地',
   promotionalText: '乾淨、快速、本地執行的 PDF 閱讀器 —— 螢光標記自動變成 Markdown 筆記。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `• 匯入其他 App 的註解:Acrobat、預覽、PDF Expert 裡的螢光標記和便利貼一鍵轉成 SoloPDF 筆記
-• 比較兩版文件:依頁對齊,逐詞標出新增、刪除、修改;兩份文件可以並排閱讀
-• PDF 附件與圖層:開啟 PDF 內嵌的檔案;工程圖、地圖的圖層可開關
-• 閱讀尺規、放大鏡;一鍵複製 BibTeX / APA / GB/T 7714 引用
-• 新格式:FB2 電子書、多頁 TIFF;書內搜尋
-• 問 AI(預設關閉):摘要、提問,回答附頁碼可跳回原文;需在設定裡自行設定服務,可用本機模型`,
+  whatsNew: `• 浮水印與頁碼/Bates 編號:支援斜排文字浮水印、頁碼範本({n}/{total})、Bates 連續編號與圖片印章
+• 一鍵自動裁白邊:智慧偵測全文邊距並支援奇偶頁分別預覽與永久物理裁切(桌面端)或非破壞性設定
+• 頁面與拆分增強:在任意頁後插入空白頁、原地複製目前頁面;依目錄大綱(Bookmarks)自動拆分為獨立章節 PDF
+• 格式轉換與無損提圖:PDF 轉結構化 Markdown(自動識別標題與段落);無損提取 PDF 內嵌 JPEG/PNG 原圖
+• 隱私塗黑與淨化:真塗黑脫敏(Redact,從底層清除敏感文字物件)、一鍵清理中繼資料/註解/指令碼(Sanitize)、表單與註解平面化固化(Flatten)`,
 };
 
 const enUS = {
@@ -68,12 +66,11 @@ Everything runs on your device. No network calls, no data collection.`,
   keywords: 'pdf,reader,annotate,highlight,markdown,notes,forms,viewer,offline,documents',
   promotionalText: 'A clean, fast, local-first PDF reader — highlights become Markdown notes.',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `• Import annotations made in other apps: highlights and notes from Acrobat, Preview or PDF Expert become SoloPDF notes in one tap
-• Compare two versions: pages aligned, word-level insertions, deletions and changes; read two documents side by side
-• PDF attachments and layers: open embedded files; toggle layers in drawings and maps
-• Reading ruler and magnifier; copy a BibTeX / APA / GB/T 7714 citation
-• New formats: FB2 e-books and multi-page TIFF; search inside books
-• Ask AI (off by default): summaries and questions with page citations you can tap; uses a service you configure, including a model on your own computer`,
+  whatsNew: `• Watermarks, Page Numbers & Bates Stamping: add diagonal text watermarks, page number templates ({n}/{total}), sequential Bates numbers, and image stamps
+• One-click Auto-crop Margins: detect document-wide whitespace with odd/even page splits, plus permanent physical cropping or non-destructive CropBox margins
+• Page & Split Tools: insert blank pages, duplicate pages in place, and split PDFs automatically by top-level outline bookmarks
+• Convert & Extract: export structured Markdown with heading inference and losslessly extract embedded JPEG/PNG images
+• Redact, Sanitize & Flatten: permanently scrub sensitive text runs, strip metadata/annotations/scripts, and flatten forms and annotations into page content`,
 };
 
 const ja = {
@@ -90,12 +87,11 @@ const ja = {
   keywords: 'pdf,リーダー,注釈,ハイライト,ノート,markdown,フォーム,閲覧,オフライン',
   promotionalText: '広告なし・完全ローカルの PDF リーダー。ハイライトが Markdown ノートになります。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `• 他のアプリの注釈を読み込み:Acrobat・プレビュー・PDF Expert のハイライトやメモを SoloPDF のノートにワンタップで変換
-• 2 つの版を比較:ページを揃えて追加・削除・変更を単語単位で表示。2 つの文書を並べて閲覧
-• PDF の添付ファイルとレイヤー:埋め込みファイルを開く。図面や地図のレイヤーを切り替え
-• リーディングルーラーとルーペ。BibTeX / APA / GB/T 7714 の引用をコピー
-• 新フォーマット:FB2 電子書籍、複数ページ TIFF。書籍内検索
-• AI に質問(既定はオフ):要約と質問、回答のページ番号から原文へ。設定で自分のサービスを指定(ローカルモデルも可)`,
+  whatsNew: `• 透かし・ページ番号・ベイツ番号:斜めテキスト透かし、ページ番号テンプレート({n}/{total})、連番ベイツ番号、画像スタンプに対応
+• 自動余白トリミング:文書全体の余白を自動検出し、奇数/偶数ページ別のプレビューと完全トリミングに対応
+• ページ操作と目次分割:空白ページの挿入、ページの複製、目次(ブックマーク)ごとの自動分割を追加
+• Markdown 変換と画像抽出:見出し構造を保持した Markdown 書き出しと、埋め込み JPEG/PNG 画像の無劣化抽出に対応
+• 墨消し・メタデータ消去・フラット化:機密テキストの完全削除(Redact)、メタデータ・注釈・スクリプトの一括消去(Sanitize)、フォームや注釈の統合(Flatten)`,
 };
 
 // whatsNew is intentionally absent — Apple rejects it on an app's first version.
@@ -153,6 +149,6 @@ export const screenshots = {
 
 // Per-platform release plan: store version string must match the attached build's train.
 export const platforms = {
-  IOS:    { versionString: '0.8.0', buildVersion: '0.8.0' },
-  MAC_OS: { versionString: '1.7.0', buildVersion: '1.7.0' },
+  IOS:    { versionString: '0.9.0', buildVersion: '0.9.0' },
+  MAC_OS: { versionString: '1.8.0', buildVersion: '1.8.0' },
 };
