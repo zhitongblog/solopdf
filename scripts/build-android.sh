@@ -299,10 +299,9 @@ class MainActivity : TauriActivity() {
           val params = QueryProductDetailsParams.newBuilder()
             .setProductList(productList)
             .build()
-          client.queryProductDetailsAsync(params) { _, detailsResult ->
+          client.queryProductDetailsAsync(params) { _, productDetailsList ->
             val out = JSONArray()
-            val list = detailsResult.productDetailsList ?: emptyList()
-            for (d in list) {
+            for (d in productDetailsList) {
               productCache[d.productId] = d
               val price = d.oneTimePurchaseOfferDetails?.formattedPrice ?: ""
               out.put(
@@ -363,8 +362,8 @@ class MainActivity : TauriActivity() {
                 )
               )
               .build()
-            client.queryProductDetailsAsync(qParams) { _, detailsResult ->
-              val found = detailsResult.productDetailsList?.firstOrNull()
+            client.queryProductDetailsAsync(qParams) { _, productDetailsList ->
+              val found = productDetailsList.firstOrNull()
               if (found != null) {
                 productCache[found.productId] = found
                 launchWith(found)

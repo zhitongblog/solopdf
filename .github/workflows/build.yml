@@ -42,7 +42,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: app/src-tauri
-          key: ${{ matrix.target }}
+          key: ${{ matrix.target }}-v2
 
       - name: Extra Rust targets (macOS universal)
         if: matrix.target == 'mac-universal'
