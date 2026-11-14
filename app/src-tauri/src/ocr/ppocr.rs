@@ -53,8 +53,22 @@ fn load_keys(path: &PathBuf) -> Result<Vec<String>, String> {
     Ok(text.lines().map(|l| l.to_string()).collect())
 }
 
+static ORT_ENV: OnceLock<Result<ort::environment::Environment, String>> = OnceLock::new();
+
+fn ort_env() -> Result<&'static ort::environment::Environment, String> {
+    ORT_ENV
+        .get_or_init(|| {
+            ort::init()
+                .build()
+                .map_err(|e| format!("初始化 ONNX Runtime 失败: {e}"))
+        })
+        .as_ref()
+        .map_err(|e| e.clone())
+}
+
 fn load_session(path: &PathBuf) -> Result<Session, String> {
-    Session::builder()
+    let env = ort_env()?;
+    Session::builder(env)
         .and_then(|mut b| b.commit_from_file(path))
         .map_err(|e| format!("加载 OCR 模型失败 ({}): {e}", path.display()))
 }
