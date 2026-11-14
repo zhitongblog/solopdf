@@ -18,19 +18,20 @@ const zhHans = {
 • 学术与知识管理:框选页面区域一键提取表格为 Markdown 或 CSV;批注支持 #标签 与颜色筛选,并可一键导出为 Anki / Obsidian 复习闪卡。
 • 全离线文档工具(严格遵循 Copy-out 原则,原文件永不修改):目录大纲智能生成与编辑、N-up 多页合一拼版、小册子骑马钉拼版、PDF 转灰度与扫描底色漂白、统一页面尺寸、水印与 Bates 编号、自动裁白边、无损提取原图、真涂黑脱敏(Redact)、元数据清理、表单填写与扁平化、X.509/PKCS#7 数字证书验签与签名。
 • 审阅与测量:内置 8 款多语言矢量标准图章与动态署名公章;支持标定比例尺测量图纸距离、周长与多边形面积。
-• 支持独立开发(可选内购):所有功能 100% 永久免费;提供三档一次性自愿打赏内购(请喝杯咖啡 / 请吃顿工作餐 / 强力支持,非自动续费订阅),支持任意一档即可永久点亮专属「✨ 支持者」徽章。
+• 支持独立开发(可选内购):所有功能 100% 永久免费;提供三档一次性自愿打赏内购(请喝杯咖啡 / 请吃顿工作餐 / 强力支持,非自动续费订阅),支持任意一档即可永久点亮专属「支持者」徽章。
 
 所有处理都在你的设备上完成,不收集任何数据。`,
   keywords: 'pdf,阅读器,无广告,批注,高亮,笔记,markdown,拼版,闪卡,数字签名',
   promotionalText: '干净、快速、全本地的 PDF 阅读器与文档工具 —— 高亮自动变成 Markdown 笔记。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
   whatsNew: `SoloPDF 1.0 正式版里程碑更新:
+• 自动化文档流水线与进阶处理:新增 15 步内存流水线(Pipeline)、双页扫描中缝切分、多页拼为单张连续长页、空白页智能检测与清理、PDF 矢量底图叠印、智能重命名与内嵌附件管理
 • 目录书签编辑与智能生成:支持可视化增删改目录层级,或一键按正文字号梯度/章节正则自动生成 PDF 目录树
 • 拼版印刷与页面标准化:新增 N-up 多页合一拼版(2/4/6/9/16 页)、小册子骑马钉对折拼版、PDF 转灰度与扫描底色漂白、统一页面尺寸(A4/A3/Letter)
 • 学术与闪卡增强:框选任意区域一键提取表格为 Markdown 或 CSV;批注支持多维筛选并可一键导出为 Anki (.tsv) 与 Obsidian 复习闪卡
 • 图章与比例尺测量:内置 8 款多语言矢量印章与动态日期署名印章;支持标定比例尺测量图纸距离、周长与多边形面积
 • 数字证书验签与签名:支持校验 PDF 内的 X.509 / PKCS#7 数字签名与篡改状态,支持本地证书签署
-• 支持者徽章:新增三档自愿一次性打赏内购,点亮专属「✨ 支持者」徽章(所有功能 100% 保持免费)`,
+• 支持者徽章:新增三档自愿一次性打赏内购,点亮专属「支持者」徽章(所有功能 100% 保持免费)`,
 };
 
 const zhHant = {
@@ -41,19 +42,20 @@ const zhHant = {
 • 學術與知識管理:框選頁面區域一鍵提取表格為 Markdown 或 CSV;批註支援 #標籤 與顏色篩選,並可一鍵匯出為 Anki / Obsidian 複習閃卡。
 • 全離線文件工具(嚴格遵循 Copy-out 原則,原檔案永不修改):目錄大綱智慧生成與編輯、N-up 多頁合一拼版、小冊子騎馬釘拼版、PDF 轉灰階與掃描底色漂白、統一頁面尺寸、浮水印與 Bates 編號、自動裁白邊、無損提取原圖、真塗黑脫敏(Redact)、中繼資料清理、表單填寫與平面化、X.509/PKCS#7 數位憑證驗簽與簽章。
 • 審閱與測量:內建 8 款多語言向量標準圖章與動態署名公章;支援標定比例尺測量圖紙距離、周長與多邊形面積。
-• 支持獨立開發(可選內購):所有功能 100% 永久免費;提供三檔一次性自願打賞內購(請喝杯咖啡 / 請吃頓工作餐 / 強力支持,非自動續費訂閱),支持任意一檔即可永久點亮專屬「✨ 支持者」徽章。
+• 支持獨立開發(可選內購):所有功能 100% 永久免費;提供三檔一次性自願打賞內購(請喝杯咖啡 / 請吃頓工作餐 / 強力支持,非自動續費訂閱),支持任意一檔即可永久點亮專屬「支持者」徽章。
 
 所有處理都在你的裝置上完成,不收集任何資料。`,
   keywords: 'pdf,閱讀器,無廣告,批註,螢光筆,筆記,markdown,拼版,閃卡,數位簽章',
   promotionalText: '乾淨、快速、全本地的 PDF 閱讀器與文件工具 —— 螢光標記自動變成 Markdown 筆記。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
   whatsNew: `SoloPDF 1.0 正式版里程碑更新:
+• 自動化文件流水線與進階處理:新增 15 步記憶體流水線(Pipeline)、雙頁掃描中縫切分、多頁拼為單張連續長頁、空白頁智慧檢測與清理、PDF 向量底圖疊印、智慧重新命名與內嵌附件管理
 • 目錄書籤編輯與智慧生成:支援視覺化增刪改目錄層級,或一鍵依正文字級梯度/章節正規表示式自動生成 PDF 目錄樹
 • 拼版印刷與頁面標準化:新增 N-up 多頁合一拼版(2/4/6/9/16 頁)、小冊子騎馬釘對折拼版、PDF 轉灰階與掃描底色漂白、統一頁面尺寸(A4/A3/Letter)
 • 學術與閃卡增強:框選任意區域一鍵提取表格為 Markdown 或 CSV;批註支援多維篩選並可一鍵匯出為 Anki (.tsv) 與 Obsidian 複習閃卡
 • 圖章與比例尺測量:內建 8 款多語言向量印章與動態日期署名印章;支援標定比例尺測量圖紙距離、周長與多邊形面積
 • 數位憑證驗簽與簽章:支援校驗 PDF 內的 X.509 / PKCS#7 數位簽章與竄改狀態,支援本地憑證簽署
-• 支持者徽章:新增三檔自願一次性打賞內購,點亮專屬「✨ 支持者」徽章(所有功能 100% 保持免費)`,
+• 支持者徽章:新增三檔自願一次性打賞內購,點亮專屬「支持者」徽章(所有功能 100% 保持免費)`,
 };
 
 const enUS = {
@@ -64,19 +66,20 @@ const enUS = {
 • Academic & Study Tools: snip any table region on a page into Markdown or CSV; filter annotations by #tag, color, or kind, and export flashcards to Anki (.tsv) or Obsidian Spaced Repetition.
 • Offline Document Toolkit (strictly copy-out, original files are never modified): smart outline/bookmark generator & editor, N-up multi-page imposition, saddle-stitch booklet maker, grayscale & scan background whitening, page size normalization, watermarks & Bates numbering, auto-crop margins, lossless image extraction, true content-stream redaction, metadata sanitization, form filling & flattening, and X.509 / PKCS#7 digital signature verification & signing.
 • Review & Measurement: 8 localized vector stamps + dynamic author/date stamps; calibrated scale ruler for measuring distance, perimeter, and polygon area.
-• Optional Tip Jar: 100% of SoloPDF features are free forever. Three optional one-time tip tiers (Buy a Coffee / Buy a Lunch / Generous Support, non-renewing) unlock the "✨ Supporter" badge.
+• Optional Tip Jar: 100% of SoloPDF features are free forever. Three optional one-time tip tiers (Buy a Coffee / Buy a Lunch / Generous Support, non-renewing) unlock the "Supporter" badge.
 
 Everything runs on your device. No data collection.`,
   keywords: 'pdf,reader,annotate,highlight,markdown,notes,booklet,flashcards,signature,offline',
   promotionalText: 'A clean, fast, local-first PDF reader & toolkit — highlights become Markdown notes.',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
   whatsNew: `SoloPDF 1.0 Milestone Release:
+• Automated Pipeline & Advanced Document Suite: 15-step in-memory pipeline, 2-up scan split, single continuous page stitch, blank page detection & removal, vector PDF overlay, smart auto-rename, and embedded file attachments
 • Outline / Bookmark Editor & Smart Generator: edit PDF outline trees visually or auto-generate bookmarks from heading font-size gradients and chapter patterns
 • Print & Layout Suite: N-up multi-page imposition (2/4/6/9/16 pages per sheet), saddle-stitch Booklet maker, Grayscale & scan background whitening, and Page Size Normalization (A4/A3/Letter)
 • Table Snip & Flashcards: extract tables from any selected region directly to Markdown or CSV; export annotations and Cloze cards to Anki (.tsv) and Obsidian Spaced Repetition
 • Vector Stamps & Scale Measurement: 8 localized vector review stamps + dynamic author/date stamps; calibrated scale measurement for distance, perimeter, and polygon area
 • Digital Signatures (X.509 / PKCS#7): verify cryptographic PDF signatures and tamper status, and sign PDFs with certificates
-• Supporter Tip Jar: optional one-time tip tiers that unlock the "✨ Supporter" badge (100% of app features remain free)`,
+• Supporter Tip Jar: optional one-time tip tiers that unlock the "Supporter" badge (100% of app features remain free)`,
 };
 
 const ja = {
@@ -87,17 +90,18 @@ const ja = {
 • 学習・研究支援:ページ内の表を範囲選択して Markdown や CSV として抽出。注釈の #タグ・色フィルタリングや、Anki (.tsv)・Obsidian 暗記カードへの一括書き出しに対応。
 • 完全オフライン文書ツール(元ファイルを変更しない 안전한 Copy-out 方式):目次の自動生成・編集、N-up 集約印刷、小冊子(中綴じ)面付け、グレースケール変換・スキャン背景の漂白、ページサイズ統一(A4/A3/Letter)、透かし・ベイツ番号、余白自動トリミング、埋め込み画像の無劣化抽出、完全墨消し(Redact)、メタデータ消去、フォーム入力・フラット化、X.509/PKCS#7 電子署名の検証・署名。
 • スタンプと計測:8種類の多言語ベクタースタンプと日付・署名入り動的スタンプ、縮尺校正対応の距離・周囲長・面積計測ツールを搭載。
-• 開発者へのサポート(任意):すべての機能は永久に 100% 無料です。3段階の買い切り型チップ(自動更新なし)で「✨ サポーター」バッジを点灯できます。`,
+• 開発者へのサポート(任意):すべての機能は永久に 100% 無料です。3段階の買い切り型チップ(自動更新なし)で「サポーター」バッジを点灯できます。`,
   keywords: 'pdf,リーダー,注釈,ハイライト,ノート,markdown,面付け,暗記カード,電子署名,オフライン',
   promotionalText: '広告なし・完全ローカルの PDF リーダー＆ツール。ハイライトが Markdown ノートになります。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
   whatsNew: `SoloPDF 1.0 正式版リリース:
+• 自動化パイプライン＆高度文書処理:15ステップ自動パイプライン、見開きスキャン分割、単一連続ページ結合、空白ページ検出・削除、ベクターオーバーレイ、自動リネーム、添付ファイル管理を追加
 • 目次(アウトライン)編集＆自動生成:目次ツリーの編集や、見出しフォントサイズ・章番号パターンからの目次自動生成に対応
 • 面付け・レイアウト機能:N-up 集約配置(2/4/6/9/16分割)、小冊子(中綴じ)作成、グレースケール変換＆スキャン背景漂白、ページサイズ統一(A4/A3/Letter)を追加
 • 表抽出＆暗記カード出力:選択範囲の表を Markdown / CSV へ即座に抽出。注釈を Anki (.tsv) や Obsidian 暗記カードとして書き出し可能に
 • ベクタースタンプ＆縮尺計測:8種類の標準スタンプと日付入りスタンプ、距離・面積の縮尺計測に対応
 • 電子署名の検証・署名:PDF 内の X.509 / PKCS#7 電子署名と改ざん状態の検証、証明書による署名に対応
-• サポーターバッジ:任意の1回限りチップ(アプリ内課金)で「✨ サポーター」バッジを解除(全機能は100%無料)`,
+• サポーターバッジ:任意の1回限りチップ(アプリ内課金)で「サポーター」バッジを解除(全機能は100%無料)`,
 };
 
 export const versionLocalizations = { 'zh-Hans': zhHans, 'zh-Hant': zhHant, 'en-US': enUS, 'ja': ja };
@@ -117,7 +121,7 @@ export const reviewContact = {
   demoAccountRequired: false,
   notes: `SoloPDF is a fully local PDF reader and offline document toolkit. No account needed, no server component.
 
-IN-APP PURCHASES (VOLUNTARY TIP JAR): This version includes three optional one-time tip tiers (app.solopdf.tip.coffee, app.solopdf.tip.meal, app.solopdf.tip.feast) via StoreKit. 100% of SoloPDF's PDF reading, annotation, and document processing features are completely free without any purchase. Tipping any tier simply unlocks a cosmetic "✨ Supporter" badge in Settings/Library.
+IN-APP PURCHASES (VOLUNTARY TIP JAR): This version includes three optional one-time tip tiers (app.solopdf.tip.coffee, app.solopdf.tip.meal, app.solopdf.tip.feast) via StoreKit. 100% of SoloPDF's PDF reading, annotation, and document processing features are completely free without any purchase. Tipping any tier simply unlocks a cosmetic "Supporter" badge in Settings/Library.
 
 OPTIONAL "ASK AI" FEATURE: it is OFF by default and SoloPDF ships no AI service of its own. A user can turn it on in Settings and enter their own OpenAI-compatible endpoint (for example a local Ollama / LM Studio server on their own computer). Before any text is sent, the app shows a consent sheet naming the exact endpoint and stating whether it is on the local machine or online. All other features work 100% offline.
 
