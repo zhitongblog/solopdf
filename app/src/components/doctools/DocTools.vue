@@ -24,16 +24,18 @@ import SecurityPanel from './SecurityPanel.vue'
 import AnnotExportPanel from './AnnotExportPanel.vue'
 import OutlinesPanel from './OutlinesPanel.vue'
 import LayoutPanel from './LayoutPanel.vue'
+import PipelinePanel from './PipelinePanel.vue'
 
 const emit = defineEmits<{ close: []; toast: [msg: string]; open: [path: string] }>()
 
-type Section = 'pages' | 'crop' | 'mergesplit' | 'outlines' | 'layout' | 'watermark' | 'convert' | 'sign' | 'security' | 'annots'
+type Section = 'pages' | 'crop' | 'mergesplit' | 'outlines' | 'layout' | 'pipeline' | 'watermark' | 'convert' | 'sign' | 'security' | 'annots'
 const SECTIONS: { key: Section; icon: string }[] = [
   { key: 'pages', icon: '▤' },
   { key: 'crop', icon: '✂' },
   { key: 'mergesplit', icon: '⇹' },
   { key: 'outlines', icon: '📑' },
   { key: 'layout', icon: '⊞' },
+  { key: 'pipeline', icon: '⚡' },
   { key: 'watermark', icon: '💧' },
   { key: 'convert', icon: '⇄' },
   { key: 'sign', icon: '✍' },
@@ -72,6 +74,7 @@ const phone = computed(() => isMobile() || window.innerWidth < 700)
           <MergeSplitPanel v-else-if="section === 'mergesplit'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
           <OutlinesPanel v-else-if="section === 'outlines'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
           <LayoutPanel v-else-if="section === 'layout'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
+          <PipelinePanel v-else-if="section === 'pipeline'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
           <WatermarkPanel v-else-if="section === 'watermark'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
           <ConvertPanel v-else-if="section === 'convert'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
           <SignPanel v-else-if="section === 'sign'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />

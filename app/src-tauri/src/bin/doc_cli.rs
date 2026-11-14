@@ -108,6 +108,15 @@ fn usage() -> ! {
   resize <src.pdf> <dest.pdf> [--size A4|A3|Letter|Legal] [--width pt] [--height pt] [--password pw]
   verify-signatures <src.pdf> [--password pw]
   cert-sign <src.pdf> <dest.pdf> --signer <name> [--reason r] [--location l] [--page p] [--rect x,y,w,h] [--p12 path] [--pass pw] [--password pdf_pw]
+  split-2up <src.pdf> <dest.pdf> [--dir vertical|horizontal] [--rtl 0|1] [--only-wide 0|1] [--overlap pt] [--password pw]
+  single-page <src.pdf> <dest.pdf> [--gap 16] [--border 0|1] [--password pw]
+  detect-blank <src.pdf> [--threshold 0.005] [--password pw]
+  remove-blank <src.pdf> <dest.pdf> [--threshold 0.005] [--password pw]
+  overlay <src.pdf> <dest.pdf> <overlay.pdf> [--under 0|1] [--repeat 0|1] [--overlay-password pw] [--password pw]
+  attachments-list <src.pdf> [--password pw]
+  attachments-add <src.pdf> <dest.pdf> <file1> [file2 …] [--desc txt] [--password pw]
+  attachments-remove <src.pdf> <dest.pdf> [--names a.txt,b.csv] [--password pw]
+  pipeline <src.pdf> <dest.pdf> <steps.json> [--password pw]
   info <src.pdf> [--password pw]
   djvu-info <src.djvu>
   djvu-page <src.djvu> <dest.png> [--page 1] [--width 1400]
@@ -460,6 +469,115 @@ fn main() {
                 passphrase,
             };
             write(dest, ok(crypto_sig::sign_pdf_pkcs12(&read(src), pw, &spec)));
+        }
+        "split-2up" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            let direction = arg(&args, "--dir").unwrap_or("vertical").to_string();
+            let rtl = arg(&args, "--rtl").map(|v| v == "1" || v == "true").unwrap_or(false);
+            let only_wide = arg(&args, "--only-wide")
+                .map(|v| v == "1" || v == "true")
+                .unwrap_or(false);
+            let overlap = arg(&args, "--overlap").and_then(|v| v.parse().ok()).unwrap_or(0.0);
+            let spec = pdfops::Split2upSpec {
+                direction,
+                rtl,
+                only_wide,
+                overlap,
+            };
+            write(dest, ok(pdfops::split_2up_pdf(&read(src), pw, &spec)));
+        }
+        "single-page" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            let gap = arg(&args, "--gap").and_then(|v| v.parse().ok()).unwrap_or(16.0);
+            let border = arg(&args, "--border").map(|v| v == "1" || v == "true").unwrap_or(false);
+            write(dest, ok(pdfops::single_large_page_pdf(&read(src), pw, gap, border)));
+        }
+        "detect-blank" => {
+            let Some(src) = positional.first() else { usage() };
+            let thr = arg(&args, "--threshold").and_then(|v| v.parse().ok()).unwrap_or(0.005);
+            let blanks = ok(pdfops::detect_blank_pages(&read(src), pw, thr));
+            println!("{}", serde_json::json!({ "blankPages": blanks, "count": blanks.len() }));
+        }
+        "remove-blank" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            let thr = arg(&args, "--threshold").and_then(|v| v.parse().ok()).unwrap_or(0.005);
+            let (out, removed) = ok(pdfops::remove_blank_pages(&read(src), pw, thr));
+            write(dest, out);
+            println!("{}", serde_json::json!({ "removedPages": removed, "count": removed.len() }));
+        }
+        "overlay" => {
+            let (Some(src), Some(dest), Some(ov_path)) =
+                (positional.first(), positional.get(1), positional.get(2))
+            else {
+                usage()
+            };
+            let under = arg(&args, "--under").map(|v| v != "0" && v != "false").unwrap_or(true);
+            let repeat = arg(&args, "--repeat").map(|v| v != "0" && v != "false").unwrap_or(true);
+            let ov_pw = arg(&args, "--overlay-password");
+            write(
+                dest,
+                ok(pdfops::overlay_pdf(
+                    &read(src),
+                    pw,
+                    &read(ov_path),
+                    ov_pw,
+                    under,
+                    repeat,
+                )),
+            );
+        }
+        "attachments-list" => {
+            let Some(src) = positional.first() else { usage() };
+            let list = ok(pdfops::list_embedded_attachments(&read(src), pw));
+            println!("{}", serde_json::to_string_pretty(&list).unwrap_or_default());
+        }
+        "attachments-add" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            if positional.len() < 3 {
+                die("需要至少一个待嵌入的附件文件路径");
+            }
+            let desc = arg(&args, "--desc").unwrap_or("").to_string();
+            let mut inputs = Vec::new();
+            for fpath in &positional[2..] {
+                let bytes = read(fpath);
+                let name = std::path::Path::new(fpath.as_str())
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "attachment".into());
+                inputs.push(pdfops::EmbeddedAttachmentInput {
+                    name,
+                    bytes,
+                    description: desc.clone(),
+                });
+            }
+            write(dest, ok(pdfops::add_embedded_attachments(&read(src), pw, &inputs)));
+        }
+        "attachments-remove" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            let names: Vec<String> = arg(&args, "--names")
+                .map(|s| {
+                    s.split(',')
+                        .map(|p| p.trim().to_string())
+                        .filter(|p| !p.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            write(dest, ok(pdfops::remove_embedded_attachments(&read(src), pw, &names)));
+        }
+        "pipeline" => {
+            let (Some(src), Some(dest), Some(json_arg)) =
+                (positional.first(), positional.get(1), positional.get(2))
+            else {
+                usage()
+            };
+            let raw_json = if std::path::Path::new(json_arg.as_str()).exists() {
+                read(json_arg)
+            } else {
+                json_arg.as_bytes().to_vec()
+            };
+            let steps: Vec<pdfops::PipelineStep> = serde_json::from_slice(&raw_json)
+                .unwrap_or_else(|e| die(&format!("pipeline steps 解析失败: {e}")));
+            write(dest, ok(pdfops::run_pipeline(&read(src), pw, &steps)));
         }
         "info" => {
             let Some(src) = positional.first() else { usage() };

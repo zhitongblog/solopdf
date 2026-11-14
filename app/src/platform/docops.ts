@@ -9,10 +9,10 @@
  * fallback on purpose: a browser build has no file to write back to, and a
  * silently half-working "save" is worse than a disabled button.
  */
-import type { AnnotExportSpec, OutlineNode } from '@solopdf/core'
+import type { AnnotExportSpec, OutlineNode, PipelineStepSpec } from '@solopdf/core'
 import { isTauri } from './index'
 
-export type { OutlineNode }
+export type { OutlineNode, PipelineStepSpec }
 
 /** mirror of pdfops.rs AnnotSpec — built by core exportSpec() so the app,
  *  the CLI and the MCP server hand the exporter identical JSON */
@@ -135,6 +135,30 @@ export interface CertSignSpec {
   p12Bytes?: number[] | null
   passphrase?: string | null
   p12Path?: string | null
+}
+
+export interface Split2upSpec {
+  direction?: 'vertical' | 'horizontal'
+  rtl?: boolean
+  only_wide?: boolean
+  overlap?: number
+}
+
+export interface RemoveBlankResult {
+  path: string
+  removed: number[]
+}
+
+export interface EmbeddedAttachmentInfo {
+  name: string
+  size: number
+  description: string
+}
+
+export interface AttachmentFileSpec {
+  path: string
+  name?: string
+  description?: string
 }
 
 async function call<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
@@ -265,6 +289,74 @@ export const docOps = {
       p12Path: p12Path ?? spec.p12Path ?? null,
     }),
 
+  split2up: (
+    srcPath: string,
+    destPath: string | null,
+    password: string | null,
+    spec: Split2upSpec,
+  ) => call<string>('pdf_split_2up', { srcPath, destPath, password, spec }),
+
+  singleLargePage: (
+    srcPath: string,
+    destPath: string | null,
+    password: string | null,
+    gap = 16,
+    border = false,
+  ) => call<string>('pdf_single_large_page', { srcPath, destPath, password, gap, border }),
+
+  detectBlankPages: (srcPath: string, password: string | null, threshold = 0.005) =>
+    call<number[]>('pdf_detect_blank_pages', { srcPath, password, threshold }),
+
+  removeBlankPages: (
+    srcPath: string,
+    destPath: string | null,
+    password: string | null,
+    threshold = 0.005,
+  ) => call<RemoveBlankResult>('pdf_remove_blank_pages', { srcPath, destPath, password, threshold }),
+
+  overlay: (
+    srcPath: string,
+    destPath: string | null,
+    password: string | null,
+    overlayPath: string,
+    overlayPassword: string | null,
+    under = true,
+    repeat = true,
+  ) =>
+    call<string>('pdf_overlay', {
+      srcPath,
+      destPath,
+      password,
+      overlayPath,
+      overlayPassword,
+      under,
+      repeat,
+    }),
+
+  listAttachments: (srcPath: string, password: string | null) =>
+    call<EmbeddedAttachmentInfo[]>('pdf_list_attachments', { srcPath, password }),
+
+  addAttachments: (
+    srcPath: string,
+    destPath: string | null,
+    password: string | null,
+    files: AttachmentFileSpec[],
+  ) => call<string>('pdf_add_attachments', { srcPath, destPath, password, files }),
+
+  removeAttachments: (
+    srcPath: string,
+    destPath: string | null,
+    password: string | null,
+    names: string[],
+  ) => call<string>('pdf_remove_attachments', { srcPath, destPath, password, names }),
+
+  runPipeline: (
+    srcPath: string,
+    destPath: string | null,
+    password: string | null,
+    steps: PipelineStepSpec[],
+  ) => call<string>('pdf_run_pipeline', { srcPath, destPath, password, steps }),
+
   // ── signature library (appData, never beside a document) ──
   async saveSignature(name: string, bytes: Uint8Array): Promise<string> {
     const { invoke } = await import('@tauri-apps/api/core')
@@ -299,7 +391,10 @@ export async function pickSavePath(suggested: string, ext: string): Promise<stri
 
 export async function pickOpenPaths(extensions: string[], multiple = true): Promise<string[]> {
   const { open } = await import('@tauri-apps/plugin-dialog')
-  const sel = await open({ multiple, filters: [{ name: 'Files', extensions }] })
+  const sel = await open({
+    multiple,
+    ...(extensions.length ? { filters: [{ name: 'Files', extensions }] } : {}),
+  })
   if (!sel) return []
   const items = Array.isArray(sel) ? sel : [sel]
   return items

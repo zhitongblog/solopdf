@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { store } from '../../store'
-import { docOps, pickSavePath } from '../../platform/docops'
+import { docOps, pickOpenPaths, pickSavePath } from '../../platform/docops'
 import { t } from '../../i18n'
 
 const emit = defineEmits<{ open: [path: string]; toast: [msg: string] }>()
@@ -105,6 +105,99 @@ async function runGrayscale(): Promise<void> {
   busy.value = 'grayscale'
   try {
     const out = await docOps.grayscale(src, dest, null, whitenBg.value)
+    emit('toast', t('dt.savedTo', { path: out }))
+    emit('open', out)
+  } catch (err) {
+    emit('toast', String((err as Error).message ?? err))
+  } finally {
+    busy.value = ''
+  }
+}
+
+// ── 5. Split 2-up Spreads (De-nup) ──
+const splitDir = ref<'vertical' | 'horizontal'>('vertical')
+const splitOnlyWide = ref(true)
+const splitRtl = ref(false)
+const splitOverlap = ref(4)
+
+async function runSplit2up(): Promise<void> {
+  const src = tab.value?.path
+  if (!src) return
+  const suggested = src.replace(/\.pdf$/i, '') + '-split2up.pdf'
+  const dest = await pickSavePath(suggested, 'pdf')
+  if (dest === undefined) return
+  busy.value = 'split2up'
+  try {
+    const out = await docOps.split2up(src, dest, null, {
+      direction: splitDir.value,
+      only_wide: splitOnlyWide.value,
+      rtl: splitRtl.value,
+      overlap: splitOverlap.value,
+    })
+    emit('toast', t('dt.savedTo', { path: out }))
+    emit('open', out)
+  } catch (err) {
+    emit('toast', String((err as Error).message ?? err))
+  } finally {
+    busy.value = ''
+  }
+}
+
+// ── 6. Single Continuous Large Page ──
+const singleGap = ref(16)
+const singleBorder = ref(true)
+
+async function runSinglePage(): Promise<void> {
+  const src = tab.value?.path
+  if (!src) return
+  const suggested = src.replace(/\.pdf$/i, '') + '-singlepage.pdf'
+  const dest = await pickSavePath(suggested, 'pdf')
+  if (dest === undefined) return
+  busy.value = 'singlepage'
+  try {
+    const out = await docOps.singleLargePage(
+      src,
+      dest,
+      null,
+      singleGap.value,
+      singleBorder.value,
+    )
+    emit('toast', t('dt.savedTo', { path: out }))
+    emit('open', out)
+  } catch (err) {
+    emit('toast', String((err as Error).message ?? err))
+  } finally {
+    busy.value = ''
+  }
+}
+
+// ── 7. Vector Overlay PDF (Letterhead / Background / Stamp PDF) ──
+const overlayPath = ref('')
+const overlayUnder = ref(true)
+const overlayRepeat = ref(true)
+
+async function pickOverlayPdf(): Promise<void> {
+  const picked = await pickOpenPaths(['pdf'], false)
+  if (picked.length) overlayPath.value = picked[0]
+}
+
+async function runOverlay(): Promise<void> {
+  const src = tab.value?.path
+  if (!src || !overlayPath.value) return
+  const suggested = src.replace(/\.pdf$/i, '') + '-overlay.pdf'
+  const dest = await pickSavePath(suggested, 'pdf')
+  if (dest === undefined) return
+  busy.value = 'overlay'
+  try {
+    const out = await docOps.overlay(
+      src,
+      dest,
+      null,
+      overlayPath.value,
+      null,
+      overlayUnder.value,
+      overlayRepeat.value,
+    )
     emit('toast', t('dt.savedTo', { path: out }))
     emit('open', out)
   } catch (err) {
@@ -219,6 +312,92 @@ async function runGrayscale(): Promise<void> {
       <div class="ly-actions">
         <button class="primary" :disabled="!!busy" @click="runGrayscale">
           {{ busy === 'grayscale' ? t('dt.working') : t('dt.ly.grayBtn') }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 5. Split 2-up Spreads (De-nup) -->
+    <div class="ly-card">
+      <div class="ly-head">
+        <h4>{{ t('dt.ly.split2upTitle') }}</h4>
+        <span class="dt-sub">{{ t('dt.ly.split2upSub') }}</span>
+      </div>
+      <div class="dt-form">
+        <div class="ly-inline-fields">
+          <label class="dt-field">
+            <span>{{ t('dt.ly.splitDir') }}</span>
+            <select v-model="splitDir">
+              <option value="vertical">{{ t('dt.ly.splitVertical') }}</option>
+              <option value="horizontal">{{ t('dt.ly.splitHorizontal') }}</option>
+            </select>
+          </label>
+          <label class="dt-field">
+            <span>{{ t('dt.ly.splitOverlap') }} (pt)</span>
+            <input type="number" v-model.number="splitOverlap" min="0" max="60" />
+          </label>
+        </div>
+        <label class="ly-check">
+          <input type="checkbox" v-model="splitOnlyWide" />
+          <span>{{ t('dt.ly.splitOnlyWide') }}</span>
+        </label>
+        <label class="ly-check">
+          <input type="checkbox" v-model="splitRtl" />
+          <span>{{ t('dt.ly.splitRtl') }}</span>
+        </label>
+      </div>
+      <div class="ly-actions">
+        <button class="primary" :disabled="!!busy" @click="runSplit2up">
+          {{ busy === 'split2up' ? t('dt.working') : t('dt.ly.split2upBtn') }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 6. Single Continuous Large Page -->
+    <div class="ly-card">
+      <div class="ly-head">
+        <h4>{{ t('dt.ly.singleTitle') }}</h4>
+        <span class="dt-sub">{{ t('dt.ly.singleSub') }}</span>
+      </div>
+      <div class="dt-form">
+        <label class="dt-field">
+          <span>{{ t('dt.ly.gap') }} (pt)</span>
+          <input type="number" v-model.number="singleGap" min="0" max="120" />
+        </label>
+        <label class="ly-check">
+          <input type="checkbox" v-model="singleBorder" />
+          <span>{{ t('dt.ly.singleBorder') }}</span>
+        </label>
+      </div>
+      <div class="ly-actions">
+        <button class="primary" :disabled="!!busy" @click="runSinglePage">
+          {{ busy === 'singlepage' ? t('dt.working') : t('dt.ly.singleBtn') }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 7. Vector Overlay PDF (Letterhead / Stationery) -->
+    <div class="ly-card">
+      <div class="ly-head">
+        <h4>{{ t('dt.ly.overlayTitle') }}</h4>
+        <span class="dt-sub">{{ t('dt.ly.overlaySub') }}</span>
+      </div>
+      <div class="dt-form">
+        <div class="dt-actions">
+          <button @click="pickOverlayPdf">{{ t('dt.ly.overlayPick') }}</button>
+          <span class="dt-sub" v-if="overlayPath">{{ overlayPath.split('/').pop() }}</span>
+        </div>
+        <label class="ly-check">
+          <input type="checkbox" v-model="overlayUnder" />
+          <span>{{ t('dt.ly.overlayUnder') }}</span>
+        </label>
+        <label class="ly-check">
+          <input type="checkbox" v-model="overlayRepeat" />
+          <span>{{ t('dt.ly.overlayRepeat') }}</span>
+        </label>
+      </div>
+      <div class="ly-actions">
+        <button class="primary" :disabled="!!busy || !overlayPath" @click="runOverlay">
+          {{ busy === 'overlay' ? t('dt.working') : t('dt.ly.overlayBtn') }}
         </button>
       </div>
     </div>

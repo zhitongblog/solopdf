@@ -126,6 +126,31 @@ function duplicateSelected(): void {
   selected.value = newSel
 }
 
+async function detectBlank(): Promise<void> {
+  const src = tab.value?.path
+  if (!src) return
+  busy.value = true
+  try {
+    const blanks = await docOps.detectBlankPages(src, null, 0.005)
+    const blankSet = new Set(blanks)
+    const sel = new Set<number>()
+    plan.value.forEach((p, idx) => {
+      if (p.src === 0 || blankSet.has(p.src)) sel.add(idx)
+    })
+    selected.value = sel
+    emit(
+      'toast',
+      sel.size > 0
+        ? t('dt.pages.blankFound', { n: sel.size })
+        : t('dt.pages.noBlankFound'),
+    )
+  } catch (err) {
+    emit('toast', String((err as Error).message ?? err))
+  } finally {
+    busy.value = false
+  }
+}
+
 function move(dir: -1 | 1): void {
   const idx = [...selected.value].sort((a, b) => (dir < 0 ? a - b : b - a))
   if (!idx.length) return
@@ -214,6 +239,7 @@ async function saveAs(onlySelected: boolean): Promise<void> {
       <button :disabled="!anySelected" @click="move(1)">→</button>
       <button @click="insertBlank">＋ {{ t('dt.pages.insertBlank') }}</button>
       <button :disabled="!anySelected" @click="duplicateSelected">⧉ {{ t('dt.pages.duplicate') }}</button>
+      <button :disabled="busy" @click="detectBlank">✨ {{ t('dt.pages.detectBlank') }}</button>
       <button :disabled="!anySelected" class="danger" @click="removeSelected">{{ t('dt.pages.remove') }}</button>
     </div>
 

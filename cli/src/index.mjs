@@ -48,6 +48,7 @@ import {
   detectOutlinesFromPages, sanitizeOutlineTree,
   extractTableFromItems, tableToMarkdown, tableToCsv,
   filterAnnotations, toAnkiTsv, toObsidianSr,
+  suggestPdfFilename,
 } from '@solopdf/core'
 import { formatOf, loadFb2, fb2InfoJson, tiffInfoJson, tiffPages } from './formats.mjs'
 
@@ -1202,6 +1203,41 @@ async function cmdCite(file) {
   await doc.destroy()
 }
 
+/**
+ * Smart PDF auto-rename: extract title / authors / year / DOI from metadata
+ * and first pages, and compute a clean, filesystem-safe filename.
+ * If --out-dir <dir> is provided, copies the PDF into <dir>/<suggested.pdf>
+ * (preserving the copy-out rule: source file is never mutated).
+ */
+async function cmdAutoRename(file) {
+  const { copyFile, mkdir } = await import('node:fs/promises')
+  const template = flag('template') ?? '{year} - {author} - {title}'
+  const doc = await open(file)
+  const meta = extractCitation(await readCitationInput(doc, path.basename(file)))
+  await doc.destroy()
+  const { filename: suggested } = suggestPdfFilename(meta, template)
+  const outDir = flag('out-dir')
+  let copiedTo = null
+  if (outDir) {
+    await mkdir(outDir, { recursive: true })
+    copiedTo = path.resolve(outDir, suggested)
+    await copyFile(file, copiedTo)
+  }
+  if (args.includes('--json')) {
+    console.log(JSON.stringify({
+      file: path.resolve(file),
+      suggested,
+      template,
+      ...(copiedTo ? { written: copiedTo } : {}),
+      meta,
+    }, null, 2))
+  } else if (copiedTo) {
+    console.log(copiedTo)
+  } else {
+    console.log(suggested)
+  }
+}
+
 /** text items of every page, the same filter the viewer applies */
 async function compareInput(doc) {
   const pages = []
@@ -1441,6 +1477,60 @@ async function cmdSelftest(dir) {
       console.log(`FAIL v1.0 cert-sign + verify-signatures: ${e.message}`)
       fail++
     }
+
+    // 6. v1.1 Stirling suite: auto-rename, split-2up, single-page, detect/remove-blank, overlay, attachments, pipeline
+    try {
+      const doc = await open(samplePdf)
+      const citeMeta = extractCitation(await readCitationInput(doc, path.basename(samplePdf)))
+      await doc.destroy()
+      const { filename: suggested } = suggestPdfFilename(citeMeta)
+      if (!suggested.endsWith('.pdf') || suggested.length < 5) {
+        throw new Error(`auto-rename 建议文件名异常: ${suggested}`)
+      }
+
+      const split2upPdf = path.join(tmp, 'split2up.pdf')
+      const singlePagePdf = path.join(tmp, 'single-page.pdf')
+      const overlayPdf = path.join(tmp, 'overlay.pdf')
+      const attachPdf = path.join(tmp, 'attach.pdf')
+      const noAttachPdf = path.join(tmp, 'no-attach.pdf')
+      const attachTxt = path.join(tmp, 'note.txt')
+      await writeFile(attachTxt, 'Hello SoloPDF Attachment!\n', 'utf-8')
+
+      execFileSync(docBin(), ['split-2up', samplePdf, split2upPdf, '--only-wide', '0'], { stdio: 'pipe' })
+      execFileSync(docBin(), ['single-page', samplePdf, singlePagePdf, '--gap', '12', '--border', '1'], { stdio: 'pipe' })
+      const blankInfo = JSON.parse(execFileSync(docBin(), ['detect-blank', samplePdf]).toString())
+      if (!Array.isArray(blankInfo.blankPages)) throw new Error('detect-blank 返回异常')
+      execFileSync(docBin(), ['overlay', samplePdf, overlayPdf, samplePdf, '--under', '1', '--repeat', '1'], { stdio: 'pipe' })
+
+      execFileSync(docBin(), ['attachments-add', samplePdf, attachPdf, attachTxt], { stdio: 'pipe' })
+      const listed = JSON.parse(execFileSync(docBin(), ['attachments-list', attachPdf]).toString())
+      if (!Array.isArray(listed) || listed.length < 1 || listed[0].name !== 'note.txt') {
+        throw new Error(`attachments-list 异常: ${JSON.stringify(listed)}`)
+      }
+      execFileSync(docBin(), ['attachments-remove', attachPdf, noAttachPdf], { stdio: 'pipe' })
+      const listedAfter = JSON.parse(execFileSync(docBin(), ['attachments-list', noAttachPdf]).toString())
+      if (!Array.isArray(listedAfter) || listedAfter.length !== 0) {
+        throw new Error(`attachments-remove 异常: ${JSON.stringify(listedAfter)}`)
+      }
+
+      const pipeSpecFile = path.join(tmp, 'pipeline.json')
+      const pipeOutPdf = path.join(tmp, 'pipeline-out.pdf')
+      await writeFile(pipeSpecFile, JSON.stringify([
+        { op: 'split_2up', direction: 'vertical', onlyWide: false, rtl: false, overlap: 0 },
+        { op: 'grayscale', whiten: false },
+        { op: 'page_numbers', format: '{n}/{total}', position: 'bottom-center', startAt: 1, fontSize: 10 },
+      ]), 'utf-8')
+      execFileSync(docBin(), ['pipeline', samplePdf, pipeOutPdf, pipeSpecFile], { stdio: 'pipe' })
+
+      for (const f of [split2upPdf, singlePagePdf, overlayPdf, attachPdf, noAttachPdf, pipeOutPdf]) {
+        if (!existsSync(f) || statSync(f).size < 100) throw new Error(`v1.1 输出文件异常: ${f}`)
+      }
+      console.log(`PASS v1.1 Stirling suite (auto-rename="${suggested}", split-2up, single-page, overlay, attachments, pipeline)`)
+      pass++
+    } catch (e) {
+      console.log(`FAIL v1.1 Stirling suite: ${e.message}`)
+      fail++
+    }
   } finally {
     await rm(tmp, { recursive: true, force: true })
   }
@@ -1475,6 +1565,7 @@ switch (cmd) {
   case 'export-flashcards': await cmdExportFlashcards(file ?? die('用法: solopdf export-flashcards <file.pdf> [--format anki|obsidian] [--tag tag] [--color color] [--cloze] [--out file]')); break
   case 'verify-signatures': await cmdVerifySignatures(file ?? die('用法: solopdf verify-signatures <file.pdf> [--password pw]')); break
   case 'cite': await cmdCite(file ?? die('用法: solopdf cite <file.pdf> [--format bibtex|apa|gbt|all|json] [--online]')); break
+  case 'auto-rename': await cmdAutoRename(file ?? die('用法: solopdf auto-rename <file.pdf> [--template "{year} - {author} - {title}"] [--out-dir dir] [--json]')); break
   case 'compare': await cmdCompare(file ?? die('用法: solopdf compare <old.pdf> <new.pdf> [--json]'), args[2]); break
   case 'ask': await cmdAsk(file ?? die('用法: solopdf ask <file.pdf> "问题"'), args[2]); break
   case 'summarize': await cmdSummarize(file ?? die('用法: solopdf summarize <file.pdf> [--page N]')); break
@@ -1509,7 +1600,9 @@ switch (cmd) {
   solopdf translate "文字" [--to zh-Hans]          翻译：macOS 用本机 Apple 翻译；可选 --provider deepl|openai
   solopdf cite <file.pdf> [--format bibtex|apa|gbt|json] [--online]
                                                    引用信息（DOI/arXiv/标题/作者/年份；--online 才联网查 doi.org）
-  solopdf doc <子命令> …                            页面/合并/拆分/压缩/加密/拼版/小册子/灰度/签名（solopdf-doc）
+  solopdf auto-rename <file.pdf> [--template tpl] [--out-dir dir] [--json]
+                                                   智能重命名建议（基于标题/作者/年份/DOI 生成规范文件名，可选输出副本）
+  solopdf doc <子命令> …                            页面/合并/拆分/压缩/加密/拼版/双页中缝切分/空白页清理/流水线（solopdf-doc）
   solopdf compare <old.pdf> <new.pdf> [--json]     比较两版文档：按页对齐，列出新增/删除/修改的文字
   solopdf ask <file.pdf> "问题"                     问 AI：检索相关页 → 你的 OpenAI 兼容服务，带 [p.N] 引用
   solopdf summarize <file.pdf> [--page N]          AI 摘要（长文档 map-reduce，--budget 字数上限）
@@ -1521,6 +1614,8 @@ switch (cmd) {
   images-to-pdf / protect / unprotect / watermark / page-numbers / crop /
   extract-images / sanitize / flatten / redact / outlines / set-outlines /
   nup / booklet / grayscale / resize / verify-signatures / cert-sign /
+  split-2up / single-page / detect-blank / remove-blank / overlay /
+  attachments-list / attachments-add / attachments-remove / pipeline /
   info / djvu-info / djvu-page`)
     process.exit(cmd ? 1 : 0)
 }

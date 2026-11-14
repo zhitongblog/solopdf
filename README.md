@@ -55,9 +55,10 @@ SoloPDF：秒开、零广告、零遥测（更新检查可完全关闭）、永�
   正文按需建索引）
 - **阅读统计**：时长、连续天数、每本书进度——只存本机，可一键清空/导出
 - **文档工具（全本地 Copy-out，原文件永不修改）**：
+  - **自动化流水线（Pipeline）、智能重命名与内嵌附件管理**：**多步内存流水线**（一键串联移除空白页 → 双页中缝切分 → 白边裁切 → 灰度漂白 → 页码 → 压缩/加密，内置「扫描书籍清理」「办公归档压缩」「发件脱敏定稿」预设，零中间临时文件）、**智能重命名（Auto-Rename）**（基于标题/作者/年份/DOI 自动生成规范文件名导出副本）、**PDF 文档级内嵌附件读写管理**（写入/查看/剥离 `/EmbeddedFiles` 附件）
   - **目录书签（Outlines）编辑与智能生成**：可视化增删改目录树层级，或**一键按正文字号梯度/章节正则自动生成 PDF 目录树**
-  - **页面管理**：旋转、删除、提取、拖拽重排、**插入同尺寸空白页**、**复制页面**
-  - **拼版与印前套件（Layout & Imposition）**：**N-up 多页合一拼版**（2/4/6/9/16 页，保留矢量清晰度）、**小册子骑马钉对折拼版（Booklet）**、**PDF 转灰度与扫描底色漂白（Grayscale）**、**统一页面尺寸（Normalize to A4/A3/Letter）**
+  - **页面管理**：旋转、删除、提取、拖拽重排、**插入同尺寸空白页**、**复制页面**、**一键自动检测并清理空白页（含纯白扫描页墨迹比检测）**
+  - **拼版与印前套件（Layout & Imposition）**：**双页扫描件中缝切分（2-up Split / De-nup，支持跳过单页封面、古籍日漫从右到左页序与中缝留白）**、**多页拼接为单张连续长页（Single Continuous Page，全矢量不栅格化）**、**PDF 矢量信纸/底图叠印（Overlay PDF，支持背景信头或前景套印循环叠加）**、**N-up 多页合一拼版**（2/4/6/9/16 页，保留矢量清晰度）、**小册子骑马钉对折拼版（Booklet）**、**PDF 转灰度与扫描底色漂白（Grayscale）**、**统一页面尺寸（Normalize to A4/A3/Letter）**
   - **永久裁切（Crop PDF）**：按边距或区域永久更新 `/CropBox` 与 `/MediaBox`；支持**一键自动检测全书白边**（含扫描件像素墨迹检测）及奇偶页对称装订边距
   - **合并与拆分**：多文件排序合并；按页码范围、每 N 页、均分 N 份、或**按 PDF 目录书签章节自动拆分**
   - **水印与页码**：文字水印（支持中文/CJK、满页平铺、旋转、置底）与透明 PNG 图片水印；页码与 **Bates 编号**（`{n}/{total}`、`DOC-{n:06}`、奇偶页外侧对齐）
@@ -133,11 +134,21 @@ node cli/src/index.mjs outlines a.pdf --auto [--out a-outlines.pdf] # 智能识�
 node cli/src/index.mjs extract-table a.pdf --page 1 [--format md|csv] # 提取页面/区域表格为 Markdown 或 CSV
 node cli/src/index.mjs export-flashcards a.pdf [--format anki|obsidian] # 导出伴生批注为 Anki / Obsidian 闪卡
 node cli/src/index.mjs verify-signatures signed.pdf                  # 校验 PDF 数字签名与篡改状态
+node cli/src/index.mjs auto-rename paper.pdf [--out-dir dir] [--json] # 智能重命名建议（{year} - {author} - {title}.pdf）
 
 # 文档操作（转发给原生驱动 solopdf-doc，全部写新文件）
 node cli/src/index.mjs doc pages a.pdf out.pdf --keep 1,0,3-5 --rotate 90   # 0 = 插入空白页
 node cli/src/index.mjs doc merge out.pdf a.pdf b.pdf
 node cli/src/index.mjs doc split a.pdf outdir --ranges 1-3,4-10
+node cli/src/index.mjs doc split-2up scan.pdf out.pdf --only-wide 1 --rtl 0 # 双页扫描件中缝切分为单页
+node cli/src/index.mjs doc single-page a.pdf out.pdf --gap 12 --border 1    # 多页垂直拼接为单张连续长页
+node cli/src/index.mjs doc detect-blank scan.pdf --threshold 0.005          # 检测空白页与纯白扫描页
+node cli/src/index.mjs doc remove-blank scan.pdf out.pdf --threshold 0.005  # 自动剔除空白页
+node cli/src/index.mjs doc overlay a.pdf out.pdf letterhead.pdf --under 1   # 矢量信纸/底图叠印
+node cli/src/index.mjs doc attachments-list a.pdf                           # 列出文档级内嵌附件
+node cli/src/index.mjs doc attachments-add a.pdf out.pdf data.csv note.txt  # 嵌入文档级附件
+node cli/src/index.mjs doc attachments-remove a.pdf out.pdf [--names a,b]   # 剥离指定或全部内嵌附件
+node cli/src/index.mjs doc pipeline a.pdf out.pdf steps.json                # 内存多步自动化流水线
 node cli/src/index.mjs doc outlines a.pdf
 node cli/src/index.mjs doc set-outlines a.pdf out.pdf outlines.json
 node cli/src/index.mjs doc nup a.pdf out.pdf --cols 2 --rows 2 --border 1
@@ -180,6 +191,8 @@ claude mcp add solopdf -- node /path/to/pdf/dev-mcp/src/index.mjs --allow-write
 `solopdf_translate` / `solopdf_pdf_annotations`（PDF 内其他应用留下的注释及导入状态）/
 `solopdf_attachments`（嵌入附件）/ `solopdf_layers`（图层）/
 `solopdf_cite`（引用信息，`online: true` 才联网） /
+`solopdf_auto_rename`（基于标题/作者/年份/DOI 智能生成规范文件名建议） /
+`solopdf_detect_blank_pages`（空白页与纯白扫描页检测） /
 `solopdf_compare`（两版 PDF 的文字差异 + 页对齐） /
 `solopdf_export_markdown`（结构化 Markdown 导出） /
 `solopdf_retrieve`（本地 BM25 检索最相关的页段落，不调用模型、不联网——给外部 LLM 带页码引用作答用）。
@@ -188,6 +201,8 @@ claude mcp add solopdf -- node /path/to/pdf/dev-mcp/src/index.mjs --allow-write
 `solopdf_export_annotated_pdf` / `solopdf_import_annotations` / `solopdf_pages` / `solopdf_merge` /
 `solopdf_watermark` / `solopdf_page_numbers` / `solopdf_crop` / `solopdf_split_by_bookmarks` /
 `solopdf_extract_images` / `solopdf_sanitize` / `solopdf_flatten` / `solopdf_redact` / `solopdf_redact_by_text` /
+`solopdf_split_2up` / `solopdf_single_page` / `solopdf_remove_blank_pages` / `solopdf_overlay` /
+`solopdf_add_attachments` / `solopdf_remove_attachments` / `solopdf_pipeline` /
 `solopdf_extract_attachment`（把附件写到目录）。
 
 ## 开发

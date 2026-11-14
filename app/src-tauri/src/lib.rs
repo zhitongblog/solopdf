@@ -1020,6 +1020,214 @@ async fn pdf_cert_sign(
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+async fn pdf_split_2up(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    spec: pdfops::Split2upSpec,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-split2up", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::split_2up_pdf(&pdf, password.as_deref(), &spec)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_single_large_page(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    gap: Option<f32>,
+    border: Option<bool>,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-singlepage", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(
+            dest,
+            pdfops::single_large_page_pdf(
+                &pdf,
+                password.as_deref(),
+                gap.unwrap_or(16.0),
+                border.unwrap_or(false),
+            )?,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_detect_blank_pages(
+    src_path: String,
+    password: Option<String>,
+    threshold: Option<f32>,
+) -> Result<Vec<u32>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        pdfops::detect_blank_pages(&pdf, password.as_deref(), threshold.unwrap_or(0.005))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize)]
+struct RemoveBlankResult {
+    path: String,
+    removed: Vec<u32>,
+}
+
+#[tauri::command]
+async fn pdf_remove_blank_pages(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    threshold: Option<f32>,
+) -> Result<RemoveBlankResult, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-noblank", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        let (out_bytes, removed) =
+            pdfops::remove_blank_pages(&pdf, password.as_deref(), threshold.unwrap_or(0.005))?;
+        let path = write_out(dest, out_bytes)?;
+        Ok(RemoveBlankResult { path, removed })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_overlay(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    overlay_path: String,
+    overlay_password: Option<String>,
+    under: Option<bool>,
+    repeat: Option<bool>,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-overlay", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取底稿失败: {e}"))?;
+        let ov = fs::read(&overlay_path).map_err(|e| format!("读取叠印 PDF 失败: {e}"))?;
+        write_out(
+            dest,
+            pdfops::overlay_pdf(
+                &pdf,
+                password.as_deref(),
+                &ov,
+                overlay_password.as_deref(),
+                under.unwrap_or(true),
+                repeat.unwrap_or(true),
+            )?,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_list_attachments(
+    src_path: String,
+    password: Option<String>,
+) -> Result<Vec<pdfops::EmbeddedAttachmentInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        pdfops::list_embedded_attachments(&pdf, password.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(serde::Deserialize)]
+struct AttachmentFileSpec {
+    path: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    description: String,
+}
+
+#[tauri::command]
+async fn pdf_add_attachments(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    files: Vec<AttachmentFileSpec>,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-attached", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        let mut inputs = Vec::with_capacity(files.len());
+        for f in files {
+            let bytes = fs::read(&f.path).map_err(|e| format!("读取附件 {} 失败: {e}", f.path))?;
+            let name = f.name.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| {
+                Path::new(&f.path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "attachment".into())
+            });
+            inputs.push(pdfops::EmbeddedAttachmentInput {
+                name,
+                bytes,
+                description: f.description,
+            });
+        }
+        write_out(
+            dest,
+            pdfops::add_embedded_attachments(&pdf, password.as_deref(), &inputs)?,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_remove_attachments(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    names: Vec<String>,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-detached", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(
+            dest,
+            pdfops::remove_embedded_attachments(&pdf, password.as_deref(), &names)?,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_run_pipeline(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    steps: Vec<pdfops::PipelineStep>,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-pipeline", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::run_pipeline(&pdf, password.as_deref(), &steps)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[derive(Serialize)]
 struct UserDict {
     name: String,
@@ -1763,6 +1971,15 @@ pub fn run() {
             pdf_resize_pages,
             pdf_verify_signatures,
             pdf_cert_sign,
+            pdf_split_2up,
+            pdf_single_large_page,
+            pdf_detect_blank_pages,
+            pdf_remove_blank_pages,
+            pdf_overlay,
+            pdf_list_attachments,
+            pdf_add_attachments,
+            pdf_remove_attachments,
+            pdf_run_pipeline,
             iap::iap_get_state,
             iap::iap_fetch_products,
             iap::iap_purchase,

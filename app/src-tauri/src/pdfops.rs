@@ -3195,6 +3195,941 @@ pub fn normalize_page_size(
     save(&mut doc)
 }
 
+// ── Split 2-up spreads (De-nup) & Single Continuous Page ─────────────────
+
+fn default_split_2up_dir() -> String {
+    "vertical".into()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Split2upSpec {
+    /// "vertical" (split left/right along a vertical center line) or
+    /// "horizontal" (split top/bottom along a horizontal center line)
+    #[serde(default = "default_split_2up_dir")]
+    pub direction: String,
+    /// Right-to-left page order (for traditional CJK vertical/right-bound scans)
+    #[serde(default)]
+    pub rtl: bool,
+    /// Only split pages that look like 2-up spreads (aspect ratio > 1.1 for vertical)
+    #[serde(default)]
+    pub only_wide: bool,
+    /// Center spine overlap in points so gutter text is not clipped
+    #[serde(default)]
+    pub overlap: f32,
+}
+
+impl Default for Split2upSpec {
+    fn default() -> Self {
+        Self {
+            direction: default_split_2up_dir(),
+            rtl: false,
+            only_wide: false,
+            overlap: 0.0,
+        }
+    }
+}
+
+/// Split 2-up spread pages into individual half-pages by cloning the page
+/// dictionary and clipping `/MediaBox` and `/CropBox` to each half.
+pub fn split_2up_pdf(pdf: &[u8], password: Option<&str>, spec: &Split2upSpec) -> R<Vec<u8>> {
+    let mut doc = load(pdf, password)?;
+    let ids = page_ids(&doc);
+    if ids.is_empty() {
+        return Err("PDF 没有页面".into());
+    }
+    let pages_id = doc
+        .catalog()
+        .and_then(|c| c.get(b"Pages"))
+        .and_then(Object::as_reference)
+        .map_err(e("找不到页面树"))?;
+
+    // Copy down inherited attributes before flattening / cloning pages
+    for &id in &ids {
+        for key in [&b"MediaBox"[..], b"Resources", b"Rotate", b"CropBox"] {
+            if doc.get_dictionary(id).map(|d| d.has(key)).unwrap_or(false) {
+                continue;
+            }
+            if let Some(v) = inherited(&doc, id, key) {
+                if let Ok(d) = doc.get_dictionary_mut(id) {
+                    d.set(key.to_vec(), v);
+                }
+            }
+        }
+    }
+
+    let is_horiz = spec.direction.eq_ignore_ascii_case("horizontal");
+    let mut new_kids: Vec<Object> = Vec::with_capacity(ids.len() * 2);
+
+    for orig_id in ids {
+        let [x1, y1, x2, y2] = page_box(&doc, orig_id);
+        let w = (x2 - x1).abs().max(1.0);
+        let h = (y2 - y1).abs().max(1.0);
+
+        let should_split = if !spec.only_wide {
+            true
+        } else if !is_horiz {
+            w > h * 1.1
+        } else {
+            h > w * 1.4
+        };
+
+        if !should_split {
+            if let Ok(d) = doc.get_dictionary_mut(orig_id) {
+                d.set("Parent", Object::Reference(pages_id));
+            }
+            new_kids.push(Object::Reference(orig_id));
+            continue;
+        }
+
+        let (first_box, second_box) = if !is_horiz {
+            let mid_x = (x1 + x2) * 0.5;
+            let ov = spec.overlap.max(0.0).min(w * 0.25);
+            let left_box = [x1, y1, (mid_x + ov).min(x2), y2];
+            let right_box = [(mid_x - ov).max(x1), y1, x2, y2];
+            if spec.rtl {
+                (right_box, left_box)
+            } else {
+                (left_box, right_box)
+            }
+        } else {
+            let mid_y = (y1 + y2) * 0.5;
+            let ov = spec.overlap.max(0.0).min(h * 0.25);
+            // In PDF user space y grows upward, so top half is [mid_y..y2]
+            let top_box = [x1, (mid_y - ov).max(y1), x2, y2];
+            let bottom_box = [x1, y1, x2, (mid_y + ov).min(y2)];
+            if spec.rtl {
+                (bottom_box, top_box)
+            } else {
+                (top_box, bottom_box)
+            }
+        };
+
+        let mut cloned = doc
+            .get_dictionary(orig_id)
+            .map_err(e("页面结构异常"))?
+            .clone();
+        cloned.set("Parent", Object::Reference(pages_id));
+        cloned.set("MediaBox", nums(&second_box));
+        cloned.set("CropBox", nums(&second_box));
+
+        if let Ok(d) = doc.get_dictionary_mut(orig_id) {
+            d.set("Parent", Object::Reference(pages_id));
+            d.set("MediaBox", nums(&first_box));
+            d.set("CropBox", nums(&first_box));
+        }
+        let second_id = doc.add_object(Object::Dictionary(cloned));
+        new_kids.push(Object::Reference(orig_id));
+        new_kids.push(Object::Reference(second_id));
+    }
+
+    let count = new_kids.len() as i64;
+    let root = doc.get_dictionary_mut(pages_id).map_err(e("页面树异常"))?;
+    root.set("Kids", Object::Array(new_kids));
+    root.set("Count", Object::Integer(count));
+    let _ = doc.catalog_mut().map(|c| c.remove(b"Outlines"));
+    doc.prune_objects();
+    doc.renumber_objects();
+    save(&mut doc)
+}
+
+/// Join all pages vertically into a single continuous large PDF page.
+pub fn single_large_page_pdf(
+    pdf: &[u8],
+    password: Option<&str>,
+    gap: f32,
+    border: bool,
+) -> R<Vec<u8>> {
+    let mut doc = load(pdf, password)?;
+    let src_pages = page_ids(&doc);
+    if src_pages.is_empty() {
+        return Err("PDF 没有页面".into());
+    }
+    let pages_id = doc
+        .catalog()
+        .and_then(|c| c.get(b"Pages"))
+        .and_then(Object::as_reference)
+        .map_err(e("找不到页面树"))?;
+
+    let first_box = page_box(&doc, src_pages[0]);
+    let target_w = (first_box[2] - first_box[0]).abs().max(72.0);
+    let gap = gap.max(0.0);
+
+    let mut forms = Vec::with_capacity(src_pages.len());
+    let mut scaled_heights = Vec::with_capacity(src_pages.len());
+    for &pid in &src_pages {
+        let (fid, bbox) = page_to_form_xobject(&mut doc, pid);
+        let pw = (bbox[2] - bbox[0]).abs().max(1.0);
+        let ph = (bbox[3] - bbox[1]).abs().max(1.0);
+        let s = target_w / pw;
+        forms.push((fid, bbox, s));
+        scaled_heights.push(ph * s);
+    }
+
+    let n = forms.len();
+    let total_h: f32 =
+        scaled_heights.iter().sum::<f32>() + gap * (n.saturating_sub(1) as f32);
+
+    let mut ops: Vec<Operation> = Vec::new();
+    let mut xobj_dict = Dictionary::new();
+    let mut cur_top = total_h;
+
+    for (k, &(form_id, bbox, s)) in forms.iter().enumerate() {
+        let dh = scaled_heights[k];
+        let cell_y = cur_top - dh;
+        let tx = -bbox[0] * s;
+        let ty = cell_y - bbox[1] * s;
+
+        let fm_name = format!("Fm{k}");
+        xobj_dict.set(fm_name.clone(), Object::Reference(form_id));
+        ops.push(op("q", &[]));
+        ops.push(op("cm", &[s, 0.0, 0.0, s, tx, ty]));
+        ops.push(Operation::new("Do", vec![Object::Name(fm_name.into_bytes())]));
+        ops.push(op("Q", &[]));
+
+        if border && k + 1 < n {
+            let line_y = cell_y - gap * 0.5;
+            ops.push(op("q", &[]));
+            ops.push(op("RG", &[0.78, 0.78, 0.78]));
+            ops.push(op("w", &[0.5]));
+            ops.push(op("m", &[0.0, line_y]));
+            ops.push(op("l", &[target_w, line_y]));
+            ops.push(op("S", &[]));
+            ops.push(op("Q", &[]));
+        }
+
+        cur_top = cell_y - gap;
+    }
+
+    let content_bytes = Content { operations: ops }.encode().unwrap_or_default();
+    let content_id = doc.add_object(Stream::new(dictionary! {}, content_bytes));
+    let page_id = doc.add_object(dictionary! {
+        "Type" => "Page",
+        "Parent" => pages_id,
+        "MediaBox" => nums(&[0.0, 0.0, target_w, total_h.max(1.0)]),
+        "Contents" => content_id,
+        "Resources" => dictionary! { "XObject" => Object::Dictionary(xobj_dict) },
+    });
+
+    let root = doc.get_dictionary_mut(pages_id).map_err(e("页面树异常"))?;
+    root.set("Kids", Object::Array(vec![Object::Reference(page_id)]));
+    root.set("Count", Object::Integer(1));
+    let _ = doc.catalog_mut().map(|c| c.remove(b"Outlines"));
+    doc.prune_objects();
+    doc.renumber_objects();
+    save(&mut doc)
+}
+
+// ── Blank page detection & removal ───────────────────────────────────────
+
+fn bytes_have_visible_text(bytes: &[u8]) -> bool {
+    bytes
+        .iter()
+        .any(|&b| !matches!(b, b' ' | b'\t' | b'\r' | b'\n' | 0x00 | 0xFE | 0xFF))
+}
+
+fn image_stream_is_blank(stream: &Stream, threshold: f32) -> bool {
+    let w = stream.dict.get(b"Width").and_then(Object::as_i64).unwrap_or(0) as u32;
+    let h = stream.dict.get(b"Height").and_then(Object::as_i64).unwrap_or(0) as u32;
+    if w == 0 || h == 0 {
+        return true;
+    }
+    let total = (w as usize) * (h as usize);
+    let filters = stream.filters().unwrap_or_default();
+    let is_jpeg = filters.iter().any(|f| *f == b"DCTDecode");
+
+    if is_jpeg {
+        let Ok(img) = image::load_from_memory(&stream.content) else {
+            return false;
+        };
+        let luma = img.to_luma8();
+        let dark = luma.as_raw().iter().filter(|&&p| p < 235).count();
+        return (dark as f32) / (total.max(1) as f32) <= threshold;
+    }
+
+    let Ok(raw) = stream.decompressed_content() else {
+        return false;
+    };
+    let cs = stream
+        .dict
+        .get(b"ColorSpace")
+        .and_then(Object::as_name)
+        .unwrap_or(b"");
+    if cs == b"DeviceGray" && raw.len() >= total {
+        let dark = raw[..total].iter().filter(|&&p| p < 235).count();
+        return (dark as f32) / (total.max(1) as f32) <= threshold;
+    }
+    if cs == b"DeviceRGB" && raw.len() >= total * 3 {
+        let dark = raw[..total * 3]
+            .chunks_exact(3)
+            .filter(|rgb| {
+                let y = (77u32 * rgb[0] as u32 + 150u32 * rgb[1] as u32 + 29u32 * rgb[2] as u32)
+                    >> 8;
+                y < 235
+            })
+            .count();
+        return (dark as f32) / (total.max(1) as f32) <= threshold;
+    }
+    false
+}
+
+fn is_page_blank(doc: &Document, page_id: ObjectId, threshold: f32) -> bool {
+    // Pages with annotations are not blank
+    if let Ok(annots) = doc.get_page_annotations(page_id) {
+        if !annots.is_empty() {
+            return false;
+        }
+    }
+    let Ok(raw) = doc.get_page_content(page_id) else {
+        return true;
+    };
+    if raw.iter().all(|b| b.is_ascii_whitespace()) {
+        return true;
+    }
+    let Ok(decoded) = Content::decode(&raw) else {
+        return false;
+    };
+
+    let mut path_paint_ops = 0usize;
+    let mut invoked_xobjects: Vec<Vec<u8>> = Vec::new();
+
+    for op_item in &decoded.operations {
+        match op_item.operator.as_str() {
+            "Tj" | "'" | "\"" => {
+                for operand in &op_item.operands {
+                    if let Object::String(bytes, _) = operand {
+                        if bytes_have_visible_text(bytes) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            "TJ" => {
+                for operand in &op_item.operands {
+                    if let Object::Array(items) = operand {
+                        for item in items {
+                            if let Object::String(bytes, _) = item {
+                                if bytes_have_visible_text(bytes) {
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            "BI" | "sh" => return false,
+            "S" | "s" | "f" | "F" | "f*" | "B" | "B*" | "b" | "b*" => {
+                path_paint_ops += 1;
+                if path_paint_ops > 2 {
+                    return false;
+                }
+            }
+            "Do" => {
+                if let Some(Object::Name(name)) = op_item.operands.first() {
+                    invoked_xobjects.push(name.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if invoked_xobjects.is_empty() {
+        return true;
+    }
+
+    let Some(res_obj) = inherited(doc, page_id, b"Resources") else {
+        return false;
+    };
+    let Some(res_dict) = resolve_dict(doc, &res_obj) else {
+        return false;
+    };
+    let Ok(xobj_entry) = res_dict.get(b"XObject") else {
+        return false;
+    };
+    let Some(xobj_dict) = resolve_dict(doc, xobj_entry) else {
+        return false;
+    };
+
+    for xname in invoked_xobjects {
+        let Ok(Object::Reference(xid)) = xobj_dict.get(&xname) else {
+            return false;
+        };
+        let Ok(stream) = doc.get_object(*xid).and_then(Object::as_stream) else {
+            return false;
+        };
+        let subtype = stream
+            .dict
+            .get(b"Subtype")
+            .and_then(Object::as_name)
+            .unwrap_or(b"");
+        if subtype == b"Image" {
+            if !image_stream_is_blank(stream, threshold) {
+                return false;
+            }
+        } else if subtype == b"Form" {
+            let Ok(f_raw) = stream.decompressed_content() else {
+                return false;
+            };
+            if !f_raw.iter().all(|b| b.is_ascii_whitespace()) {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Detect 1-based page numbers that are visually blank (empty stream or near-white scan).
+pub fn detect_blank_pages(pdf: &[u8], password: Option<&str>, threshold: f32) -> R<Vec<u32>> {
+    let doc = load(pdf, password)?;
+    let pages = page_ids(&doc);
+    let thr = threshold.clamp(0.0, 0.25);
+    let mut blanks = Vec::new();
+    for (idx, &pid) in pages.iter().enumerate() {
+        if is_page_blank(&doc, pid, thr) {
+            blanks.push((idx + 1) as u32);
+        }
+    }
+    Ok(blanks)
+}
+
+/// Remove detected blank pages and return `(new_pdf_bytes, removed_page_numbers)`.
+/// Always keeps at least page 1 if every page in the document is blank.
+pub fn remove_blank_pages(
+    pdf: &[u8],
+    password: Option<&str>,
+    threshold: f32,
+) -> R<(Vec<u8>, Vec<u32>)> {
+    let total = page_count(pdf, password)? as u32;
+    if total == 0 {
+        return Err("PDF 没有页面".into());
+    }
+    let blanks = detect_blank_pages(pdf, password, threshold)?;
+    if blanks.is_empty() {
+        return Ok((pdf.to_vec(), Vec::new()));
+    }
+    let blank_set: std::collections::HashSet<u32> = blanks.iter().copied().collect();
+    let mut keep: Vec<u32> = (1..=total).filter(|p| !blank_set.contains(p)).collect();
+    let actual_removed = if keep.is_empty() {
+        keep.push(1);
+        blanks.into_iter().filter(|&p| p != 1).collect()
+    } else {
+        blanks
+    };
+    let out = arrange_pages(pdf, password, &keep)?;
+    Ok((out, actual_removed))
+}
+
+// ── Vector PDF Overlay (letterhead / background stationery / stamp PDF) ──
+
+/// Overlay pages from `overlay_bytes` onto `pdf` as vector Form XObjects.
+/// - `under`: `true` places the overlay behind the base page content (letterhead/stationery);
+///   `false` places it on top (foreground stamp/template).
+/// - `repeat`: `true` cycles the overlay pages across all base pages; `false` applies 1-to-1.
+pub fn overlay_pdf(
+    pdf: &[u8],
+    password: Option<&str>,
+    overlay_bytes: &[u8],
+    overlay_password: Option<&str>,
+    under: bool,
+    repeat: bool,
+) -> R<Vec<u8>> {
+    let mut doc = load(pdf, password)?;
+    let base_pages = page_ids(&doc);
+    if base_pages.is_empty() {
+        return Err("底稿 PDF 没有页面".into());
+    }
+
+    let mut ov_doc = load(overlay_bytes, overlay_password)?;
+    let ov_pages = page_ids(&ov_doc);
+    if ov_pages.is_empty() {
+        return Err("叠印 PDF 没有页面".into());
+    }
+
+    let mut ov_forms = Vec::with_capacity(ov_pages.len());
+    for &opid in &ov_pages {
+        ov_forms.push(page_to_form_xobject(&mut ov_doc, opid));
+    }
+
+    let max_base_id = doc
+        .objects
+        .keys()
+        .map(|&(n, _)| n)
+        .max()
+        .unwrap_or(0)
+        .max(doc.max_id);
+    let start_id = max_base_id + 1;
+    // Remap ov_forms ids by tracking old->new or renumbering before creating forms:
+    // Let's renumber a fresh load of ov_doc first so page_to_form_xobject uses renumbered IDs!
+    drop(ov_forms);
+    let mut ov_doc = load(overlay_bytes, overlay_password)?;
+    ov_doc.renumber_objects_with(start_id);
+    let ov_pages = page_ids(&ov_doc);
+    let mut ov_forms = Vec::with_capacity(ov_pages.len());
+    for &opid in &ov_pages {
+        ov_forms.push(page_to_form_xobject(&mut ov_doc, opid));
+    }
+    let new_max = ov_doc
+        .objects
+        .keys()
+        .map(|&(n, _)| n)
+        .max()
+        .unwrap_or(start_id)
+        .max(ov_doc.max_id);
+    doc.objects.extend(ov_doc.objects);
+    doc.max_id = new_max;
+
+    for (idx, &page_id) in base_pages.iter().enumerate() {
+        let (ov_form_id, ov_bbox) = if idx < ov_forms.len() {
+            ov_forms[idx]
+        } else if repeat {
+            ov_forms[idx % ov_forms.len()]
+        } else {
+            break;
+        };
+
+        let b = page_box(&doc, page_id);
+        let pw = (b[2] - b[0]).abs().max(1.0);
+        let ph = (b[3] - b[1]).abs().max(1.0);
+        let ow = (ov_bbox[2] - ov_bbox[0]).abs().max(1.0);
+        let oh = (ov_bbox[3] - ov_bbox[1]).abs().max(1.0);
+        let s = (pw / ow).min(ph / oh);
+        let tx = b[0] + (pw - ow * s) * 0.5 - ov_bbox[0] * s;
+        let ty = b[1] + (ph - oh * s) * 0.5 - ov_bbox[1] * s;
+
+        let ops = vec![
+            op("q", &[]),
+            op("cm", &[s, 0.0, 0.0, s, tx, ty]),
+            Operation::new("Do", vec![Object::Name(b"OvSrc".to_vec())]),
+            op("Q", &[]),
+        ];
+        let content = Content { operations: ops }.encode().unwrap_or_default();
+        let wrapper_form = dictionary! {
+            "Type" => "XObject",
+            "Subtype" => "Form",
+            "BBox" => nums(&b),
+            "Resources" => dictionary! {
+                "XObject" => dictionary! {
+                    "OvSrc" => Object::Reference(ov_form_id),
+                },
+            },
+        };
+        let wrapper_id = doc.add_object(Stream::new(wrapper_form, content));
+        attach_form_layer(&mut doc, page_id, &format!("SoloOv{idx}"), wrapper_id, under)?;
+    }
+
+    save(&mut doc)
+}
+
+// ── Embedded Attachments Management (/Names /EmbeddedFiles) ──────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EmbeddedAttachmentInfo {
+    pub name: String,
+    pub size: usize,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddedAttachmentInput {
+    pub name: String,
+    pub bytes: Vec<u8>,
+    #[serde(default)]
+    pub description: String,
+}
+
+fn collect_name_tree_pairs<'a>(
+    doc: &'a Document,
+    node: &'a Dictionary,
+    out: &mut Vec<(String, ObjectId)>,
+    depth: usize,
+) {
+    if depth > 16 {
+        return;
+    }
+    if let Ok(names_obj) = node.get(b"Names") {
+        if let Some(arr) = resolve_array(doc, names_obj) {
+            for pair in arr.chunks_exact(2) {
+                let key = match &pair[0] {
+                    Object::String(b, _) => crate::crypto_sig::decode_pdf_string(b),
+                    _ => continue,
+                };
+                let fid = match &pair[1] {
+                    Object::Reference(r) => *r,
+                    _ => continue,
+                };
+                out.push((key, fid));
+            }
+        }
+    }
+    if let Ok(kids_obj) = node.get(b"Kids") {
+        if let Some(kids) = resolve_array(doc, kids_obj) {
+            for k in kids {
+                if let Some(kd) = resolve_dict(doc, k) {
+                    collect_name_tree_pairs(doc, kd, out, depth + 1);
+                }
+            }
+        }
+    }
+}
+
+/// List document-level embedded files stored in Catalog `/Names -> /EmbeddedFiles`.
+pub fn list_embedded_attachments(
+    pdf: &[u8],
+    password: Option<&str>,
+) -> R<Vec<EmbeddedAttachmentInfo>> {
+    let doc = load(pdf, password)?;
+    let Ok(cat) = doc.catalog() else {
+        return Ok(Vec::new());
+    };
+    let Ok(names_obj) = cat.get(b"Names") else {
+        return Ok(Vec::new());
+    };
+    let Some(names_dict) = resolve_dict(&doc, names_obj) else {
+        return Ok(Vec::new());
+    };
+    let Ok(ef_obj) = names_dict.get(b"EmbeddedFiles") else {
+        return Ok(Vec::new());
+    };
+    let Some(ef_dict) = resolve_dict(&doc, ef_obj) else {
+        return Ok(Vec::new());
+    };
+
+    let mut pairs = Vec::new();
+    collect_name_tree_pairs(&doc, ef_dict, &mut pairs, 0);
+
+    let mut list = Vec::with_capacity(pairs.len());
+    for (key_name, fspec_id) in pairs {
+        let Ok(fspec) = doc.get_dictionary(fspec_id) else {
+            continue;
+        };
+        let name = fspec
+            .get(b"UF")
+            .or_else(|_| fspec.get(b"F"))
+            .ok()
+            .and_then(|o| match o {
+                Object::String(b, _) => Some(crate::crypto_sig::decode_pdf_string(b)),
+                _ => None,
+            })
+            .filter(|s| !s.is_empty())
+            .unwrap_or(key_name);
+        let description = fspec
+            .get(b"Desc")
+            .ok()
+            .and_then(|o| match o {
+                Object::String(b, _) => Some(crate::crypto_sig::decode_pdf_string(b)),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let mut size = 0usize;
+        if let Ok(ef_sub) = fspec.get(b"EF") {
+            if let Some(ef_sub_dict) = resolve_dict(&doc, ef_sub) {
+                if let Ok(st_ref) = ef_sub_dict
+                    .get(b"UF")
+                    .or_else(|_| ef_sub_dict.get(b"F"))
+                    .and_then(Object::as_reference)
+                {
+                    if let Ok(st) = doc.get_object(st_ref).and_then(Object::as_stream) {
+                        size = st
+                            .decompressed_content()
+                            .map(|b| b.len())
+                            .unwrap_or(st.content.len());
+                    }
+                }
+            }
+        }
+        list.push(EmbeddedAttachmentInfo {
+            name,
+            size,
+            description,
+        });
+    }
+    Ok(list)
+}
+
+/// Add or replace document-level embedded files in Catalog `/Names -> /EmbeddedFiles`.
+pub fn add_embedded_attachments(
+    pdf: &[u8],
+    password: Option<&str>,
+    attachments: &[EmbeddedAttachmentInput],
+) -> R<Vec<u8>> {
+    if attachments.is_empty() {
+        return Err("没有要添加的附件".into());
+    }
+    let mut doc = load(pdf, password)?;
+
+    // Gather existing (name, fspec_id) pairs if any
+    let mut existing: Vec<(String, ObjectId)> = Vec::new();
+    if let Ok(cat) = doc.catalog() {
+        if let Ok(names_obj) = cat.get(b"Names") {
+            if let Some(names_dict) = resolve_dict(&doc, names_obj) {
+                if let Ok(ef_obj) = names_dict.get(b"EmbeddedFiles") {
+                    if let Some(ef_dict) = resolve_dict(&doc, ef_obj) {
+                        collect_name_tree_pairs(&doc, ef_dict, &mut existing, 0);
+                    }
+                }
+            }
+        }
+    }
+
+    for att in attachments {
+        let fname = att.name.trim();
+        if fname.is_empty() {
+            continue;
+        }
+        let mut ef_stream = Stream::new(
+            dictionary! {
+                "Type" => "EmbeddedFile",
+                "Params" => dictionary! {
+                    "Size" => Object::Integer(att.bytes.len() as i64),
+                },
+            },
+            att.bytes.clone(),
+        );
+        let _ = ef_stream.compress();
+        let ef_stream_id = doc.add_object(ef_stream);
+
+        let mut fspec = dictionary! {
+            "Type" => "Filespec",
+            "F" => text_string(fname),
+            "UF" => text_string(fname),
+            "EF" => dictionary! {
+                "F" => Object::Reference(ef_stream_id),
+                "UF" => Object::Reference(ef_stream_id),
+            },
+        };
+        if !att.description.trim().is_empty() {
+            fspec.set("Desc", text_string(att.description.trim()));
+        }
+        let fspec_id = doc.add_object(Object::Dictionary(fspec));
+
+        if let Some(slot) = existing.iter_mut().find(|(k, _)| k == fname) {
+            slot.1 = fspec_id;
+        } else {
+            existing.push((fname.to_string(), fspec_id));
+        }
+    }
+
+    existing.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut names_arr: Vec<Object> = Vec::with_capacity(existing.len() * 2);
+    for (k, fid) in existing {
+        names_arr.push(text_string(&k));
+        names_arr.push(Object::Reference(fid));
+    }
+
+    let ef_tree_id = doc.add_object(dictionary! {
+        "Names" => Object::Array(names_arr),
+    });
+
+    // Preserve other keys in Catalog /Names (such as /Dests) if present
+    let mut root_names_dict = doc
+        .catalog()
+        .ok()
+        .and_then(|c| c.get(b"Names").ok())
+        .and_then(|o| resolve_dict(&doc, o).cloned())
+        .unwrap_or_default();
+    root_names_dict.set("EmbeddedFiles", Object::Reference(ef_tree_id));
+    let root_names_id = doc.add_object(Object::Dictionary(root_names_dict));
+
+    let cat = doc.catalog_mut().map_err(e("找不到 Catalog"))?;
+    cat.set("Names", Object::Reference(root_names_id));
+    save(&mut doc)
+}
+
+/// Remove document-level embedded files matching `names` (or remove all if `names` is empty).
+pub fn remove_embedded_attachments(
+    pdf: &[u8],
+    password: Option<&str>,
+    names: &[String],
+) -> R<Vec<u8>> {
+    let mut doc = load(pdf, password)?;
+    let mut existing: Vec<(String, ObjectId)> = Vec::new();
+    if let Ok(cat) = doc.catalog() {
+        if let Ok(names_obj) = cat.get(b"Names") {
+            if let Some(names_dict) = resolve_dict(&doc, names_obj) {
+                if let Ok(ef_obj) = names_dict.get(b"EmbeddedFiles") {
+                    if let Some(ef_dict) = resolve_dict(&doc, ef_obj) {
+                        collect_name_tree_pairs(&doc, ef_dict, &mut existing, 0);
+                    }
+                }
+            }
+        }
+    }
+
+    let drop_set: std::collections::HashSet<&str> = names.iter().map(|s| s.as_str()).collect();
+    let kept: Vec<(String, ObjectId)> = if drop_set.is_empty() {
+        Vec::new()
+    } else {
+        existing
+            .into_iter()
+            .filter(|(k, fspec_id)| {
+                if drop_set.contains(k.as_str()) {
+                    return false;
+                }
+                if let Ok(fspec) = doc.get_dictionary(*fspec_id) {
+                    if let Ok(Object::String(b, _)) = fspec.get(b"UF").or_else(|_| fspec.get(b"F")) {
+                        let decoded = crate::crypto_sig::decode_pdf_string(b);
+                        if drop_set.contains(decoded.as_str()) {
+                            return false;
+                        }
+                    }
+                }
+                true
+            })
+            .collect()
+    };
+
+    let mut root_names_dict = doc
+        .catalog()
+        .ok()
+        .and_then(|c| c.get(b"Names").ok())
+        .and_then(|o| resolve_dict(&doc, o).cloned())
+        .unwrap_or_default();
+
+    if kept.is_empty() {
+        root_names_dict.remove(b"EmbeddedFiles");
+    } else {
+        let mut names_arr = Vec::with_capacity(kept.len() * 2);
+        for (k, fid) in kept {
+            names_arr.push(text_string(&k));
+            names_arr.push(Object::Reference(fid));
+        }
+        let ef_tree_id = doc.add_object(dictionary! {
+            "Names" => Object::Array(names_arr),
+        });
+        root_names_dict.set("EmbeddedFiles", Object::Reference(ef_tree_id));
+    }
+
+    if root_names_dict.is_empty() {
+        let cat = doc.catalog_mut().map_err(e("找不到 Catalog"))?;
+        cat.remove(b"Names");
+    } else {
+        let root_names_id = doc.add_object(Object::Dictionary(root_names_dict));
+        let cat = doc.catalog_mut().map_err(e("找不到 Catalog"))?;
+        cat.set("Names", Object::Reference(root_names_id));
+    }
+    doc.prune_objects();
+    doc.renumber_objects();
+    save(&mut doc)
+}
+
+// ── Automated Multi-Step PDF Pipeline ────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum PipelineStep {
+    RemoveBlank {
+        #[serde(default = "default_blank_threshold")]
+        threshold: f32,
+    },
+    #[serde(rename = "split_2up", alias = "split2up")]
+    Split2up(Split2upSpec),
+    SingleLargePage {
+        #[serde(default = "default_nup_gap")]
+        gap: f32,
+        #[serde(default)]
+        border: bool,
+    },
+    Crop(CropSpec),
+    Rotate {
+        #[serde(default)]
+        pages: Vec<u32>,
+        degrees: i64,
+    },
+    Grayscale {
+        #[serde(default)]
+        whiten_bg: bool,
+    },
+    Resize {
+        width: f32,
+        height: f32,
+    },
+    Nup(NupSpec),
+    Booklet {
+        #[serde(default)]
+        border: bool,
+    },
+    Watermark(WatermarkSpec),
+    PageNumbers(PageNumberSpec),
+    Flatten,
+    Sanitize(SanitizeSpec),
+    Compress {
+        #[serde(default = "default_compress_dim")]
+        max_dim: u32,
+        #[serde(default = "default_compress_quality")]
+        quality: u8,
+    },
+    Protect {
+        password: String,
+        #[serde(default)]
+        owner_password: String,
+    },
+}
+
+fn default_blank_threshold() -> f32 {
+    0.005
+}
+fn default_compress_dim() -> u32 {
+    1600
+}
+fn default_compress_quality() -> u8 {
+    75
+}
+
+/// Execute a sequence of PDF operations in memory and return the final PDF bytes.
+pub fn run_pipeline(
+    pdf: &[u8],
+    password: Option<&str>,
+    steps: &[PipelineStep],
+) -> R<Vec<u8>> {
+    if steps.is_empty() {
+        return Err("流水线至少需要一个步骤".into());
+    }
+    let mut current = pdf.to_vec();
+    let mut cur_pw = password.map(|s| s.to_string());
+
+    for step in steps {
+        let pw_ref = cur_pw.as_deref();
+        current = match step {
+            PipelineStep::RemoveBlank { threshold } => {
+                remove_blank_pages(&current, pw_ref, *threshold)?.0
+            }
+            PipelineStep::Split2up(spec) => split_2up_pdf(&current, pw_ref, spec)?,
+            PipelineStep::SingleLargePage { gap, border } => {
+                single_large_page_pdf(&current, pw_ref, *gap, *border)?
+            }
+            PipelineStep::Crop(spec) => crop_pages(&current, pw_ref, spec)?,
+            PipelineStep::Rotate { pages, degrees } => {
+                rotate_pages(&current, pw_ref, pages, *degrees)?
+            }
+            PipelineStep::Grayscale { whiten_bg } => grayscale_pdf(&current, pw_ref, *whiten_bg)?,
+            PipelineStep::Resize { width, height } => {
+                normalize_page_size(&current, pw_ref, *width, *height)?
+            }
+            PipelineStep::Nup(spec) => nup_pdf(&current, pw_ref, spec)?,
+            PipelineStep::Booklet { border } => booklet_pdf(&current, pw_ref, *border)?,
+            PipelineStep::Watermark(spec) => watermark_pdf(&current, pw_ref, spec)?,
+            PipelineStep::PageNumbers(spec) => add_page_numbers(&current, pw_ref, spec)?,
+            PipelineStep::Flatten => flatten_pdf(&current, pw_ref)?,
+            PipelineStep::Sanitize(spec) => sanitize_pdf(&current, pw_ref, spec)?.0,
+            PipelineStep::Compress { max_dim, quality } => {
+                compress_pdf(&current, pw_ref, *max_dim, *quality)?
+            }
+            PipelineStep::Protect {
+                password,
+                owner_password,
+            } => {
+                let locked = set_password(&current, pw_ref, password, owner_password)?;
+                cur_pw = Some(password.clone());
+                locked
+            }
+        };
+    }
+
+    Ok(current)
+}
+
 pub use crate::crypto_sig::{
     sign_pdf_pkcs12, verify_signatures, CertSignSpec, SignatureInfo,
 };
@@ -3993,6 +4928,173 @@ mod tests {
             assert!((w - 595.28).abs() < 0.1);
             assert!((h - 841.89).abs() < 0.1);
         }
+    }
+
+    #[test]
+    fn split_2up_splits_spreads_and_honours_only_wide_and_rtl() {
+        // Page 1: portrait cover (100x200), Page 2: landscape 2-up spread (400x200)
+        let mut p1 = Vec::new();
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(100, 200, image::Rgb([255, 255, 255])))
+            .write_to(&mut std::io::Cursor::new(&mut p1), image::ImageFormat::Png)
+            .unwrap();
+        let mut p2 = Vec::new();
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(400, 200, image::Rgb([255, 255, 255])))
+            .write_to(&mut std::io::Cursor::new(&mut p2), image::ImageFormat::Png)
+            .unwrap();
+        let src = images_to_pdf(&[p1, p2], 72.0).unwrap();
+
+        // With only_wide = true, portrait page 1 stays 1 page, landscape page 2 splits into 2 (total 3)
+        let out_wide = split_2up_pdf(
+            &src,
+            None,
+            &Split2upSpec {
+                direction: "vertical".into(),
+                rtl: true,
+                only_wide: true,
+                overlap: 10.0,
+            },
+        )
+        .unwrap();
+        let sizes_wide = page_sizes(&out_wide, None).unwrap();
+        assert_eq!(sizes_wide.len(), 3);
+        assert!((sizes_wide[0].0 - 100.0).abs() < 0.5);
+        // Each half of 400pt with 10pt overlap is 210pt wide
+        assert!((sizes_wide[1].0 - 210.0).abs() < 0.5);
+        assert!((sizes_wide[2].0 - 210.0).abs() < 0.5);
+
+        // With only_wide = false, all 2 pages split -> 4 pages
+        let out_all = split_2up_pdf(&src, None, &Split2upSpec::default()).unwrap();
+        assert_eq!(page_count(&out_all, None).unwrap(), 4);
+    }
+
+    #[test]
+    fn single_large_page_joins_pages_vertically() {
+        let three = arrange_pages(&sample(), None, &[1, 2, 3]).unwrap();
+        let orig_sizes = page_sizes(&three, None).unwrap();
+        let out = single_large_page_pdf(&three, None, 20.0, true).unwrap();
+        let new_sizes = page_sizes(&out, None).unwrap();
+        assert_eq!(new_sizes.len(), 1, "must produce a single continuous page");
+        assert!((new_sizes[0].0 - orig_sizes[0].0).abs() < 0.5);
+        let expected_h = orig_sizes[0].1 + orig_sizes[1].1 + orig_sizes[2].1 + 40.0;
+        assert!((new_sizes[0].1 - expected_h).abs() < 1.0);
+    }
+
+    #[test]
+    fn detect_and_remove_blank_pages_handles_empty_and_white_scans() {
+        // Insert a blank page at index 2 and index 4: [1, 0, 2, 0]
+        let with_blanks = arrange_pages(&sample(), None, &[1, 0, 2, 0]).unwrap();
+        let detected = detect_blank_pages(&with_blanks, None, 0.005).unwrap();
+        assert_eq!(detected, vec![2, 4]);
+
+        let (cleaned, removed) = remove_blank_pages(&with_blanks, None, 0.005).unwrap();
+        assert_eq!(removed, vec![2, 4]);
+        assert_eq!(page_count(&cleaned, None).unwrap(), 2);
+
+        // Also test an all-white scanned image page vs an inked image page
+        let mut white_png = Vec::new();
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(60, 60, image::Rgb([252, 252, 252])))
+            .write_to(&mut std::io::Cursor::new(&mut white_png), image::ImageFormat::Png)
+            .unwrap();
+        let mut dark_png = Vec::new();
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(60, 60, image::Rgb([20, 20, 20])))
+            .write_to(&mut std::io::Cursor::new(&mut dark_png), image::ImageFormat::Png)
+            .unwrap();
+        let scan_pdf = images_to_pdf(&[white_png, dark_png], 72.0).unwrap();
+        assert_eq!(detect_blank_pages(&scan_pdf, None, 0.01).unwrap(), vec![1]);
+    }
+
+    #[test]
+    fn overlay_pdf_repeats_letterhead_under_and_over() {
+        let base = arrange_pages(&sample(), None, &[1, 2, 3]).unwrap();
+        let letterhead = watermark_pdf(
+            &arrange_pages(&sample(), None, &[1]).unwrap(),
+            None,
+            &WatermarkSpec {
+                text: "LETTERHEAD".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let out = overlay_pdf(&base, None, &letterhead, None, true, true).unwrap();
+        let doc = Document::load_mem(&out).unwrap();
+        assert_eq!(doc.get_pages().len(), 3);
+        let p3 = *doc.get_pages().get(&3).unwrap();
+        let content = String::from_utf8_lossy(&doc.get_page_content(p3).unwrap()).into_owned();
+        assert!(
+            content.starts_with("q\n/SoloOv2 Do"),
+            "under=true and repeat=true must prepend overlay on page 3: {content}"
+        );
+    }
+
+    #[test]
+    fn embedded_attachments_add_list_and_remove_roundtrip() {
+        let src = sample();
+        assert!(list_embedded_attachments(&src, None).unwrap().is_empty());
+
+        let with_att = add_embedded_attachments(
+            &src,
+            None,
+            &[
+                EmbeddedAttachmentInput {
+                    name: "数据表.csv".into(),
+                    bytes: b"col1,col2\n1,2\n".to_vec(),
+                    description: "原始实验数据".into(),
+                },
+                EmbeddedAttachmentInput {
+                    name: "readme.txt".into(),
+                    bytes: b"hello attachment".to_vec(),
+                    description: String::new(),
+                },
+            ],
+        )
+        .unwrap();
+
+        let list = list_embedded_attachments(&with_att, None).unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list.iter().any(|a| a.name == "readme.txt" && a.size == 16));
+        assert!(list
+            .iter()
+            .any(|a| a.name == "数据表.csv" && a.description == "原始实验数据"));
+
+        let after_rm =
+            remove_embedded_attachments(&with_att, None, &[String::from("readme.txt")]).unwrap();
+        let list2 = list_embedded_attachments(&after_rm, None).unwrap();
+        assert_eq!(list2.len(), 1);
+        assert_eq!(list2[0].name, "数据表.csv");
+
+        let cleared = remove_embedded_attachments(&after_rm, None, &[]).unwrap();
+        assert!(list_embedded_attachments(&cleared, None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn pipeline_chains_multiple_steps_in_memory() {
+        let with_blank = arrange_pages(&sample(), None, &[1, 0, 2]).unwrap();
+        let steps = vec![
+            PipelineStep::RemoveBlank { threshold: 0.005 },
+            PipelineStep::Watermark(WatermarkSpec {
+                text: "PIPELINE".into(),
+                ..Default::default()
+            }),
+            PipelineStep::PageNumbers(PageNumberSpec {
+                format: "{n}/{total}".into(),
+                ..Default::default()
+            }),
+            PipelineStep::Sanitize(SanitizeSpec {
+                metadata: true,
+                annotations: false,
+                attachments: false,
+                javascript_actions: true,
+                forms: false,
+            }),
+        ];
+        let out = run_pipeline(&with_blank, None, &steps).unwrap();
+        let doc = Document::load_mem(&out).unwrap();
+        assert_eq!(doc.get_pages().len(), 2, "blank page removed by step 1");
+        let p1 = *doc.get_pages().get(&1).unwrap();
+        let c1 = String::from_utf8_lossy(&doc.get_page_content(p1).unwrap()).into_owned();
+        assert!(c1.contains("/SoloWm0 Do"), "watermark applied by step 2");
+        assert!(c1.contains("/SoloPn1 Do"), "page numbers applied by step 3");
     }
 }
 

@@ -294,8 +294,20 @@ mod tests {
         let addr = l.local_addr().unwrap();
         std::thread::spawn(move || {
             let (mut s, _) = l.accept().unwrap();
-            let mut buf = [0u8; 4096];
-            let _ = s.read(&mut buf);
+            let mut req_buf = Vec::new();
+            let mut tmp = [0u8; 1024];
+            while let Ok(k) = s.read(&mut tmp) {
+                if k == 0 {
+                    break;
+                }
+                req_buf.extend_from_slice(&tmp[..k]);
+                if let Some(pos) = req_buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let body_received = req_buf.len() - (pos + 4);
+                    if body_received >= 2 {
+                        break;
+                    }
+                }
+            }
             let _ = s.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n");
             for i in 0..n {
                 let line = format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"w{i} 汉\"}}}}]}}\n\n");
@@ -306,6 +318,9 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(delay_ms));
             }
             let _ = s.write_all(b"data: [DONE]\n\n");
+            let _ = s.flush();
+            let _ = s.shutdown(std::net::Shutdown::Write);
+            let _ = s.read(&mut tmp);
         });
         format!("http://127.0.0.1:{}/v1/chat/completions", addr.port())
     }

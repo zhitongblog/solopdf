@@ -30,6 +30,7 @@ import {
   detectOutlinesFromPages, sanitizeOutlineTree,
   extractTableFromItems, tableToMarkdown, tableToCsv,
   filterAnnotations, toAnkiTsv, toObsidianSr,
+  suggestPdfFilename,
 } from '@solopdf/core'
 import { inflateSync } from 'node:zlib'
 // FB2 / TIFF go through the CLI's format module (same core parser as the app)
@@ -824,6 +825,44 @@ server.tool(
   },
 )
 
+server.tool(
+  'solopdf_auto_rename',
+  '基于 PDF 元数据与前几页标题/作者/年份/DOI 自动生成规范文件名建议（如 "2017 - Vaswani et al. - Attention Is All You Need.pdf"；只读）',
+  {
+    path: z.string(),
+    template: z.string().default('{year} - {author} - {title}'),
+    password: z.string().optional(),
+  },
+  async ({ path, template, password }) => {
+    const doc = await open(path, password)
+    const meta = extractCitation(await readCitationInput(doc, nodePath.basename(path)))
+    await doc.destroy()
+    const { filename: suggested } = suggestPdfFilename(meta, template)
+    return text({
+      file: nodePath.resolve(path),
+      suggested,
+      template,
+      meta,
+    })
+  },
+)
+
+server.tool(
+  'solopdf_detect_blank_pages',
+  '检测 PDF 中的空白页或近乎纯白的扫描页（返回 1-based 空白页页码列表；只读）',
+  {
+    path: z.string(),
+    threshold: z.number().min(0).max(0.2).default(0.005),
+    password: z.string().optional(),
+  },
+  async ({ path, threshold, password }) => {
+    const argv = ['detect-blank', path, '--threshold', String(threshold)]
+    if (password) argv.push('--password', password)
+    const stdout = execFileSync(docBin(), argv).toString()
+    return text(JSON.parse(stdout || '{"blankPages":[]}'))
+  },
+)
+
 if (ALLOW_WRITE) {
   server.tool(
     'solopdf_extract_attachment',
@@ -1338,6 +1377,156 @@ if (ALLOW_WRITE) {
       if (password) argv.push('--password', password)
       execFileSync(docBin(), argv)
       return text({ written: outputPath, signerName })
+    },
+  )
+
+  server.tool(
+    'solopdf_split_2up',
+    '双页扫描件中缝切分（De-nup）：将左右或上下合扫的双联页拆分为独立单页，支持跳过单页封面（onlyWide）、古籍日漫从右到左页序（rtl）与中缝重叠留白（overlap pt）（需 --allow-write）',
+    {
+      path: z.string(),
+      outputPath: z.string(),
+      direction: z.enum(['vertical', 'horizontal']).default('vertical'),
+      onlyWide: z.boolean().default(true),
+      rtl: z.boolean().default(false),
+      overlap: z.number().default(0),
+      password: z.string().optional(),
+    },
+    async ({ path, outputPath, direction, onlyWide, rtl, overlap, password }) => {
+      checkWrite()
+      const argv = [
+        'split-2up', path, outputPath,
+        '--direction', direction,
+        '--only-wide', onlyWide ? '1' : '0',
+        '--rtl', rtl ? '1' : '0',
+        '--overlap', String(overlap),
+      ]
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ written: outputPath, direction, onlyWide, rtl, overlap })
+    },
+  )
+
+  server.tool(
+    'solopdf_single_page',
+    '多页拼接为单张连续长页（PDF to Single Large Page）：保持全部矢量文字与图形不栅格化，可配置页间距与分割线（需 --allow-write）',
+    {
+      path: z.string(),
+      outputPath: z.string(),
+      gap: z.number().min(0).default(12),
+      border: z.boolean().default(true),
+      password: z.string().optional(),
+    },
+    async ({ path, outputPath, gap, border, password }) => {
+      checkWrite()
+      const argv = ['single-page', path, outputPath, '--gap', String(gap), '--border', border ? '1' : '0']
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ written: outputPath, gap, border })
+    },
+  )
+
+  server.tool(
+    'solopdf_remove_blank_pages',
+    '自动检测并移除 PDF 中的空白页或近似纯白扫描页，另存为新文件（需 --allow-write）',
+    {
+      path: z.string(),
+      outputPath: z.string(),
+      threshold: z.number().min(0).max(0.2).default(0.005),
+      password: z.string().optional(),
+    },
+    async ({ path, outputPath, threshold, password }) => {
+      checkWrite()
+      const argv = ['remove-blank', path, outputPath, '--threshold', String(threshold)]
+      if (password) argv.push('--password', password)
+      const stdout = execFileSync(docBin(), argv).toString()
+      return text({ written: outputPath, ...JSON.parse(stdout || '{}') })
+    },
+  )
+
+  server.tool(
+    'solopdf_overlay',
+    'PDF 矢量信纸/底图叠印（Overlay PDF）：将另一份 PDF 作为背景底图（under=true）或前景套印（under=false）矢量叠加到当前文档各页（需 --allow-write）',
+    {
+      path: z.string(),
+      overlayPath: z.string(),
+      outputPath: z.string(),
+      under: z.boolean().default(true),
+      repeat: z.boolean().default(true),
+      password: z.string().optional(),
+    },
+    async ({ path, overlayPath, outputPath, under, repeat, password }) => {
+      checkWrite()
+      const argv = [
+        'overlay', path, outputPath, overlayPath,
+        '--under', under ? '1' : '0',
+        '--repeat', repeat ? '1' : '0',
+      ]
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ written: outputPath, overlayPath, under, repeat })
+    },
+  )
+
+  server.tool(
+    'solopdf_add_attachments',
+    '向 PDF 嵌入一个或多个文档级附件（写入 /Names -> /EmbeddedFiles），另存为新文件（需 --allow-write）',
+    {
+      path: z.string(),
+      outputPath: z.string(),
+      files: z.array(z.string()).min(1),
+      password: z.string().optional(),
+    },
+    async ({ path, outputPath, files, password }) => {
+      checkWrite()
+      const argv = ['attachments-add', path, outputPath, ...files]
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ written: outputPath, added: files.length })
+    },
+  )
+
+  server.tool(
+    'solopdf_remove_attachments',
+    '从 PDF 中剥离指定名称或全部文档级嵌入附件，另存为新文件（需 --allow-write）',
+    {
+      path: z.string(),
+      outputPath: z.string(),
+      names: z.array(z.string()).default([]),
+      password: z.string().optional(),
+    },
+    async ({ path, outputPath, names, password }) => {
+      checkWrite()
+      const argv = ['attachments-remove', path, outputPath]
+      if (names.length > 0) argv.push('--names', names.join(','))
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ written: outputPath, removedNames: names.length ? names : 'all' })
+    },
+  )
+
+  server.tool(
+    'solopdf_pipeline',
+    '多步自动化 PDF 流水线（Pipeline）：在内存中顺序串联执行多个 PDF 处理步骤（如 remove_blank -> split_2up -> grayscale -> page_numbers -> compress），一次输出最终 PDF（需 --allow-write）',
+    {
+      path: z.string(),
+      outputPath: z.string(),
+      steps: z.array(z.record(z.string(), z.any())).min(1),
+      password: z.string().optional(),
+    },
+    async ({ path, outputPath, steps, password }) => {
+      checkWrite()
+      const tmp = await mkdtemp(nodePath.join(os.tmpdir(), 'solopdf-pipe-'))
+      try {
+        const specPath = nodePath.join(tmp, 'steps.json')
+        await writeFile(specPath, JSON.stringify(steps), 'utf-8')
+        const argv = ['pipeline', path, outputPath, specPath]
+        if (password) argv.push('--password', password)
+        execFileSync(docBin(), argv)
+        return text({ written: outputPath, stepsCount: steps.length })
+      } finally {
+        await rm(tmp, { recursive: true, force: true })
+      }
     },
   )
 }
