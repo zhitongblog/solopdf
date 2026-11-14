@@ -2,22 +2,26 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
-    // Vision OCR shim — Apple platforms only. cc respects the cross target
-    // (aarch64-apple-ios etc) via the TARGET env cargo sets.
+    println!("cargo:rerun-if-env-changed=SOLOPDF_APP_STORE_BUILD");
+    // Vision OCR + Dictionary + StoreKit IAP shims — Apple platforms only.
+    // cc respects the cross target (aarch64-apple-ios etc) via the TARGET env cargo sets.
     let target = std::env::var("TARGET").unwrap_or_default();
     if target.contains("apple") {
         cc::Build::new()
             .file("vision_shim/ocr_shim.m")
             .file("vision_shim/dict_shim.m")
+            .file("vision_shim/iap_shim.m")
             .flag("-fobjc-arc")
             .compile("solopdf_vision_shim");
         println!("cargo:rerun-if-changed=vision_shim/ocr_shim.m");
         println!("cargo:rerun-if-changed=vision_shim/dict_shim.m");
+        println!("cargo:rerun-if-changed=vision_shim/iap_shim.m");
         println!("cargo:rustc-link-lib=framework=Vision");
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=ImageIO");
         println!("cargo:rustc-link-lib=framework=CoreGraphics");
         println!("cargo:rustc-link-lib=framework=CoreImage");
+        println!("cargo:rustc-link-lib=framework=StoreKit");
         // the system dictionary panel lives in UIKit on iOS, AppKit on macOS
         if target.contains("ios") {
             println!("cargo:rustc-link-lib=framework=UIKit");

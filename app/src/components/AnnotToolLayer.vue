@@ -12,8 +12,16 @@
  * (there is no Esc key to press).
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { Quad } from '@solopdf/core'
-import { store, controllers, annotManagers } from '../store'
+import {
+  extractTableFromItems,
+  tableToMarkdown,
+  tableToCsv,
+  type Quad,
+  type SnipTextItem,
+} from '@solopdf/core'
+import { store, controllers, annotManagers, documents } from '../store'
+import { copyText } from '../clipboard'
+import { platform } from '../platform'
 import { t } from '../i18n'
 import { focusPaneAt } from '../viewer/split'
 import { focusPairAt } from '../viewer/pair'
@@ -36,6 +44,7 @@ const editor = ref<{
 } | null>(null)
 const noteText = ref('')
 const noteColor = ref('yellow')
+const snipFeedback = ref('')
 const COLORS = ['yellow', 'green', 'blue', 'pink'] as const
 
 let startX = 0
@@ -166,6 +175,50 @@ async function save(): Promise<void> {
 function closeEditor(): void {
   if (editor.value?.preview) URL.revokeObjectURL(editor.value.preview)
   editor.value = null
+  snipFeedback.value = ''
+}
+
+async function snipTable(format: 'md' | 'csv'): Promise<void> {
+  const ed = editor.value
+  if (!ed) return
+  const doc = documents.get(props.tabId)
+  if (!doc) return
+  try {
+    const page = await doc.getPage(ed.page)
+    const tc = await page.getTextContent()
+    const items: SnipTextItem[] = []
+    for (const raw of tc.items) {
+      if (!('str' in raw) || !raw.str) continue
+      const tr = raw.transform
+      const h = raw.height || Math.abs(tr[3]) || Math.abs(tr[0]) || 10
+      const w = raw.width || raw.str.length * h * 0.5
+      items.push({ str: raw.str, x: tr[4], y: tr[5], width: w, height: h })
+    }
+    const rect = {
+      x: ed.quad.x1,
+      y: ed.quad.y1,
+      width: Math.max(1, ed.quad.x2 - ed.quad.x1),
+      height: Math.max(1, ed.quad.y2 - ed.quad.y1),
+    }
+    const rows = extractTableFromItems(items, rect, { yDirection: 'up' })
+    if (!rows.length) {
+      snipFeedback.value = t('at.tableEmpty')
+      return
+    }
+    if (format === 'md') {
+      const md = tableToMarkdown(rows)
+      await copyText(md)
+      if (!noteText.value.trim()) noteText.value = md
+      snipFeedback.value = t('at.tableCopiedMd', { r: rows.length, c: rows[0]?.length ?? 0 })
+    } else {
+      const csv = tableToCsv(rows)
+      await copyText(csv)
+      await platform().saveText('table.csv', csv)
+      snipFeedback.value = t('at.tableExportedCsv', { r: rows.length, c: rows[0]?.length ?? 0 })
+    }
+  } catch (err) {
+    snipFeedback.value = String((err as Error).message ?? err)
+  }
 }
 
 function onKey(e: KeyboardEvent): void {
@@ -207,6 +260,11 @@ onBeforeUnmount(() => {
     <div class="modal at-editor">
       <h3>{{ editor.kind === 'region' ? t('at.regionTitle') : t('at.noteTitle') }}</h3>
       <img v-if="editor.preview" class="at-preview" :src="editor.preview" alt="" />
+      <div v-if="editor.kind === 'region'" class="at-snip-bar">
+        <button @click="snipTable('md')">📋 {{ t('at.copyTableMd') }}</button>
+        <button @click="snipTable('csv')">📊 {{ t('at.exportTableCsv') }}</button>
+        <span v-if="snipFeedback" class="at-snip-msg">{{ snipFeedback }}</span>
+      </div>
       <textarea
         v-model="noteText"
         :placeholder="t('at.placeholder')"
@@ -228,3 +286,23 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.at-snip-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.at-snip-bar button {
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  font-size: 12px;
+  background: var(--bg);
+}
+.at-snip-msg {
+  font-size: 11.5px;
+  color: var(--accent);
+}
+</style>

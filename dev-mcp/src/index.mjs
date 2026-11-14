@@ -27,6 +27,9 @@ import {
   compareDocuments,
   textFromItems, indexDocument, retrieve,
   pdfToMarkdown, findRedactionRects, computeAutoCropMargins, splitByBookmarks,
+  detectOutlinesFromPages, sanitizeOutlineTree,
+  extractTableFromItems, tableToMarkdown, tableToCsv,
+  filterAnnotations, toAnkiTsv, toObsidianSr,
 } from '@solopdf/core'
 import { inflateSync } from 'node:zlib'
 // FB2 / TIFF go through the CLI's format module (same core parser as the app)
@@ -34,7 +37,11 @@ import { formatOf, loadFb2, fb2InfoJson, tiffInfoJson } from '../../cli/src/form
 
 const ALLOW_WRITE = process.argv.includes('--allow-write')
 
-const server = new McpServer({ name: 'solopdf', version: '0.1.0' })
+function checkWrite() {
+  if (!ALLOW_WRITE) throw new Error('写入操作需要以 --allow-write 参数启动 MCP 服务')
+}
+
+const server = new McpServer({ name: 'solopdf', version: '1.0.0' })
 
 /** pdfjs-dist package root: its packed CMaps are what turn non-embedded CJK
  *  fonts (STSong-Light + UniGB-UCS2-H …) into text instead of nothing */
@@ -676,6 +683,147 @@ server.tool(
   },
 )
 
+async function detectOutlinesMcp(path, password, mode = 'auto', customRegex = undefined) {
+  const doc = await open(path, password)
+  const pages = []
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p)
+    const vp = page.getViewport({ scale: 1 })
+    const tc = await page.getTextContent()
+    const items = tc.items
+      .filter((it) => 'str' in it && it.str && it.str.trim())
+      .map((it) => {
+        const h = it.height || Math.abs(it.transform?.[3] ?? 0) || 12
+        return {
+          str: it.str,
+          x: it.transform[4],
+          y: vp.height - it.transform[5],
+          width: it.width || 0,
+          height: h,
+          fontSize: h,
+        }
+      })
+    pages.push({ page: p, width: vp.width, height: vp.height, items })
+  }
+  const numPages = doc.numPages
+  await doc.destroy()
+  const rawTree = detectOutlinesFromPages(pages, { mode, customRegex })
+  return sanitizeOutlineTree(rawTree, numPages)
+}
+
+server.tool(
+  'solopdf_outlines',
+  '读取 PDF 现有目录书签（Outlines），或根据正文字号梯度与中英文章节正则自动识别生成目录树（只读）',
+  {
+    path: z.string(),
+    password: z.string().optional(),
+    auto: z.boolean().default(false).describe('true = 自动从正文识别目录；false = 读取 PDF 现有书签'),
+    mode: z.enum(['auto', 'fontsize', 'regex']).default('auto'),
+    customRegex: z.string().optional(),
+  },
+  async ({ path, password, auto, mode, customRegex }) => {
+    if (auto) {
+      const outlines = await detectOutlinesMcp(path, password, mode, customRegex)
+      return text({ auto: true, mode, count: outlines.length, outlines })
+    }
+    const argv = ['outlines', path]
+    if (password) argv.push('--password', password)
+    const stdout = execFileSync(docBin(), argv).toString()
+    const outlines = JSON.parse(stdout || '[]')
+    return text({ auto: false, count: outlines.length, outlines })
+  },
+)
+
+server.tool(
+  'solopdf_extract_table',
+  '从 PDF 指定页或矩形区域提取结构化二维表格，返回 Markdown 表格、CSV 或 JSON 二维数组（只读）',
+  {
+    path: z.string(),
+    page: z.number().int().min(1).default(1),
+    rect: z.tuple([z.number(), z.number(), z.number(), z.number()]).optional().describe('可选区域 [x, y, width, height]（支持 0..1 归一化坐标或 PDF 点坐标）'),
+    format: z.enum(['md', 'csv', 'json']).default('md'),
+    password: z.string().optional(),
+  },
+  async ({ path, page: pageNum, rect: rectTuple, format, password }) => {
+    const doc = await open(path, password)
+    const p = Math.min(pageNum, doc.numPages)
+    const page = await doc.getPage(p)
+    const vp = page.getViewport({ scale: 1 })
+    const tc = await page.getTextContent()
+
+    let rect = undefined
+    if (rectTuple) {
+      const [rx, ry, rw, rh] = rectTuple
+      if ([rx, ry, rw, rh].every((n) => n >= 0 && n <= 1) && rw <= 1 && rh <= 1) {
+        rect = { x: rx * vp.width, y: ry * vp.height, width: rw * vp.width, height: rh * vp.height }
+      } else {
+        rect = { x: rx, y: ry, width: rw, height: rh }
+      }
+    }
+
+    const items = tc.items
+      .filter((it) => 'str' in it && it.str && it.str.trim())
+      .map((it) => {
+        const h = it.height || Math.abs(it.transform?.[3] ?? 0) || 10
+        return {
+          str: it.str,
+          x: it.transform[4],
+          y: vp.height - it.transform[5] - h,
+          width: it.width || 0,
+          height: h,
+        }
+      })
+    await doc.destroy()
+
+    const rows = extractTableFromItems(items, rect, { yDirection: 'down' })
+    if (format === 'json') return text({ page: p, rowCount: rows.length, rows })
+    if (format === 'csv') return text(tableToCsv(rows))
+    return text(tableToMarkdown(rows))
+  },
+)
+
+server.tool(
+  'solopdf_export_flashcards',
+  '将 PDF 伴生批注 (.annotations.md) 导出为 Anki TSV 或 Obsidian Spaced Repetition 闪卡（支持按 #标签、颜色过滤及 Cloze 挖空；只读）',
+  {
+    path: z.string(),
+    format: z.enum(['anki', 'obsidian']).default('anki'),
+    tags: z.array(z.string()).optional(),
+    colors: z.array(z.string()).optional(),
+    cloze: z.boolean().default(false),
+  },
+  async ({ path, format, tags, colors, cloze }) => {
+    const scPath = /\.annotations\.md$/i.test(path) ? path : sidecarPath(path)
+    if (!existsSync(scPath)) return text({ cards: 0, content: '', note: '没有伴生批注文件' })
+    const sc = parse(await readFile(scPath, 'utf-8'))
+    const filtered = (tags && tags.length) || (colors && colors.length)
+      ? filterAnnotations(sc.annotations, { tags, colors })
+      : sc.annotations
+    const rawPdfName = sc.meta?.pdfName || nodePath.basename(path).replace(/\.annotations\.md$/i, '.pdf')
+    const docTitle = rawPdfName.replace(/\.[^.]+$/, '')
+    const content = format === 'obsidian'
+      ? toObsidianSr(filtered, { docTitle, fileName: rawPdfName })
+      : toAnkiTsv(filtered, { docTitle, fileName: rawPdfName, cloze })
+    return text(content)
+  },
+)
+
+server.tool(
+  'solopdf_verify_signatures',
+  '校验 PDF 中的数字签名（PKCS#7 / CMS 签名域、签署人、签署时间、ByteRange 完整性与是否覆盖全文档；只读）',
+  {
+    path: z.string(),
+    password: z.string().optional(),
+  },
+  async ({ path, password }) => {
+    const argv = ['verify-signatures', path]
+    if (password) argv.push('--password', password)
+    const stdout = execFileSync(docBin(), argv).toString()
+    const signatures = JSON.parse(stdout || '[]')
+    return text({ count: signatures.length, signatures })
+  },
+)
+
 if (ALLOW_WRITE) {
   server.tool(
     'solopdf_extract_attachment',
@@ -1039,6 +1187,157 @@ if (ALLOW_WRITE) {
       } finally {
         await rm(tmp, { recursive: true, force: true })
       }
+    },
+  )
+
+  server.tool(
+    'solopdf_write_outlines',
+    '将目录书签树写入 PDF 副本（支持直接传入 outlines 数组或开启 auto 自动识别生成；需 --allow-write）',
+    {
+      path: z.string(),
+      outputPath: z.string(),
+      outlines: z.array(z.any()).optional(),
+      auto: z.boolean().default(false),
+      mode: z.enum(['auto', 'fontsize', 'regex']).default('auto'),
+      customRegex: z.string().optional(),
+      password: z.string().optional(),
+    },
+    async ({ path, outputPath, outlines, auto, mode, customRegex, password }) => {
+      checkWrite()
+      const tree = outlines && outlines.length
+        ? outlines
+        : (auto || !outlines ? await detectOutlinesMcp(path, password, mode, customRegex) : [])
+      const tmp = await mkdtemp(nodePath.join(os.tmpdir(), 'solopdf-outlines-'))
+      try {
+        const json = nodePath.join(tmp, 'outlines.json')
+        await writeFile(json, JSON.stringify(tree, null, 2), 'utf-8')
+        const argv = ['set-outlines', path, outputPath, json]
+        if (password) argv.push('--password', password)
+        execFileSync(docBin(), argv)
+        return text({ written: outputPath, count: tree.length, outlines: tree })
+      } finally {
+        await rm(tmp, { recursive: true, force: true })
+      }
+    },
+  )
+
+  server.tool(
+    'solopdf_nup',
+    '多合一拼版（2合1 / 4合1 / 6合1 / 9合1）：通过 Form XObject 矢量无损缩放排版并另存为新文件（需 --allow-write）',
+    {
+      path: z.string(),
+      outputPath: z.string(),
+      cols: z.number().int().min(1).max(6).default(2),
+      rows: z.number().int().min(1).max(6).default(2),
+      landscape: z.boolean().optional(),
+      margin: z.number().min(0).default(18),
+      gap: z.number().min(0).default(12),
+      border: z.boolean().default(false),
+      password: z.string().optional(),
+    },
+    async ({ path, outputPath, cols, rows, landscape, margin, gap, border, password }) => {
+      checkWrite()
+      const argv = [
+        'nup', path, outputPath,
+        '--cols', String(cols),
+        '--rows', String(rows),
+        '--margin', String(margin),
+        '--gap', String(gap),
+        '--border', border ? '1' : '0',
+      ]
+      if (landscape !== undefined) argv.push('--landscape', landscape ? '1' : '0')
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ written: outputPath, cols, rows })
+    },
+  )
+
+  server.tool(
+    'solopdf_booklet',
+    '骑马钉小册子折页拼版（自动补齐 4 的倍数页、正反面左右页序配对）并另存为新文件（需 --allow-write）',
+    {
+      path: z.string(),
+      outputPath: z.string(),
+      border: z.boolean().default(false),
+      password: z.string().optional(),
+    },
+    async ({ path, outputPath, border, password }) => {
+      checkWrite()
+      const argv = ['booklet', path, outputPath, '--border', border ? '1' : '0']
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ written: outputPath })
+    },
+  )
+
+  server.tool(
+    'solopdf_grayscale',
+    '文档灰度化与扫描底色漂白（支持内容流色彩操作符转灰度与扫描件底色去灰提亮）并另存为新文件（需 --allow-write）',
+    {
+      path: z.string(),
+      outputPath: z.string(),
+      whiten: z.boolean().default(false),
+      password: z.string().optional(),
+    },
+    async ({ path, outputPath, whiten, password }) => {
+      checkWrite()
+      const argv = ['grayscale', path, outputPath, '--whiten', whiten ? '1' : '0']
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ written: outputPath, whiten })
+    },
+  )
+
+  server.tool(
+    'solopdf_resize_pages',
+    '统一页面尺寸（支持 A4 / A3 / Letter / Legal 或自定义宽高 pt，自动居中缩放原页内容）并另存为新文件（需 --allow-write）',
+    {
+      path: z.string(),
+      outputPath: z.string(),
+      size: z.enum(['A4', 'A3', 'Letter', 'Legal']).optional(),
+      width: z.number().positive().optional(),
+      height: z.number().positive().optional(),
+      password: z.string().optional(),
+    },
+    async ({ path, outputPath, size, width, height, password }) => {
+      checkWrite()
+      const argv = ['resize', path, outputPath]
+      if (size) argv.push('--size', size)
+      if (width) argv.push('--width', String(width))
+      if (height) argv.push('--height', String(height))
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ written: outputPath, size: size ?? null, width: width ?? null, height: height ?? null })
+    },
+  )
+
+  server.tool(
+    'solopdf_cert_sign',
+    '使用数字证书对 PDF 进行加密签名（支持外部 .p12/.pfx 证书或内置自签名 X.509 证书，写入真实 /ByteRange 与 /Contents 摘要及可视化印章外观；需 --allow-write）',
+    {
+      path: z.string(),
+      outputPath: z.string(),
+      signerName: z.string(),
+      reason: z.string().optional(),
+      location: z.string().optional(),
+      page: z.number().int().min(1).optional(),
+      rect: z.tuple([z.number(), z.number(), z.number(), z.number()]).optional(),
+      p12Path: z.string().optional(),
+      passphrase: z.string().optional(),
+      password: z.string().optional(),
+    },
+    async ({ path, outputPath, signerName, reason, location, page, rect, p12Path, passphrase, password }) => {
+      checkWrite()
+      const argv = ['cert-sign', path, outputPath, '--signer', signerName]
+      if (reason) argv.push('--reason', reason)
+      if (location) argv.push('--location', location)
+      if (page) argv.push('--page', String(page))
+      if (rect) argv.push('--rect', rect.join(','))
+      if (p12Path) argv.push('--p12', p12Path)
+      if (passphrase) argv.push('--pass', passphrase)
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ written: outputPath, signerName })
     },
   )
 }

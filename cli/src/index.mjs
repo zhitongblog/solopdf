@@ -22,6 +22,10 @@
  *   solopdf ask <file.pdf> "question"           # Ask AI via your own endpoint
  *   solopdf summarize <file.pdf> [--page N]     # AI summary (map-reduce)
  *   solopdf retrieve <file.pdf> "query"         # top-k page chunks, no model
+ *   solopdf outlines <file.pdf> [--auto] [--out x.pdf] # read/detect/write PDF outlines
+ *   solopdf extract-table <file.pdf> [--page 1] [--format md|csv|json] # table snip
+ *   solopdf export-flashcards <file.pdf> [--format anki|obsidian]      # flashcards
+ *   solopdf verify-signatures <file.pdf>        # verify PDF digital signatures
  *
  * Used by Claude/CI for self-testing (global rule #2) and by users for
  * scripting. Read-only EXCEPT the commands that name an explicit output
@@ -41,6 +45,9 @@ import {
   txtToBlocks, textFromItems, indexDocument, searchChunks, askDocument, summarizeDocument, summarizePage,
   aiProviderReady, citedPages, uiLangToTarget,
   pdfToMarkdown, splitByBookmarks, findRedactionRects, computeAutoCropMargins,
+  detectOutlinesFromPages, sanitizeOutlineTree,
+  extractTableFromItems, tableToMarkdown, tableToCsv,
+  filterAnnotations, toAnkiTsv, toObsidianSr,
 } from '@solopdf/core'
 import { formatOf, loadFb2, fb2InfoJson, tiffInfoJson, tiffPages } from './formats.mjs'
 
@@ -970,6 +977,196 @@ async function cmdRedactText(file) {
   }
 }
 
+async function detectPdfOutlines(file, mode = 'auto', customRegex = undefined) {
+  const doc = await open(file)
+  const pages = []
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p)
+    const vp = page.getViewport({ scale: 1 })
+    const tc = await page.getTextContent()
+    const items = tc.items
+      .filter((it) => 'str' in it && it.str && it.str.trim())
+      .map((it) => {
+        const h = it.height || Math.abs(it.transform?.[3] ?? 0) || 12
+        return {
+          str: it.str,
+          x: it.transform[4],
+          y: vp.height - it.transform[5],
+          width: it.width || 0,
+          height: h,
+          fontSize: h,
+        }
+      })
+    pages.push({ page: p, width: vp.width, height: vp.height, items })
+  }
+  const numPages = doc.numPages
+  await doc.destroy()
+  const rawTree = detectOutlinesFromPages(pages, { mode, customRegex })
+  return sanitizeOutlineTree(rawTree, numPages)
+}
+
+/**
+ * Read existing PDF outlines, auto-detect headings into an outline tree,
+ * or write an outline tree into a new PDF via solopdf-doc set-outlines.
+ */
+async function cmdOutlines(file) {
+  const { execFileSync } = await import('node:child_process')
+  const { writeFile, mkdtemp, rm } = await import('node:fs/promises')
+  const os = await import('node:os')
+  const out = flag('out')
+  const importPath = flag('import')
+  const mode = flag('mode') ?? 'auto'
+  const customRegex = flag('regex')
+  const auto = args.includes('--auto') || Boolean(flag('mode')) || Boolean(customRegex)
+  const pw = flag('password')
+
+  if (!out) {
+    if (importPath) {
+      const tree = JSON.parse(await readFile(importPath, 'utf-8'))
+      console.log(JSON.stringify(tree, null, 2))
+      return
+    }
+    if (auto) {
+      const tree = await detectPdfOutlines(file, mode, customRegex)
+      console.log(JSON.stringify(tree, null, 2))
+      return
+    }
+    const argv = ['outlines', file]
+    if (pw) argv.push('--password', pw)
+    const stdout = execFileSync(docBin(), argv).toString()
+    process.stdout.write(stdout.endsWith('\n') ? stdout : stdout + '\n')
+    return
+  }
+
+  let tree
+  if (importPath) {
+    tree = JSON.parse(await readFile(importPath, 'utf-8'))
+  } else {
+    tree = await detectPdfOutlines(file, mode, customRegex)
+  }
+
+  const tmp = await mkdtemp(path.join(os.tmpdir(), 'solopdf-outlines-'))
+  try {
+    const json = path.join(tmp, 'outlines.json')
+    await writeFile(json, JSON.stringify(tree, null, 2), 'utf-8')
+    const argv = ['set-outlines', file, out, json]
+    if (pw) argv.push('--password', pw)
+    execFileSync(docBin(), argv, { stdio: 'inherit' })
+    console.log(JSON.stringify({ file: path.resolve(file), out: path.resolve(out), count: tree.length, outlines: tree }, null, 2))
+  } finally {
+    await rm(tmp, { recursive: true, force: true })
+  }
+}
+
+/**
+ * Extract a structured 2D table from a PDF page or rectangular region
+ * as Markdown, CSV, or JSON.
+ */
+async function cmdExtractTable(file) {
+  const pageNum = Math.max(1, parseInt(flag('page') ?? '1', 10))
+  const fmt = (flag('format') ?? 'md').toLowerCase()
+  if (!['md', 'markdown', 'csv', 'json'].includes(fmt)) {
+    die('--format 取值: md | csv | json')
+  }
+  const doc = await open(file)
+  const p = Math.min(pageNum, doc.numPages)
+  const page = await doc.getPage(p)
+  const vp = page.getViewport({ scale: 1 })
+  const tc = await page.getTextContent()
+
+  let rect = undefined
+  const rectSpec = flag('rect')
+  if (rectSpec) {
+    const nums = rectSpec.split(',').map((s) => parseFloat(s.trim()))
+    if (nums.length !== 4 || nums.some(Number.isNaN)) {
+      die('--rect 格式: x,y,w,h')
+    }
+    if (nums.every((n) => n >= 0 && n <= 1) && nums[2] <= 1 && nums[3] <= 1) {
+      rect = {
+        x: nums[0] * vp.width,
+        y: nums[1] * vp.height,
+        width: nums[2] * vp.width,
+        height: nums[3] * vp.height,
+      }
+    } else {
+      rect = { x: nums[0], y: nums[1], width: nums[2], height: nums[3] }
+    }
+  }
+
+  const items = tc.items
+    .filter((it) => 'str' in it && it.str && it.str.trim())
+    .map((it) => {
+      const h = it.height || Math.abs(it.transform?.[3] ?? 0) || 10
+      return {
+        str: it.str,
+        x: it.transform[4],
+        y: vp.height - it.transform[5] - h,
+        width: it.width || 0,
+        height: h,
+      }
+    })
+
+  await doc.destroy()
+  const rows = extractTableFromItems(items, rect, { yDirection: 'down' })
+  if (fmt === 'json') {
+    console.log(JSON.stringify(rows, null, 2))
+  } else if (fmt === 'csv') {
+    console.log(tableToCsv(rows))
+  } else {
+    console.log(tableToMarkdown(rows))
+  }
+}
+
+/**
+ * Export sidecar annotations as Anki TSV or Obsidian Spaced Repetition flashcards.
+ */
+async function cmdExportFlashcards(file) {
+  const { writeFile } = await import('node:fs/promises')
+  const sidecar = /\.annotations\.md$/i.test(file) ? file : sidecarOf(file)
+  if (!existsSync(sidecar)) die(`没有伴生批注文件: ${sidecar}`)
+  const sc = parse(await readFile(sidecar, 'utf-8'))
+  const fmt = (flag('format') ?? 'anki').toLowerCase()
+  if (!['anki', 'obsidian'].includes(fmt)) {
+    die('--format 取值: anki | obsidian')
+  }
+  const tags = flag('tag')
+    ? flag('tag').split(/[,，]/).map((s) => s.trim()).filter(Boolean)
+    : undefined
+  const colors = flag('color')
+    ? flag('color').split(/[,，]/).map((s) => s.trim()).filter(Boolean)
+    : undefined
+  const cloze = args.includes('--cloze')
+
+  const annots = tags || colors
+    ? filterAnnotations(sc.annotations, { tags, colors })
+    : sc.annotations
+
+  const rawPdfName = sc.meta?.pdfName || path.basename(file).replace(/\.annotations\.md$/i, '.pdf')
+  const docTitle = rawPdfName.replace(/\.[^.]+$/, '')
+  const outText = fmt === 'obsidian'
+    ? toObsidianSr(annots, { docTitle, fileName: rawPdfName })
+    : toAnkiTsv(annots, { docTitle, fileName: rawPdfName, cloze })
+
+  const outFile = flag('out')
+  if (outFile) {
+    await writeFile(outFile, outText, 'utf-8')
+    console.error(`✓ ${outFile}`)
+  } else {
+    process.stdout.write(outText)
+  }
+}
+
+/**
+ * Verify PDF digital signatures via solopdf-doc verify-signatures.
+ */
+async function cmdVerifySignatures(file) {
+  const { execFileSync } = await import('node:child_process')
+  const argv = ['verify-signatures', file]
+  if (flag('password')) argv.push('--password', flag('password'))
+  const stdout = execFileSync(docBin(), argv).toString()
+  process.stdout.write(stdout.endsWith('\n') ? stdout : stdout + '\n')
+}
+
 /**
  * Citation for a paper: offline from metadata + first pages; --online asks
  * doi.org for the exact record (the ONLY network request, and only on this
@@ -1135,6 +1332,119 @@ async function cmdSelftest(dir) {
       fail++
     }
   }
+
+  // v1.0.0 feature self-tests (outlines, extract-table, export-flashcards, nup/booklet/grayscale/resize, cert-sign + verify-signatures)
+  const { execFileSync } = await import('node:child_process')
+  const { writeFile, mkdtemp, rm } = await import('node:fs/promises')
+  const os = await import('node:os')
+  const tmp = await mkdtemp(path.join(os.tmpdir(), 'solopdf-selftest-'))
+  try {
+    const samplePdf = path.join(dir, 'compare-contract-v1.pdf')
+    const smartPdf = existsSync(path.join(dir, 'smart-refs-paper.pdf')) ? path.join(dir, 'smart-refs-paper.pdf') : samplePdf
+
+    // 1. outlines --auto & set-outlines / outlines roundtrip
+    try {
+      const autoTree = await detectPdfOutlines(smartPdf, 'auto')
+      const outlineJson = path.join(tmp, 'outlines.json')
+      const outlinedPdf = path.join(tmp, 'outlined.pdf')
+      const customTree = autoTree.length ? autoTree : [{ title: 'Chapter 1', page: 1, children: [{ title: '1.1 Intro', page: 1, children: [] }] }]
+      await writeFile(outlineJson, JSON.stringify(customTree), 'utf-8')
+      execFileSync(docBin(), ['set-outlines', samplePdf, outlinedPdf, outlineJson], { stdio: 'pipe' })
+      const readBack = JSON.parse(execFileSync(docBin(), ['outlines', outlinedPdf]).toString())
+      if (!Array.isArray(readBack) || readBack.length < 1) throw new Error('set-outlines / outlines 往返为空')
+      console.log(`PASS v1.0 outlines (--auto 检测 ${autoTree.length} 项, set-outlines 往返 ${readBack.length} 项)`)
+      pass++
+    } catch (e) {
+      console.log(`FAIL v1.0 outlines: ${e.message}`)
+      fail++
+    }
+
+    // 2. extract-table
+    try {
+      const doc = await open(samplePdf)
+      const page = await doc.getPage(1)
+      const vp = page.getViewport({ scale: 1 })
+      const tc = await page.getTextContent()
+      const items = tc.items
+        .filter((it) => 'str' in it && it.str && it.str.trim())
+        .map((it) => {
+          const h = it.height || Math.abs(it.transform?.[3] ?? 0) || 10
+          return { str: it.str, x: it.transform[4], y: vp.height - it.transform[5] - h, width: it.width || 0, height: h }
+        })
+      await doc.destroy()
+      const rows = extractTableFromItems(items, undefined, { yDirection: 'down' })
+      const md = tableToMarkdown(rows)
+      const csv = tableToCsv(rows)
+      if (!rows.length || !md.includes('|') || !csv.length) throw new Error('表格提取结果为空')
+      console.log(`PASS v1.0 extract-table (${rows.length} 行, Markdown/CSV 生成正常)`)
+      pass++
+    } catch (e) {
+      console.log(`FAIL v1.0 extract-table: ${e.message}`)
+      fail++
+    }
+
+    // 3. export-flashcards
+    try {
+      const scPath = path.join(dir, 'chinese-wikipedia-hanzi.annotations.md')
+      const sc = parse(await readFile(scPath, 'utf-8'))
+      const anki = toAnkiTsv(sc.annotations, { docTitle: 'chinese-wikipedia-hanzi', fileName: 'chinese-wikipedia-hanzi.pdf', cloze: true })
+      const obsidian = toObsidianSr(sc.annotations, { docTitle: 'chinese-wikipedia-hanzi', fileName: 'chinese-wikipedia-hanzi.pdf' })
+      if (!anki.startsWith('#separator:tab') || !anki.includes('{{c1::') || !obsidian.includes('\n?\n')) {
+        throw new Error('Anki TSV 或 Obsidian SR 格式不符预期')
+      }
+      console.log(`PASS v1.0 export-flashcards (Anki TSV + Obsidian SR 导出 ${sc.annotations.length} 张卡片)`)
+      pass++
+    } catch (e) {
+      console.log(`FAIL v1.0 export-flashcards: ${e.message}`)
+      fail++
+    }
+
+    // 4. doc nup, booklet, grayscale, resize
+    try {
+      const nupPdf = path.join(tmp, 'nup.pdf')
+      const bookletPdf = path.join(tmp, 'booklet.pdf')
+      const grayPdf = path.join(tmp, 'gray.pdf')
+      const resizedPdf = path.join(tmp, 'resized.pdf')
+      execFileSync(docBin(), ['nup', samplePdf, nupPdf, '--cols', '2', '--rows', '1', '--border', '1'], { stdio: 'pipe' })
+      execFileSync(docBin(), ['booklet', samplePdf, bookletPdf, '--border', '1'], { stdio: 'pipe' })
+      execFileSync(docBin(), ['grayscale', samplePdf, grayPdf, '--whiten', '1'], { stdio: 'pipe' })
+      execFileSync(docBin(), ['resize', samplePdf, resizedPdf, '--size', 'A4'], { stdio: 'pipe' })
+      for (const f of [nupPdf, bookletPdf, grayPdf, resizedPdf]) {
+        if (!existsSync(f) || statSync(f).size < 100) throw new Error(`输出文件异常: ${f}`)
+      }
+      console.log(`PASS v1.0 doc nup / booklet / grayscale / resize`)
+      pass++
+    } catch (e) {
+      console.log(`FAIL v1.0 doc layout ops: ${e.message}`)
+      fail++
+    }
+
+    // 5. doc cert-sign + verify-signatures roundtrip
+    try {
+      const signedPdf = path.join(tmp, 'signed.pdf')
+      execFileSync(docBin(), [
+        'cert-sign', samplePdf, signedPdf,
+        '--signer', 'SoloPDF Selftest',
+        '--reason', 'Automated v1.0 Verification',
+        '--location', 'Localhost',
+        '--page', '1',
+        '--rect', '50,50,180,50',
+      ], { stdio: 'pipe' })
+      const sigs = JSON.parse(execFileSync(docBin(), ['verify-signatures', signedPdf]).toString())
+      if (!Array.isArray(sigs) || sigs.length !== 1) throw new Error(`签名数量异常: ${sigs?.length}`)
+      if (sigs[0].signerName !== 'SoloPDF Selftest' || !sigs[0].byteRangeValid || !sigs[0].digestValid || !sigs[0].coversWholeDocument || sigs[0].status !== 'valid') {
+        throw new Error(`签名校验未通过: ${JSON.stringify(sigs[0])}`)
+      }
+      console.log(`PASS v1.0 cert-sign + verify-signatures (signer=${sigs[0].signerName}, status=${sigs[0].status})`)
+      pass++
+    } catch (e) {
+      console.log(`FAIL v1.0 cert-sign + verify-signatures: ${e.message}`)
+      fail++
+    }
+  } finally {
+    await rm(tmp, { recursive: true, force: true })
+  }
+
   console.log(`\n${pass} pass, ${fail} fail, ${skip} skip`)
   process.exit(fail ? 1 : 0)
 }
@@ -1160,6 +1470,10 @@ switch (cmd) {
   case 'auto-crop': await cmdAutoCrop(file ?? die('用法: solopdf auto-crop <file.pdf> [--out x.pdf] [--padding 12]')); break
   case 'split-bookmarks': await cmdSplitBookmarks(file ?? die('用法: solopdf split-bookmarks <file.pdf> [--out-dir d] [--level 1|2]')); break
   case 'redact-text': await cmdRedactText(file ?? die('用法: solopdf redact-text <file.pdf> [--out x.pdf] [--terms a,b] [--presets phone,email,idcard] [--dry-run]')); break
+  case 'outlines': await cmdOutlines(file ?? die('用法: solopdf outlines <file.pdf> [--auto] [--mode auto|fontsize|regex] [--regex pattern] [--import tree.json] [--out out.pdf] [--password pw]')); break
+  case 'extract-table': await cmdExtractTable(file ?? die('用法: solopdf extract-table <file.pdf> [--page 1] [--rect x,y,w,h] [--format md|csv|json] [--password pw]')); break
+  case 'export-flashcards': await cmdExportFlashcards(file ?? die('用法: solopdf export-flashcards <file.pdf> [--format anki|obsidian] [--tag tag] [--color color] [--cloze] [--out file]')); break
+  case 'verify-signatures': await cmdVerifySignatures(file ?? die('用法: solopdf verify-signatures <file.pdf> [--password pw]')); break
   case 'cite': await cmdCite(file ?? die('用法: solopdf cite <file.pdf> [--format bibtex|apa|gbt|all|json] [--online]')); break
   case 'compare': await cmdCompare(file ?? die('用法: solopdf compare <old.pdf> <new.pdf> [--json]'), args[2]); break
   case 'ask': await cmdAsk(file ?? die('用法: solopdf ask <file.pdf> "问题"'), args[2]); break
@@ -1180,6 +1494,13 @@ switch (cmd) {
   solopdf import-annotations <file.pdf> [--dry-run]  PDF 内已有的注释（Acrobat/预览等）→ 伴生文件（可重复执行，不重复导入）
   solopdf form-fields <file.pdf>                   AcroForm 表单域与当前值 → JSON
   solopdf export-md <file.pdf>                     全文导出为 Markdown（stdout）
+  solopdf outlines <file.pdf> [--auto] [--mode auto|fontsize|regex] [--regex pat] [--import tree.json] [--out out.pdf]
+                                                   读取/智能生成/写入 PDF 目录书签（Outlines）
+  solopdf extract-table <file.pdf> [--page 1] [--rect x,y,w,h] [--format md|csv|json]
+                                                   页面或框选区域表格提取（Markdown / CSV / JSON）
+  solopdf export-flashcards <file.pdf> [--format anki|obsidian] [--tag t] [--color c] [--cloze] [--out file]
+                                                   伴生批注导出为 Anki TSV 或 Obsidian SR 闪卡
+  solopdf verify-signatures <file.pdf>             校验 PDF 数字签名（ByteRange 完整性、篡改检测、签署人信息）
   solopdf ocr <file.pdf|img> [--out x.pdf|x.md]    本地 OCR：扫描件 → 可搜索 PDF / Markdown
   solopdf annotate <file.pdf> [--out x.pdf]        伴生批注 → 标准 PDF 注释（副本）
   solopdf to-images <file.pdf> --out-dir <dir>     页面 → PNG/JPEG（--dpi 150 --pages A-B；TIFF 按原尺寸）
@@ -1188,7 +1509,7 @@ switch (cmd) {
   solopdf translate "文字" [--to zh-Hans]          翻译：macOS 用本机 Apple 翻译；可选 --provider deepl|openai
   solopdf cite <file.pdf> [--format bibtex|apa|gbt|json] [--online]
                                                    引用信息（DOI/arXiv/标题/作者/年份；--online 才联网查 doi.org）
-  solopdf doc <子命令> …                            页面/合并/拆分/压缩/加密（solopdf-doc）
+  solopdf doc <子命令> …                            页面/合并/拆分/压缩/加密/拼版/小册子/灰度/签名（solopdf-doc）
   solopdf compare <old.pdf> <new.pdf> [--json]     比较两版文档：按页对齐，列出新增/删除/修改的文字
   solopdf ask <file.pdf> "问题"                     问 AI：检索相关页 → 你的 OpenAI 兼容服务，带 [p.N] 引用
   solopdf summarize <file.pdf> [--page N]          AI 摘要（长文档 map-reduce，--budget 字数上限）
@@ -1198,6 +1519,8 @@ switch (cmd) {
 
   solopdf doc 的子命令：pages / merge / split / annotate / compress /
   images-to-pdf / protect / unprotect / watermark / page-numbers / crop /
-  extract-images / sanitize / flatten / redact / info / djvu-info / djvu-page`)
+  extract-images / sanitize / flatten / redact / outlines / set-outlines /
+  nup / booklet / grayscale / resize / verify-signatures / cert-sign /
+  info / djvu-info / djvu-page`)
     process.exit(cmd ? 1 : 0)
 }

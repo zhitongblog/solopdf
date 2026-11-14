@@ -12,7 +12,7 @@ solo 套件成员：SoloMD（Markdown）· SoloPDF（PDF）——两个独立应
 Windows 上的 PDF 阅读器要么弹广告（Adobe/福昕/WPS），要么只能用 Edge 凑合。
 SoloPDF：秒开、零广告、零遥测（更新检查可完全关闭）、永远免费。
 
-## 核心功能（v0.6）
+## 核心功能（v1.0）
 
 - **高亮 → `.annotations.md`**：批注含页码深链（`solopdf://`），点击跳回原文精确位置；
   三重锚定（文字指纹 > 页码+坐标），PDF 更新后高亮自动重定位，失效则灰显降级、正文永不丢
@@ -55,12 +55,14 @@ SoloPDF：秒开、零广告、零遥测（更新检查可完全关闭）、永�
   正文按需建索引）
 - **阅读统计**：时长、连续天数、每本书进度——只存本机，可一键清空/导出
 - **文档工具（全本地 Copy-out，原文件永不修改）**：
+  - **目录书签（Outlines）编辑与智能生成**：可视化增删改目录树层级，或**一键按正文字号梯度/章节正则自动生成 PDF 目录树**
   - **页面管理**：旋转、删除、提取、拖拽重排、**插入同尺寸空白页**、**复制页面**
+  - **拼版与印前套件（Layout & Imposition）**：**N-up 多页合一拼版**（2/4/6/9/16 页，保留矢量清晰度）、**小册子骑马钉对折拼版（Booklet）**、**PDF 转灰度与扫描底色漂白（Grayscale）**、**统一页面尺寸（Normalize to A4/A3/Letter）**
   - **永久裁切（Crop PDF）**：按边距或区域永久更新 `/CropBox` 与 `/MediaBox`；支持**一键自动检测全书白边**（含扫描件像素墨迹检测）及奇偶页对称装订边距
   - **合并与拆分**：多文件排序合并；按页码范围、每 N 页、均分 N 份、或**按 PDF 目录书签章节自动拆分**
   - **水印与页码**：文字水印（支持中文/CJK、满页平铺、旋转、置底）与透明 PNG 图片水印；页码与 **Bates 编号**（`{n}/{total}`、`DOC-{n:06}`、奇偶页外侧对齐）
-  - **转换与压缩**：PDF ↔ 图片、**无损提取 PDF 内嵌原图**（JPEG 直出 / PNG 透明通道合成）、**导出结构化 Markdown**（自动还原标题层级、列表、Markdown 表格）、重采样有损压缩
-  - **签名与安全隐私**：手写签名与日期戳、设置/移除 AES-256 打开密码、**密文涂黑真脱敏（Redact PDF：支持手机号/邮箱/身份证等预设扫描，从底层内容流彻底剔除文字并涂黑）**、**隐私与元数据清理（Sanitize：抹除 `/Info`/XMP/JS/附件/注释）**、**扁平化（Flatten：将批注与表单固化为静态页面）**
+  - **转换、提表与闪卡**：PDF ↔ 图片、**无损提取 PDF 内嵌原图**（JPEG 直出 / PNG 透明通道合成）、**导出结构化 Markdown**（自动还原标题层级、列表、Markdown 表格）、**框选区域提取表格（MD / CSV）**、**批注一键导出 Anki (`.tsv`) / Obsidian 复习闪卡**、重采样有损压缩
+  - **图章、比例尺测量与数字证书安全**：8 款多语言矢量标准图章 + 动态日期署名公章、**比例尺距离/周长/多边形面积测量**、手写签名、设置/移除 AES-256 打开密码、**X.509 / PKCS#7 数字签名验签（篡改检测）与本地证书签署**、**密文涂黑真脱敏（Redact PDF）**、**隐私与元数据清理（Sanitize）**、**扁平化（Flatten）**
 - 暗色模式智能反色（纯文字页反色，含图片页保持原样）
 - 加密 PDF：会话内记住密码；批注可选"仅存批注不存原文摘录"隐私模式
 - 扫描版无文字层自动提示并禁用高亮
@@ -127,11 +129,21 @@ node cli/src/index.mjs export-md a.pdf --out a.md           # 导出结构化 Ma
 node cli/src/index.mjs auto-crop a.pdf --out a-cropped.pdf  # 自动检测全书白边并永久裁切
 node cli/src/index.mjs split-bookmarks a.pdf --out-dir dir  # 按目录书签章节拆分 PDF
 node cli/src/index.mjs redact-text a.pdf --terms "机密" --presets phone,email,idcard --out a-redacted.pdf
+node cli/src/index.mjs outlines a.pdf --auto [--out a-outlines.pdf] # 智能识别正文标题生成目录（或读取现有目录）
+node cli/src/index.mjs extract-table a.pdf --page 1 [--format md|csv] # 提取页面/区域表格为 Markdown 或 CSV
+node cli/src/index.mjs export-flashcards a.pdf [--format anki|obsidian] # 导出伴生批注为 Anki / Obsidian 闪卡
+node cli/src/index.mjs verify-signatures signed.pdf                  # 校验 PDF 数字签名与篡改状态
 
 # 文档操作（转发给原生驱动 solopdf-doc，全部写新文件）
 node cli/src/index.mjs doc pages a.pdf out.pdf --keep 1,0,3-5 --rotate 90   # 0 = 插入空白页
 node cli/src/index.mjs doc merge out.pdf a.pdf b.pdf
 node cli/src/index.mjs doc split a.pdf outdir --ranges 1-3,4-10
+node cli/src/index.mjs doc outlines a.pdf
+node cli/src/index.mjs doc set-outlines a.pdf out.pdf outlines.json
+node cli/src/index.mjs doc nup a.pdf out.pdf --cols 2 --rows 2 --border 1
+node cli/src/index.mjs doc booklet a.pdf out.pdf --border 1
+node cli/src/index.mjs doc grayscale a.pdf out.pdf --whiten 1
+node cli/src/index.mjs doc resize a.pdf out.pdf --size A4
 node cli/src/index.mjs doc watermark a.pdf out.pdf --text "机密" --pos tile --opacity 0.2
 node cli/src/index.mjs doc page-numbers a.pdf out.pdf --format "{n} / {total}" --pos bottom-outside
 node cli/src/index.mjs doc crop a.pdf out.pdf --margins 20,15,20,15
@@ -139,6 +151,8 @@ node cli/src/index.mjs doc extract-images a.pdf outdir --min-dim 32
 node cli/src/index.mjs doc sanitize a.pdf out.pdf --annots 1 --attachments 1 --forms 1
 node cli/src/index.mjs doc flatten a.pdf out.pdf
 node cli/src/index.mjs doc redact a.pdf out.pdf rects.json
+node cli/src/index.mjs doc verify-signatures signed.pdf
+node cli/src/index.mjs doc cert-sign a.pdf out.pdf --signer "Alice" --reason "Approved"
 node cli/src/index.mjs doc compress a.pdf out.pdf --max-dim 1600 --quality 72
 node cli/src/index.mjs doc protect a.pdf out.pdf --password pw
 node cli/src/index.mjs doc unprotect a.pdf out.pdf --password pw

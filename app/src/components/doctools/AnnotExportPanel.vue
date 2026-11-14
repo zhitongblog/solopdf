@@ -13,7 +13,8 @@
  */
 import { computed, ref } from 'vue'
 import { store, controllers, annotManagers } from '../../store'
-import { exportSpec, isDrawn } from '@solopdf/core'
+import { exportSpec, isDrawn, toAnkiTsv, toObsidianSr } from '@solopdf/core'
+import { platform } from '../../platform'
 import { docOps, pickSavePath, type AnnotSpec } from '../../platform/docops'
 import { t } from '../../i18n'
 
@@ -76,6 +77,27 @@ async function run(): Promise<void> {
     busy.value = false
   }
 }
+async function exportAnki(): Promise<void> {
+  if (!marks.value.length) {
+    emit('toast', t('dt.ae.nothing'))
+    return
+  }
+  const docTitle = (tab.value?.name ?? 'Document').replace(/\.pdf$/i, '')
+  const tsv = toAnkiTsv(marks.value, { docTitle })
+  await platform().saveText(`${docTitle}-anki.tsv`, tsv)
+  emit('toast', t('dt.ae.flashcardsDone', { fmt: 'Anki TSV' }))
+}
+
+async function exportObsidian(): Promise<void> {
+  if (!marks.value.length) {
+    emit('toast', t('dt.ae.nothing'))
+    return
+  }
+  const docTitle = (tab.value?.name ?? 'Document').replace(/\.pdf$/i, '')
+  const md = toObsidianSr(marks.value, { docTitle })
+  await platform().saveText(`${docTitle}-flashcards.md`, md)
+  emit('toast', t('dt.ae.flashcardsDone', { fmt: 'Obsidian SR' }))
+}
 </script>
 
 <template>
@@ -102,5 +124,26 @@ async function run(): Promise<void> {
         {{ busy ? t('dt.working') : t('dt.ae.doExport') }}
       </button>
     </div>
+
+    <hr class="dt-divider" />
+
+    <h4>{{ t('dt.ae.flashcardsTitle') }}</h4>
+    <p class="dt-hint">{{ t('dt.ae.flashcardsHint') }}</p>
+    <div class="dt-actions">
+      <button :disabled="!marks.length" @click="exportAnki">
+        🗂 {{ t('dt.ae.exportAnki') }}
+      </button>
+      <button :disabled="!marks.length" @click="exportObsidian">
+        🧠 {{ t('dt.ae.exportObsidian') }}
+      </button>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.dt-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 14px 0;
+}
+</style>

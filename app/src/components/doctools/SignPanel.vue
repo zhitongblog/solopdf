@@ -12,9 +12,15 @@
  * drag works with a mouse or a finger.
  */
 import { computed, onMounted, ref, watch } from 'vue'
+import {
+  STAMP_PRESETS,
+  renderStampSvg,
+  type StampPresetId,
+  type StampLocale,
+} from '@solopdf/core'
 import { store, controllers } from '../../store'
-import { docOps, pickOpenPaths, pickSavePath } from '../../platform/docops'
-import { t } from '../../i18n'
+import { docOps, pickOpenPaths, pickSavePath, type SignatureInfo } from '../../platform/docops'
+import { t, currentLocale } from '../../i18n'
 
 const emit = defineEmits<{ toast: [msg: string]; open: [path: string] }>()
 
@@ -170,6 +176,129 @@ async function makeTextStamp(): Promise<void> {
   await loadSigs()
 }
 
+// ── vector stamp presets ──
+const stampAuthor = ref('')
+const stampDate = ref(todayText())
+
+function presetLabel(id: StampPresetId): string {
+  const p = STAMP_PRESETS.find((s) => s.id === id)
+  if (!p) return id
+  const loc = currentLocale.value as StampLocale
+  return p.labels[loc] || p.labels['en']
+}
+
+async function makePresetStamp(presetId: StampPresetId): Promise<void> {
+  try {
+    const loc = currentLocale.value as StampLocale
+    const svg = renderStampSvg({
+      presetId,
+      locale: loc,
+      author: stampAuthor.value.trim() || undefined,
+      date: stampDate.value.trim() || undefined,
+    })
+    const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(svgBlob)
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image()
+        el.onload = () => resolve(el)
+        el.onerror = reject
+        el.src = url
+      })
+      const scale = 2
+      const c = document.createElement('canvas')
+      c.width = (img.width || 240) * scale
+      c.height = (img.height || 88) * scale
+      const ctx = c.getContext('2d')!
+      ctx.drawImage(img, 0, 0, c.width, c.height)
+      const pngBlob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/png'))
+      if (!pngBlob) return
+      const savedPath = await docOps.saveSignature(
+        `stamp-${presetId}-${Date.now()}.png`,
+        new Uint8Array(await pngBlob.arrayBuffer()),
+      )
+      await loadSigs()
+      if (savedPath) chosen.value = savedPath
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  } catch (err) {
+    emit('toast', String((err as Error).message ?? err))
+  }
+}
+
+// ── X.509 / PKCS#7 digital signatures verification & signing ──
+const existingSigs = ref<SignatureInfo[]>([])
+const verifying = ref(false)
+const certSigner = ref('')
+const certReason = ref('')
+const certLocation = ref('')
+const certP12Path = ref<string | null>(null)
+const certPassphrase = ref('')
+
+async function checkSignatures(): Promise<void> {
+  const src = tab.value?.path
+  if (!src) {
+    existingSigs.value = []
+    return
+  }
+  verifying.value = true
+  try {
+    existingSigs.value = await docOps.verifySignatures(src, null)
+  } catch {
+    existingSigs.value = []
+  } finally {
+    verifying.value = false
+  }
+}
+onMounted(checkSignatures)
+watch(() => tab.value?.path, checkSignatures)
+
+async function pickP12(): Promise<void> {
+  const picked = await pickOpenPaths(['p12', 'pfx'], false)
+  if (picked.length) certP12Path.value = picked[0]
+}
+
+async function applyCertSign(): Promise<void> {
+  const src = tab.value?.path
+  if (!src) return
+  const signerName = certSigner.value.trim() || 'SoloPDF User'
+  const pageH = previewSize.value.h || 842
+  const rect: [number, number, number, number] = [
+    box.value.x,
+    Math.max(0, pageH - box.value.y - box.value.h),
+    box.value.w,
+    box.value.h,
+  ]
+  const suggested = (tab.value?.name ?? 'document').replace(/\.pdf$/i, '') + '-cert-signed.pdf'
+  const dest = await pickSavePath(suggested, 'pdf')
+  if (dest === undefined) return
+  busy.value = true
+  try {
+    const out = await docOps.certSign(
+      src,
+      dest,
+      null,
+      {
+        signerName,
+        reason: certReason.value.trim() || null,
+        location: certLocation.value.trim() || null,
+        page: page.value,
+        rect,
+        passphrase: certPassphrase.value || null,
+        p12Path: certP12Path.value,
+      },
+      certP12Path.value,
+    )
+    emit('toast', t('dt.saved', { file: out.split('/').pop() ?? out }))
+    emit('open', out)
+  } catch (err) {
+    emit('toast', String((err as Error).message ?? err))
+  } finally {
+    busy.value = false
+  }
+}
+
 // ── placement ──
 const page = ref(1)
 const preview = ref<HTMLCanvasElement>()
@@ -303,6 +432,23 @@ async function apply(): Promise<void> {
       <button @click="makeTextStamp">{{ t('dt.sg.makeText') }}</button>
     </div>
 
+    <h4>{{ t('dt.sg.presetTitle') }}</h4>
+    <div class="dt-stamp-presets">
+      <button
+        v-for="p in STAMP_PRESETS"
+        :key="p.id"
+        class="dt-preset-btn"
+        :style="{ borderColor: p.color, color: p.color }"
+        @click="makePresetStamp(p.id)"
+      >
+        {{ presetLabel(p.id) }}
+      </button>
+    </div>
+    <div class="dt-stamp-meta">
+      <input v-model="stampAuthor" :placeholder="t('dt.sg.stampAuthorPh')" />
+      <input v-model="stampDate" :placeholder="todayText()" />
+    </div>
+
     <h4>{{ t('dt.sg.place') }}</h4>
     <div class="dt-field">
       <label>{{ t('dt.sg.page') }}</label>
@@ -334,5 +480,130 @@ async function apply(): Promise<void> {
         {{ busy ? t('dt.working') : t('dt.sg.apply') }}
       </button>
     </div>
+
+    <hr class="dt-divider" />
+
+    <h4>{{ t('dt.sg.certVerifyTitle') }}</h4>
+    <div v-if="verifying" class="dt-empty">{{ t('dt.working') }}</div>
+    <div v-else-if="!existingSigs.length" class="dt-empty">{{ t('dt.sg.noCertSigs') }}</div>
+    <div v-else class="dt-cert-list">
+      <div v-for="(sig, idx) in existingSigs" :key="idx" class="dt-cert-card">
+        <div class="dt-cert-head">
+          <strong>{{ sig.signerName || sig.fieldName }}</strong>
+          <span class="dt-cert-badge" :class="sig.status">
+            {{
+              sig.status === 'valid'
+                ? '✅ ' + t('dt.sg.sigValid')
+                : sig.status === 'modified'
+                  ? '⚠️ ' + t('dt.sg.sigModified')
+                  : '❌ ' + t('dt.sg.sigInvalid')
+            }}
+          </span>
+        </div>
+        <div class="dt-cert-meta">
+          <span v-if="sig.organization">{{ sig.organization }}</span>
+          <span v-if="sig.reason">{{ t('dt.sg.certReason') }}: {{ sig.reason }}</span>
+          <span v-if="sig.location">{{ t('dt.sg.certLocation') }}: {{ sig.location }}</span>
+          <span v-if="sig.signingTime">{{ sig.signingTime }}</span>
+        </div>
+      </div>
+    </div>
+
+    <h4>{{ t('dt.sg.certSignTitle') }}</h4>
+    <div class="dt-cert-form">
+      <div class="dt-field">
+        <label>{{ t('dt.sg.certSigner') }}</label>
+        <input v-model="certSigner" :placeholder="t('dt.sg.certSignerPh')" />
+      </div>
+      <div class="dt-field">
+        <label>{{ t('dt.sg.certReason') }}</label>
+        <input v-model="certReason" :placeholder="t('dt.sg.certReasonPh')" />
+      </div>
+      <div class="dt-field">
+        <label>{{ t('dt.sg.certLocation') }}</label>
+        <input v-model="certLocation" :placeholder="t('dt.sg.certLocationPh')" />
+      </div>
+      <div class="dt-field">
+        <label>{{ t('dt.sg.certP12') }}</label>
+        <button @click="pickP12">
+          {{ certP12Path ? certP12Path.split('/').pop() : t('dt.sg.certP12Pick') }}
+        </button>
+        <button v-if="certP12Path" @click="certP12Path = null">✕</button>
+      </div>
+      <div class="dt-field" v-if="certP12Path">
+        <label>{{ t('dt.sg.certPass') }}</label>
+        <input type="password" v-model="certPassphrase" :placeholder="t('dt.sg.certPassPh')" />
+      </div>
+      <div class="dt-footer">
+        <button class="primary" :disabled="busy" @click="applyCertSign">
+          {{ busy ? t('dt.working') : t('dt.sg.certSignBtn') }}
+        </button>
+      </div>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.dt-stamp-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.dt-preset-btn {
+  border: 1.5px solid currentColor;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.dt-stamp-meta {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.dt-stamp-meta input {
+  flex: 1;
+}
+.dt-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 14px 0;
+}
+.dt-cert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.dt-cert-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--bg);
+}
+.dt-cert-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+.dt-cert-badge {
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.dt-cert-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+}
+.dt-cert-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+</style>

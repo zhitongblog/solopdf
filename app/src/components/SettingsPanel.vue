@@ -14,16 +14,22 @@ import { store } from '../store'
 import { isMobile, isTauri } from '../platform'
 import { t, LOCALES, currentLocale } from '../i18n'
 import { nativeEngine } from '../translate'
+import { isSupporter, initSupporterState } from '../supporter'
+import SupportDialog from './SupportDialog.vue'
 
 const emit = defineEmits<{ close: []; stats: [] }>()
 
 const phone = computed(() => isMobile() || window.innerWidth < 700)
 const clearing = ref('')
+const showSupport = ref(false)
 
 const COLORS = ['yellow', 'green', 'blue', 'pink'] as const
 
 const trEngine = ref('none')
-onMounted(async () => { trEngine.value = await nativeEngine() })
+onMounted(async () => {
+  trEngine.value = await nativeEngine()
+  void initSupporterState()
+})
 const trEngineLabel = computed(() => {
   if (trEngine.value === 'apple') return t('st.trNativeApple')
   if (trEngine.value === 'apple-hosted') return t('st.trNativeHosted')
@@ -76,6 +82,18 @@ async function clearCache(kind: 'textindex' | 'covers'): Promise<void> {
       </header>
 
       <div class="st-body">
+        <div class="settings-row st-support-card">
+          <div>
+            <div class="sr-label">
+              {{ isSupporter ? '✨ ' + t('sup.badge') : '❤️ ' + t('sup.title') }}
+            </div>
+            <div class="sr-sub">{{ t('sup.settingsSub') }}</div>
+          </div>
+          <button class="primary" @click="showSupport = true">
+            {{ isSupporter ? t('sup.badge') : t('sup.btn') }}
+          </button>
+        </div>
+
         <h4>{{ t('st.g.general') }}</h4>
         <div class="settings-row">
           <div>
@@ -347,6 +365,7 @@ async function clearCache(kind: 'textindex' | 'covers'): Promise<void> {
       <div class="dt-footer">
         <button class="primary" @click="emit('close')">{{ t('st.done') }}</button>
       </div>
+      <SupportDialog v-if="showSupport" @close="showSupport = false" />
     </div>
   </div>
 </template>

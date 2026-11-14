@@ -2398,6 +2398,807 @@ pub fn redact_pdf(
     save(&mut doc)
 }
 
+// ── outlines (bookmarks) ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OutlineNode {
+    pub title: String,
+    /// 1-based page number
+    pub page: u32,
+    #[serde(default)]
+    pub top: Option<f32>,
+    #[serde(default)]
+    pub children: Vec<OutlineNode>,
+}
+
+fn resolve_dict<'a>(doc: &'a Document, obj: &'a Object) -> Option<&'a Dictionary> {
+    match obj {
+        Object::Dictionary(d) => Some(d),
+        Object::Reference(id) => doc.get_dictionary(*id).ok(),
+        _ => None,
+    }
+}
+
+fn resolve_array<'a>(doc: &'a Document, obj: &'a Object) -> Option<&'a Vec<Object>> {
+    match obj {
+        Object::Array(a) => Some(a),
+        Object::Reference(id) => doc.get_object(*id).and_then(Object::as_array).ok(),
+        _ => None,
+    }
+}
+
+fn parse_dest_array(
+    arr: &[Object],
+    page_map: &std::collections::HashMap<ObjectId, u32>,
+    total_pages: u32,
+) -> Option<(u32, Option<f32>)> {
+    let first = arr.first()?;
+    let page = match first {
+        Object::Reference(pid) => *page_map.get(pid)?,
+        Object::Integer(n) => (*n as u32 + 1).clamp(1, total_pages.max(1)),
+        _ => return None,
+    };
+    let mode = arr.get(1).and_then(|o| o.as_name().ok()).unwrap_or(b"");
+    let top_obj = if mode == b"XYZ" {
+        arr.get(3)
+    } else if mode == b"FitH" || mode == b"FitBH" {
+        arr.get(2)
+    } else {
+        None
+    };
+    let top = top_obj.and_then(|o| {
+        o.as_float()
+            .ok()
+            .or_else(|| o.as_i64().ok().map(|n| n as f32))
+    });
+    Some((page, top))
+}
+
+fn resolve_outline_dest(
+    doc: &Document,
+    item: &Dictionary,
+    page_map: &std::collections::HashMap<ObjectId, u32>,
+    total_pages: u32,
+) -> (u32, Option<f32>) {
+    if let Ok(dest_obj) = item.get(b"Dest") {
+        if let Some(arr) = resolve_array(doc, dest_obj) {
+            if let Some(res) = parse_dest_array(arr, page_map, total_pages) {
+                return res;
+            }
+        }
+    }
+    if let Ok(act_obj) = item.get(b"A") {
+        if let Some(act_dict) = resolve_dict(doc, act_obj) {
+            let is_goto = act_dict
+                .get(b"S")
+                .and_then(Object::as_name)
+                .map(|s| s == b"GoTo")
+                .unwrap_or(true);
+            if is_goto {
+                if let Ok(d_obj) = act_dict.get(b"D") {
+                    if let Some(arr) = resolve_array(doc, d_obj) {
+                        if let Some(res) = parse_dest_array(arr, page_map, total_pages) {
+                            return res;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    (1, None)
+}
+
+fn read_outline_siblings(
+    doc: &Document,
+    first_id: ObjectId,
+    page_map: &std::collections::HashMap<ObjectId, u32>,
+    total_pages: u32,
+    visited: &mut std::collections::HashSet<ObjectId>,
+    depth: usize,
+) -> Vec<OutlineNode> {
+    if depth > 32 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut cur = Some(first_id);
+    while let Some(id) = cur {
+        if !visited.insert(id) {
+            break;
+        }
+        let Ok(item) = doc.get_dictionary(id) else {
+            break;
+        };
+        let title = item
+            .get(b"Title")
+            .ok()
+            .and_then(|o| match o {
+                Object::String(b, _) => Some(crate::crypto_sig::decode_pdf_string(b)),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let (page, top) = resolve_outline_dest(doc, item, page_map, total_pages);
+        let children = item
+            .get(b"First")
+            .and_then(Object::as_reference)
+            .ok()
+            .map(|child_first| {
+                read_outline_siblings(doc, child_first, page_map, total_pages, visited, depth + 1)
+            })
+            .unwrap_or_default();
+        out.push(OutlineNode {
+            title,
+            page,
+            top,
+            children,
+        });
+        cur = item.get(b"Next").and_then(Object::as_reference).ok();
+    }
+    out
+}
+
+/// Read the document's `/Outlines` bookmark tree.
+pub fn get_outlines(pdf: &[u8], password: Option<&str>) -> R<Vec<OutlineNode>> {
+    let doc = load(pdf, password)?;
+    let pages_btree = doc.get_pages();
+    let total_pages = pages_btree.len() as u32;
+    let page_map: std::collections::HashMap<ObjectId, u32> =
+        pages_btree.into_iter().map(|(num, id)| (id, num)).collect();
+
+    let Ok(cat) = doc.catalog() else {
+        return Ok(Vec::new());
+    };
+    let Ok(outlines_obj) = cat.get(b"Outlines") else {
+        return Ok(Vec::new());
+    };
+    let Some(outlines_dict) = resolve_dict(&doc, outlines_obj) else {
+        return Ok(Vec::new());
+    };
+    let Ok(first_id) = outlines_dict.get(b"First").and_then(Object::as_reference) else {
+        return Ok(Vec::new());
+    };
+
+    let mut visited = std::collections::HashSet::new();
+    Ok(read_outline_siblings(
+        &doc,
+        first_id,
+        &page_map,
+        total_pages,
+        &mut visited,
+        0,
+    ))
+}
+
+fn build_outline_siblings(
+    doc: &mut Document,
+    nodes: &[OutlineNode],
+    parent_id: ObjectId,
+    pages: &[ObjectId],
+) -> (ObjectId, ObjectId, usize) {
+    let sibling_ids: Vec<ObjectId> = (0..nodes.len()).map(|_| doc.new_object_id()).collect();
+    let mut total_count = nodes.len();
+
+    for (i, node) in nodes.iter().enumerate() {
+        let id = sibling_ids[i];
+        let page_idx = (node.page.max(1) as usize - 1).min(pages.len().saturating_sub(1));
+        let page_id = pages[page_idx];
+        let top_obj = node.top.map(Object::Real).unwrap_or(Object::Null);
+        let dest = Object::Array(vec![
+            Object::Reference(page_id),
+            Object::Name(b"XYZ".to_vec()),
+            Object::Null,
+            top_obj,
+            Object::Null,
+        ]);
+
+        let mut dict = dictionary! {
+            "Title" => text_string(&node.title),
+            "Parent" => Object::Reference(parent_id),
+            "Dest" => dest,
+        };
+        if i > 0 {
+            dict.set("Prev", Object::Reference(sibling_ids[i - 1]));
+        }
+        if i + 1 < nodes.len() {
+            dict.set("Next", Object::Reference(sibling_ids[i + 1]));
+        }
+        if !node.children.is_empty() {
+            let (first_child, last_child, child_count) =
+                build_outline_siblings(doc, &node.children, id, pages);
+            dict.set("First", Object::Reference(first_child));
+            dict.set("Last", Object::Reference(last_child));
+            dict.set("Count", Object::Integer(child_count as i64));
+            total_count += child_count;
+        }
+        doc.objects.insert(id, Object::Dictionary(dict));
+    }
+
+    (
+        *sibling_ids.first().unwrap(),
+        *sibling_ids.last().unwrap(),
+        total_count,
+    )
+}
+
+/// Replace the document's `/Outlines` bookmark tree with `outlines`.
+pub fn set_outlines(pdf: &[u8], password: Option<&str>, outlines: &[OutlineNode]) -> R<Vec<u8>> {
+    let mut doc = load(pdf, password)?;
+    let pages = page_ids(&doc);
+    if pages.is_empty() {
+        return Err("PDF 没有页面".into());
+    }
+    if outlines.is_empty() {
+        if let Ok(cat) = doc.catalog_mut() {
+            cat.remove(b"Outlines");
+        }
+        doc.prune_objects();
+        doc.renumber_objects();
+        return save(&mut doc);
+    }
+
+    let root_id = doc.new_object_id();
+    let (first_id, last_id, total_count) =
+        build_outline_siblings(&mut doc, outlines, root_id, &pages);
+    let root_dict = dictionary! {
+        "Type" => "Outlines",
+        "First" => Object::Reference(first_id),
+        "Last" => Object::Reference(last_id),
+        "Count" => Object::Integer(total_count as i64),
+    };
+    doc.objects.insert(root_id, Object::Dictionary(root_dict));
+    let cat = doc.catalog_mut().map_err(e("找不到 Catalog"))?;
+    cat.set("Outlines", Object::Reference(root_id));
+    cat.set("PageMode", Object::Name(b"UseOutlines".to_vec()));
+    doc.prune_objects();
+    doc.renumber_objects();
+    save(&mut doc)
+}
+
+// ── N-up & Booklet multi-page imposition ─────────────────────────────────
+
+fn default_nup_margin() -> f32 {
+    18.0
+}
+fn default_nup_gap() -> f32 {
+    12.0
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NupSpec {
+    pub cols: u32,
+    pub rows: u32,
+    #[serde(default)]
+    pub landscape: Option<bool>,
+    #[serde(default = "default_nup_margin")]
+    pub margin: f32,
+    #[serde(default = "default_nup_gap")]
+    pub gap: f32,
+    #[serde(default)]
+    pub border: bool,
+}
+
+impl Default for NupSpec {
+    fn default() -> Self {
+        Self {
+            cols: 2,
+            rows: 2,
+            landscape: None,
+            margin: default_nup_margin(),
+            gap: default_nup_gap(),
+            border: false,
+        }
+    }
+}
+
+/// Convert a page into a standalone `/Type /XObject /Subtype /Form`, returning `(form_id, bbox)`.
+fn page_to_form_xobject(doc: &mut Document, page_id: ObjectId) -> (ObjectId, [f32; 4]) {
+    let bbox = page_box(doc, page_id);
+    let resources = inherited(doc, page_id, b"Resources")
+        .unwrap_or_else(|| Object::Dictionary(Dictionary::new()));
+    let raw_content = doc.get_page_content(page_id).unwrap_or_default();
+    let form_dict = dictionary! {
+        "Type" => "XObject",
+        "Subtype" => "Form",
+        "BBox" => nums(&bbox),
+        "Resources" => resources,
+    };
+    let form_id = doc.add_object(Stream::new(form_dict, raw_content));
+    (form_id, bbox)
+}
+
+/// Impose `cols * rows` source pages onto each output sheet.
+pub fn nup_pdf(pdf: &[u8], password: Option<&str>, spec: &NupSpec) -> R<Vec<u8>> {
+    if spec.cols == 0 || spec.rows == 0 {
+        return Err("行列数必须大于 0".into());
+    }
+    let mut doc = load(pdf, password)?;
+    let src_pages = page_ids(&doc);
+    if src_pages.is_empty() {
+        return Err("PDF 没有页面".into());
+    }
+    let pages_id = doc
+        .catalog()
+        .and_then(|c| c.get(b"Pages"))
+        .and_then(Object::as_reference)
+        .map_err(e("找不到页面树"))?;
+
+    let first_box = page_box(&doc, src_pages[0]);
+    let bw0 = (first_box[2] - first_box[0]).abs().max(72.0);
+    let bh0 = (first_box[3] - first_box[1]).abs().max(72.0);
+    let (port_w, port_h) = (bw0.min(bh0), bw0.max(bh0));
+    let is_landscape = spec.landscape.unwrap_or(spec.cols > spec.rows);
+    let (sheet_w, sheet_h) = if is_landscape {
+        (port_h, port_w)
+    } else {
+        (port_w, port_h)
+    };
+
+    let mut forms = Vec::with_capacity(src_pages.len());
+    for &pid in &src_pages {
+        forms.push(page_to_form_xobject(&mut doc, pid));
+    }
+
+    let per_sheet = (spec.cols * spec.rows) as usize;
+    let margin = spec.margin.max(0.0);
+    let gap = spec.gap.max(0.0);
+    let avail_w = (sheet_w - 2.0 * margin - (spec.cols as f32 - 1.0) * gap).max(10.0);
+    let avail_h = (sheet_h - 2.0 * margin - (spec.rows as f32 - 1.0) * gap).max(10.0);
+    let cell_w = avail_w / (spec.cols as f32);
+    let cell_h = avail_h / (spec.rows as f32);
+
+    let mut new_kids: Vec<Object> = Vec::new();
+    for chunk in forms.chunks(per_sheet) {
+        let mut ops: Vec<Operation> = Vec::new();
+        let mut xobj_dict = Dictionary::new();
+
+        for (k, &(form_id, bbox)) in chunk.iter().enumerate() {
+            let col = (k as u32) % spec.cols;
+            let row = (k as u32) / spec.cols;
+            let cell_x = margin + (col as f32) * (cell_w + gap);
+            let cell_y = sheet_h - margin - ((row + 1) as f32) * cell_h - (row as f32) * gap;
+
+            let pw = (bbox[2] - bbox[0]).abs().max(1.0);
+            let ph = (bbox[3] - bbox[1]).abs().max(1.0);
+            let s = (cell_w / pw).min(cell_h / ph);
+            let dw = pw * s;
+            let dh = ph * s;
+            let tx = cell_x + (cell_w - dw) * 0.5 - bbox[0] * s;
+            let ty = cell_y + (cell_h - dh) * 0.5 - bbox[1] * s;
+
+            let fm_name = format!("Fm{k}");
+            xobj_dict.set(fm_name.clone(), Object::Reference(form_id));
+            ops.push(op("q", &[]));
+            ops.push(op("cm", &[s, 0.0, 0.0, s, tx, ty]));
+            ops.push(Operation::new("Do", vec![Object::Name(fm_name.into_bytes())]));
+            ops.push(op("Q", &[]));
+
+            if spec.border {
+                ops.push(op("q", &[]));
+                ops.push(op("RG", &[0.75, 0.75, 0.75]));
+                ops.push(op("w", &[0.5]));
+                ops.push(op("re", &[cell_x, cell_y, cell_w, cell_h]));
+                ops.push(op("S", &[]));
+                ops.push(op("Q", &[]));
+            }
+        }
+
+        let content_bytes = Content { operations: ops }.encode().unwrap_or_default();
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content_bytes));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => nums(&[0.0, 0.0, sheet_w, sheet_h]),
+            "Contents" => content_id,
+            "Resources" => dictionary! { "XObject" => Object::Dictionary(xobj_dict) },
+        });
+        new_kids.push(Object::Reference(page_id));
+    }
+
+    let count = new_kids.len() as i64;
+    let root = doc.get_dictionary_mut(pages_id).map_err(e("页面树异常"))?;
+    root.set("Kids", Object::Array(new_kids));
+    root.set("Count", Object::Integer(count));
+    let _ = doc.catalog_mut().map(|c| c.remove(b"Outlines"));
+    doc.prune_objects();
+    doc.renumber_objects();
+    save(&mut doc)
+}
+
+/// Saddle-stitch booklet imposition: pads page count $N$ to a multiple of 4
+/// ($M = \lceil N/4 \rceil \times 4$) and imposes 2-up landscape sheets ordered
+/// as Front `(M - 2s, 1 + 2s)` and Back `(2 + 2s, M - 1 - 2s)`.
+pub fn booklet_pdf(pdf: &[u8], password: Option<&str>, border: bool) -> R<Vec<u8>> {
+    let mut doc = load(pdf, password)?;
+    let src_pages = page_ids(&doc);
+    let n = src_pages.len();
+    if n == 0 {
+        return Err("PDF 没有页面".into());
+    }
+    let pages_id = doc
+        .catalog()
+        .and_then(|c| c.get(b"Pages"))
+        .and_then(Object::as_reference)
+        .map_err(e("找不到页面树"))?;
+
+    let first_box = page_box(&doc, src_pages[0]);
+    let bw0 = (first_box[2] - first_box[0]).abs().max(72.0);
+    let bh0 = (first_box[3] - first_box[1]).abs().max(72.0);
+    let (port_w, port_h) = (bw0.min(bh0), bw0.max(bh0));
+    let (sheet_w, sheet_h) = if port_h > port_w {
+        (port_h, port_w)
+    } else {
+        (port_w * 2.0, port_h)
+    };
+
+    let mut forms = Vec::with_capacity(n);
+    for &pid in &src_pages {
+        forms.push(page_to_form_xobject(&mut doc, pid));
+    }
+
+    let m = ((n + 3) / 4) * 4;
+    let mut pairs: Vec<(usize, usize)> = Vec::with_capacity(m / 2);
+    for s in 0..(m / 4) {
+        // Front side: left = M - 2s, right = 1 + 2s
+        pairs.push((m - 2 * s, 1 + 2 * s));
+        // Back side: left = 2 + 2s, right = M - 1 - 2s
+        pairs.push((2 + 2 * s, m - 1 - 2 * s));
+    }
+
+    let half_w = sheet_w * 0.5;
+    let cell_h = sheet_h;
+    let mut new_kids: Vec<Object> = Vec::with_capacity(pairs.len());
+
+    for (left_p, right_p) in pairs {
+        let mut ops: Vec<Operation> = Vec::new();
+        let mut xobj_dict = Dictionary::new();
+
+        for (slot_idx, p_no) in [left_p, right_p].into_iter().enumerate() {
+            let cell_x = (slot_idx as f32) * half_w;
+            let cell_y = 0.0f32;
+            if p_no >= 1 && p_no <= n {
+                let (form_id, bbox) = forms[p_no - 1];
+                let pw = (bbox[2] - bbox[0]).abs().max(1.0);
+                let ph = (bbox[3] - bbox[1]).abs().max(1.0);
+                let s = (half_w / pw).min(cell_h / ph);
+                let dw = pw * s;
+                let dh = ph * s;
+                let tx = cell_x + (half_w - dw) * 0.5 - bbox[0] * s;
+                let ty = cell_y + (cell_h - dh) * 0.5 - bbox[1] * s;
+                let fm_name = format!("Fm{slot_idx}");
+                xobj_dict.set(fm_name.clone(), Object::Reference(form_id));
+                ops.push(op("q", &[]));
+                ops.push(op("cm", &[s, 0.0, 0.0, s, tx, ty]));
+                ops.push(Operation::new("Do", vec![Object::Name(fm_name.into_bytes())]));
+                ops.push(op("Q", &[]));
+            }
+            if border {
+                ops.push(op("q", &[]));
+                ops.push(op("RG", &[0.75, 0.75, 0.75]));
+                ops.push(op("w", &[0.5]));
+                ops.push(op("re", &[cell_x, cell_y, half_w, cell_h]));
+                ops.push(op("S", &[]));
+                ops.push(op("Q", &[]));
+            }
+        }
+
+        let content_bytes = Content { operations: ops }.encode().unwrap_or_default();
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content_bytes));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => nums(&[0.0, 0.0, sheet_w, sheet_h]),
+            "Contents" => content_id,
+            "Resources" => dictionary! { "XObject" => Object::Dictionary(xobj_dict) },
+        });
+        new_kids.push(Object::Reference(page_id));
+    }
+
+    let count = new_kids.len() as i64;
+    let root = doc.get_dictionary_mut(pages_id).map_err(e("页面树异常"))?;
+    root.set("Kids", Object::Array(new_kids));
+    root.set("Count", Object::Integer(count));
+    let _ = doc.catalog_mut().map(|c| c.remove(b"Outlines"));
+    doc.prune_objects();
+    doc.renumber_objects();
+    save(&mut doc)
+}
+
+// ── grayscale & scan background whitening ────────────────────────────────
+
+fn rewrite_stream_to_grayscale(raw: &[u8]) -> Option<Vec<u8>> {
+    let decoded = Content::decode(raw).ok()?;
+    let mut changed = false;
+    let mut out_ops = Vec::with_capacity(decoded.operations.len());
+
+    for op_item in decoded.operations {
+        match op_item.operator.as_str() {
+            "rg" | "RG" => {
+                let v = op_floats(&op_item);
+                if v.len() == 3 {
+                    let lum = (0.299 * v[0] + 0.587 * v[1] + 0.114 * v[2]).clamp(0.0, 1.0);
+                    let new_op = if op_item.operator == "rg" { "g" } else { "G" };
+                    out_ops.push(op(new_op, &[lum]));
+                    changed = true;
+                } else {
+                    out_ops.push(op_item);
+                }
+            }
+            "k" | "K" => {
+                let v = op_floats(&op_item);
+                if v.len() == 4 {
+                    let lum = (1.0 - (0.299 * v[0] + 0.587 * v[1] + 0.114 * v[2] + v[3]).min(1.0))
+                        .clamp(0.0, 1.0);
+                    let new_op = if op_item.operator == "k" { "g" } else { "G" };
+                    out_ops.push(op(new_op, &[lum]));
+                    changed = true;
+                } else {
+                    out_ops.push(op_item);
+                }
+            }
+            _ => out_ops.push(op_item),
+        }
+    }
+
+    if !changed {
+        return None;
+    }
+    Content { operations: out_ops }.encode().ok()
+}
+
+fn whiten_gray_pixels(pixels: &mut [u8]) {
+    for p in pixels.iter_mut() {
+        let v = *p;
+        if v >= 210 {
+            *p = 255;
+        } else if v <= 35 {
+            *p = 0;
+        } else {
+            // Stretch [35..210] -> [0..255] to clean gray scan backgrounds
+            *p = (((v as u32 - 35) * 255) / 175).min(255) as u8;
+        }
+    }
+}
+
+/// Convert page/form content streams and embedded image XObjects to grayscale,
+/// optionally whitening light-gray scan backgrounds (`whiten_bg = true`).
+pub fn grayscale_pdf(pdf: &[u8], password: Option<&str>, whiten_bg: bool) -> R<Vec<u8>> {
+    let mut doc = load(pdf, password)?;
+
+    // 1. Rewrite page content streams
+    for page_id in page_ids(&doc) {
+        if let Ok(raw) = doc.get_page_content(page_id) {
+            if let Some(gray_bytes) = rewrite_stream_to_grayscale(&raw) {
+                let new_stream = doc.add_object(Stream::new(dictionary! {}, gray_bytes));
+                if let Ok(d) = doc.get_dictionary_mut(page_id) {
+                    d.set("Contents", Object::Reference(new_stream));
+                }
+            }
+        }
+    }
+
+    // 2. Rewrite Form XObjects and convert Image XObjects to DeviceGray
+    let all_ids: Vec<ObjectId> = doc.objects.keys().copied().collect();
+    for id in all_ids {
+        let Ok(stream) = doc.get_object(id).and_then(Object::as_stream).cloned() else {
+            continue;
+        };
+        let subtype = stream
+            .dict
+            .get(b"Subtype")
+            .and_then(Object::as_name)
+            .unwrap_or(b"");
+
+        if subtype == b"Form" {
+            if let Ok(raw) = stream.decompressed_content() {
+                if let Some(gray_bytes) = rewrite_stream_to_grayscale(&raw) {
+                    let mut dict = stream.dict.clone();
+                    dict.remove(b"Filter");
+                    dict.remove(b"DecodeParms");
+                    let mut new_stream = Stream::new(dict, gray_bytes);
+                    let _ = new_stream.compress();
+                    doc.objects.insert(id, Object::Stream(new_stream));
+                }
+            }
+            continue;
+        }
+
+        if subtype != b"Image" {
+            continue;
+        }
+        let w = stream.dict.get(b"Width").and_then(Object::as_i64).unwrap_or(0) as u32;
+        let h = stream.dict.get(b"Height").and_then(Object::as_i64).unwrap_or(0) as u32;
+        if w == 0 || h == 0 {
+            continue;
+        }
+        let bpc = stream
+            .dict
+            .get(b"BitsPerComponent")
+            .and_then(Object::as_i64)
+            .unwrap_or(8);
+        if bpc != 8 {
+            continue;
+        }
+        let cs = stream
+            .dict
+            .get(b"ColorSpace")
+            .and_then(Object::as_name)
+            .unwrap_or(b"");
+        if cs != b"DeviceRGB" && !(whiten_bg && cs == b"DeviceGray") {
+            continue;
+        }
+
+        let filters = stream.filters().unwrap_or_default();
+        let is_jpeg = filters.iter().any(|f| *f == b"DCTDecode");
+
+        let gray_pixels: Option<Vec<u8>> = if is_jpeg {
+            image::load_from_memory(&stream.content)
+                .ok()
+                .map(|img| img.to_luma8().into_raw())
+        } else if let Ok(raw) = stream.decompressed_content() {
+            if cs == b"DeviceRGB" && raw.len() >= (w * h * 3) as usize {
+                let mut luma = Vec::with_capacity((w * h) as usize);
+                for rgb in raw[..(w * h * 3) as usize].chunks_exact(3) {
+                    let y = ((77u32 * rgb[0] as u32
+                        + 150u32 * rgb[1] as u32
+                        + 29u32 * rgb[2] as u32
+                        + 128)
+                        >> 8) as u8;
+                    luma.push(y);
+                }
+                Some(luma)
+            } else if cs == b"DeviceGray" && raw.len() >= (w * h) as usize {
+                Some(raw[..(w * h) as usize].to_vec())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(mut gray) = gray_pixels {
+            if whiten_bg {
+                whiten_gray_pixels(&mut gray);
+            }
+            let mut dict = stream.dict.clone();
+            dict.set("ColorSpace", Object::Name(b"DeviceGray".to_vec()));
+            dict.set("BitsPerComponent", Object::Integer(8));
+            dict.remove(b"Filter");
+            dict.remove(b"DecodeParms");
+            let mut new_stream = Stream::new(dict, gray);
+            let _ = new_stream.compress();
+            doc.objects.insert(id, Object::Stream(new_stream));
+        }
+    }
+
+    save(&mut doc)
+}
+
+// ── normalize page size ──────────────────────────────────────────────────
+
+fn transform_annot_coords(ad: &mut Dictionary, s: f32, dx: f32, dy: f32) {
+    if let Ok(arr) = ad.get(b"Rect").and_then(Object::as_array) {
+        let v: Vec<f32> = arr
+            .iter()
+            .map(|o| o.as_float().unwrap_or_else(|_| o.as_i64().unwrap_or(0) as f32))
+            .collect();
+        if v.len() == 4 {
+            ad.set(
+                "Rect",
+                nums(&[
+                    v[0] * s + dx,
+                    v[1] * s + dy,
+                    v[2] * s + dx,
+                    v[3] * s + dy,
+                ]),
+            );
+        }
+    }
+    if let Ok(arr) = ad.get(b"QuadPoints").and_then(Object::as_array) {
+        let v: Vec<f32> = arr
+            .iter()
+            .map(|o| o.as_float().unwrap_or_else(|_| o.as_i64().unwrap_or(0) as f32))
+            .collect();
+        if v.len() % 2 == 0 && !v.is_empty() {
+            let mut out = Vec::with_capacity(v.len());
+            for pair in v.chunks_exact(2) {
+                out.push(pair[0] * s + dx);
+                out.push(pair[1] * s + dy);
+            }
+            ad.set("QuadPoints", nums(&out));
+        }
+    }
+    if let Ok(arr) = ad.get(b"L").and_then(Object::as_array) {
+        let v: Vec<f32> = arr
+            .iter()
+            .map(|o| o.as_float().unwrap_or_else(|_| o.as_i64().unwrap_or(0) as f32))
+            .collect();
+        if v.len() == 4 {
+            ad.set(
+                "L",
+                nums(&[
+                    v[0] * s + dx,
+                    v[1] * s + dy,
+                    v[2] * s + dx,
+                    v[3] * s + dy,
+                ]),
+            );
+        }
+    }
+}
+
+/// Uniformly scale and center every page to `[0, 0, target_w, target_h]` in
+/// PDF points while keeping `/Annots` coordinates aligned.
+pub fn normalize_page_size(
+    pdf: &[u8],
+    password: Option<&str>,
+    target_w: f32,
+    target_h: f32,
+) -> R<Vec<u8>> {
+    if target_w <= 0.0 || target_h <= 0.0 {
+        return Err("目标页面宽高必须大于 0".into());
+    }
+    let mut doc = load(pdf, password)?;
+    let pages = page_ids(&doc);
+    if pages.is_empty() {
+        return Err("PDF 没有页面".into());
+    }
+
+    let mut transformed_annots = std::collections::HashSet::new();
+
+    for page_id in pages {
+        let [bx1, by1, bx2, by2] = page_box(&doc, page_id);
+        let w = (bx2 - bx1).abs().max(1.0);
+        let h = (by2 - by1).abs().max(1.0);
+        let s = (target_w / w).min(target_h / h);
+        let dx = (target_w - w * s) * 0.5 - bx1 * s;
+        let dy = (target_h - h * s) * 0.5 - by1 * s;
+
+        let open = doc.add_object(Stream::new(
+            dictionary! {},
+            format!("q\n{s} 0 0 {s} {dx} {dy} cm\n").into_bytes(),
+        ));
+        let close = doc.add_object(Stream::new(dictionary! {}, b"\nQ\n".to_vec()));
+        let mut contents = doc.get_page_contents(page_id);
+        contents.insert(0, open);
+        contents.push(close);
+
+        // Transform annotations on this page
+        let annot_items: Vec<Object> = doc
+            .get_dictionary(page_id)
+            .ok()
+            .and_then(|d| d.get(b"Annots").ok().cloned())
+            .and_then(|o| match o {
+                Object::Array(v) => Some(v),
+                Object::Reference(r) => doc.get_object(r).and_then(Object::as_array).ok().cloned(),
+                _ => None,
+            })
+            .unwrap_or_default();
+
+        for item in annot_items {
+            if let Object::Reference(aid) = item {
+                if transformed_annots.insert(aid) {
+                    if let Ok(Object::Dictionary(ad)) = doc.get_object_mut(aid) {
+                        transform_annot_coords(ad, s, dx, dy);
+                    }
+                }
+            }
+        }
+
+        let d = doc.get_dictionary_mut(page_id).map_err(e("页面结构异常"))?;
+        d.set(
+            "Contents",
+            Object::Array(contents.into_iter().map(Object::Reference).collect()),
+        );
+        d.set("MediaBox", nums(&[0.0, 0.0, target_w, target_h]));
+        d.set("CropBox", nums(&[0.0, 0.0, target_w, target_h]));
+    }
+
+    save(&mut doc)
+}
+
+pub use crate::crypto_sig::{
+    sign_pdf_pkcs12, verify_signatures, CertSignSpec, SignatureInfo,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3050,6 +3851,148 @@ mod tests {
         assert!(raw_after.contains("KEEP_ME"), "unredacted text must survive: {raw_after}");
         assert!(!raw_after.contains("SECRET_42"), "redacted text must be stripped from stream: {raw_after}");
         assert!(raw_after.contains("/SoloRedact1 Do"), "opaque redaction layer must be drawn");
+    }
+
+    #[test]
+    fn outlines_roundtrip_preserves_hierarchy_and_unicode() {
+        let src = sample();
+        let tree = vec![
+            OutlineNode {
+                title: "Chapter 1: Introduction".into(),
+                page: 1,
+                top: Some(720.0),
+                children: vec![
+                    OutlineNode {
+                        title: "1.1 Overview 概述".into(),
+                        page: 2,
+                        top: Some(500.0),
+                        children: vec![],
+                    },
+                    OutlineNode {
+                        title: "1.2 Deep Dive 深入解析".into(),
+                        page: 3,
+                        top: None,
+                        children: vec![],
+                    },
+                ],
+            },
+            OutlineNode {
+                title: "第二章：附录 Appendix".into(),
+                page: 4,
+                top: Some(640.0),
+                children: vec![],
+            },
+        ];
+        let with_outlines = set_outlines(&src, None, &tree).unwrap();
+        let read_back = get_outlines(&with_outlines, None).unwrap();
+        assert_eq!(read_back, tree);
+
+        // Clearing outlines removes /Outlines from catalog
+        let cleared = set_outlines(&with_outlines, None, &[]).unwrap();
+        assert!(get_outlines(&cleared, None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn nup_4_pages_into_1_sheet_2x2() {
+        let four = arrange_pages(&sample(), None, &[1, 2, 3, 4]).unwrap();
+        let spec = NupSpec {
+            cols: 2,
+            rows: 2,
+            landscape: Some(false),
+            margin: 18.0,
+            gap: 12.0,
+            border: true,
+        };
+        let out = nup_pdf(&four, None, &spec).unwrap();
+        let doc = Document::load_mem(&out).unwrap();
+        assert_eq!(doc.get_pages().len(), 1, "4 pages in 2x2 N-up must produce 1 sheet");
+        let p1 = *doc.get_pages().get(&1).unwrap();
+        let content = String::from_utf8_lossy(&doc.get_page_content(p1).unwrap()).into_owned();
+        for k in 0..4 {
+            assert!(content.contains(&format!("/Fm{k} Do")), "missing /Fm{k} Do in {content}");
+        }
+    }
+
+    #[test]
+    fn booklet_5_pages_padded_to_8_produces_4_landscape_sheets() {
+        let five = arrange_pages(&sample(), None, &[1, 2, 3, 4, 1]).unwrap();
+        assert_eq!(page_count(&five, None).unwrap(), 5);
+        let out = booklet_pdf(&five, None, true).unwrap();
+        let sizes = page_sizes(&out, None).unwrap();
+        assert_eq!(
+            sizes.len(),
+            4,
+            "5-page PDF padded to 8 pages in saddle-stitch booklet must produce 4 landscape sides"
+        );
+        for (w, h) in sizes {
+            assert!(w > h, "booklet sheet must be landscape, got {w}x{h}");
+        }
+    }
+
+    #[test]
+    fn grayscale_converts_rgb_operators_and_images() {
+        let mut png = Vec::new();
+        let img = image::RgbImage::from_fn(20, 20, |x, _| {
+            if x < 10 {
+                image::Rgb([230, 230, 230]) // light gray scan background -> whitened to 255
+            } else {
+                image::Rgb([200, 40, 40])
+            }
+        });
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let pdf_with_img = images_to_pdf(&[png], 72.0).unwrap();
+        // Add a colored annotation/watermark so content stream has `rg`/`RG`
+        let colored = watermark_pdf(
+            &pdf_with_img,
+            None,
+            &WatermarkSpec {
+                text: "COLOR".into(),
+                color: [0.8, 0.2, 0.1],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let gray = grayscale_pdf(&colored, None, true).unwrap();
+        let doc = Document::load_mem(&gray).unwrap();
+        let mut found_gray_img = false;
+        for obj in doc.objects.values() {
+            if let Ok(st) = obj.as_stream() {
+                if st.dict.get(b"Subtype").and_then(Object::as_name).ok() == Some(b"Image") {
+                    let cs = st.dict.get(b"ColorSpace").and_then(Object::as_name).unwrap();
+                    assert_eq!(cs, b"DeviceGray", "image XObject must be converted to DeviceGray");
+                    let raw = st.decompressed_content().unwrap();
+                    assert_eq!(raw[0], 255, "light background pixel >= 210 must be whitened to 255");
+                    found_gray_img = true;
+                }
+            }
+        }
+        assert!(found_gray_img);
+    }
+
+    #[test]
+    fn normalize_page_size_scales_mixed_pages_to_a4() {
+        let mut p1_png = Vec::new();
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(100, 200, image::Rgb([255, 255, 255])))
+            .write_to(&mut std::io::Cursor::new(&mut p1_png), image::ImageFormat::Png)
+            .unwrap();
+        let mut p2_png = Vec::new();
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(400, 300, image::Rgb([255, 255, 255])))
+            .write_to(&mut std::io::Cursor::new(&mut p2_png), image::ImageFormat::Png)
+            .unwrap();
+        let mixed = images_to_pdf(&[p1_png, p2_png], 72.0).unwrap();
+        let orig_sizes = page_sizes(&mixed, None).unwrap();
+        assert_ne!(orig_sizes[0], orig_sizes[1]);
+
+        let norm = normalize_page_size(&mixed, None, 595.28, 841.89).unwrap();
+        let new_sizes = page_sizes(&norm, None).unwrap();
+        assert_eq!(new_sizes.len(), 2);
+        for (w, h) in new_sizes {
+            assert!((w - 595.28).abs() < 0.1);
+            assert!((h - 841.89).abs() < 0.1);
+        }
     }
 }
 

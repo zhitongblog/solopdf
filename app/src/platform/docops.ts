@@ -9,8 +9,10 @@
  * fallback on purpose: a browser build has no file to write back to, and a
  * silently half-working "save" is worse than a disabled button.
  */
-import type { AnnotExportSpec } from '@solopdf/core'
+import type { AnnotExportSpec, OutlineNode } from '@solopdf/core'
 import { isTauri } from './index'
+
+export type { OutlineNode }
 
 /** mirror of pdfops.rs AnnotSpec — built by core exportSpec() so the app,
  *  the CLI and the MCP server hand the exporter identical JSON */
@@ -99,6 +101,42 @@ export interface RedactRectInput {
   label?: string
 }
 
+export interface NupSpec {
+  cols: number
+  rows: number
+  landscape?: boolean | null
+  margin?: number
+  gap?: number
+  border?: boolean
+}
+
+export interface SignatureInfo {
+  fieldName: string
+  signerName: string
+  organization: string | null
+  email: string | null
+  reason: string | null
+  location: string | null
+  signingTime: string | null
+  byteRangeValid: boolean
+  coversWholeDocument: boolean
+  digestValid: boolean
+  status: 'valid' | 'modified' | 'invalid'
+  subFilter: string
+}
+
+export interface CertSignSpec {
+  signerName: string
+  reason?: string | null
+  location?: string | null
+  contact?: string | null
+  page?: number | null
+  rect?: [number, number, number, number] | null
+  p12Bytes?: number[] | null
+  passphrase?: string | null
+  p12Path?: string | null
+}
+
 async function call<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   const { invoke } = await import('@tauri-apps/api/core')
   return await invoke<T>(cmd, args)
@@ -172,6 +210,60 @@ export const docOps = {
     rects: RedactRectInput[],
     stripMetadata = true,
   ) => call<string>('pdf_redact', { srcPath, destPath, password, rects, stripMetadata }),
+
+  getOutlines: (srcPath: string, password: string | null) =>
+    call<OutlineNode[]>('pdf_get_outlines', { srcPath, password }),
+
+  setOutlines: (
+    srcPath: string,
+    destPath: string | null,
+    password: string | null,
+    outlines: OutlineNode[],
+  ) => call<string>('pdf_set_outlines', { srcPath, destPath, password, outlines }),
+
+  nup: (srcPath: string, destPath: string | null, password: string | null, spec: NupSpec) =>
+    call<string>('pdf_nup', { srcPath, destPath, password, spec }),
+
+  booklet: (srcPath: string, destPath: string | null, password: string | null, border: boolean) =>
+    call<string>('pdf_booklet', { srcPath, destPath, password, border }),
+
+  grayscale: (srcPath: string, destPath: string | null, password: string | null, whitenBg: boolean) =>
+    call<string>('pdf_grayscale', { srcPath, destPath, password, whitenBg }),
+
+  resizePages: (
+    srcPath: string,
+    destPath: string | null,
+    password: string | null,
+    targetWidth: number,
+    targetHeight: number,
+  ) =>
+    call<string>('pdf_resize_pages', {
+      srcPath,
+      destPath,
+      password,
+      targetWidth,
+      targetHeight,
+      width: targetWidth,
+      height: targetHeight,
+    }),
+
+  verifySignatures: (srcPath: string, password: string | null) =>
+    call<SignatureInfo[]>('pdf_verify_signatures', { srcPath, password }),
+
+  certSign: (
+    srcPath: string,
+    destPath: string | null,
+    password: string | null,
+    spec: CertSignSpec,
+    p12Path?: string | null,
+  ) =>
+    call<string>('pdf_cert_sign', {
+      srcPath,
+      destPath,
+      password,
+      spec,
+      p12Path: p12Path ?? spec.p12Path ?? null,
+    }),
 
   // ── signature library (appData, never beside a document) ──
   async saveSignature(name: string, bytes: Uint8Array): Promise<string> {

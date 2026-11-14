@@ -22,14 +22,18 @@ import ConvertPanel from './ConvertPanel.vue'
 import SignPanel from './SignPanel.vue'
 import SecurityPanel from './SecurityPanel.vue'
 import AnnotExportPanel from './AnnotExportPanel.vue'
+import OutlinesPanel from './OutlinesPanel.vue'
+import LayoutPanel from './LayoutPanel.vue'
 
 const emit = defineEmits<{ close: []; toast: [msg: string]; open: [path: string] }>()
 
-type Section = 'pages' | 'crop' | 'mergesplit' | 'watermark' | 'convert' | 'sign' | 'security' | 'annots'
+type Section = 'pages' | 'crop' | 'mergesplit' | 'outlines' | 'layout' | 'watermark' | 'convert' | 'sign' | 'security' | 'annots'
 const SECTIONS: { key: Section; icon: string }[] = [
   { key: 'pages', icon: '▤' },
   { key: 'crop', icon: '✂' },
   { key: 'mergesplit', icon: '⇹' },
+  { key: 'outlines', icon: '📑' },
+  { key: 'layout', icon: '⊞' },
   { key: 'watermark', icon: '💧' },
   { key: 'convert', icon: '⇄' },
   { key: 'sign', icon: '✍' },
@@ -66,6 +70,8 @@ const phone = computed(() => isMobile() || window.innerWidth < 700)
           <PagesPanel v-if="section === 'pages'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
           <CropPanel v-else-if="section === 'crop'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
           <MergeSplitPanel v-else-if="section === 'mergesplit'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
+          <OutlinesPanel v-else-if="section === 'outlines'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
+          <LayoutPanel v-else-if="section === 'layout'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
           <WatermarkPanel v-else-if="section === 'watermark'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
           <ConvertPanel v-else-if="section === 'convert'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />
           <SignPanel v-else-if="section === 'sign'" @toast="(m) => emit('toast', m)" @open="(p) => emit('open', p)" />

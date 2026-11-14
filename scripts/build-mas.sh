@@ -26,6 +26,8 @@ ENTITLEMENTS="app/src-tauri/entitlements.mas.plist"
 [ -f "$ENTITLEMENTS" ] || { echo "ERROR: $ENTITLEMENTS missing" >&2; exit 1; }
 
 echo "==> SoloPDF MAS build  v$MAS_VERSION ($MAS_BUILD_NUMBER)"
+export SOLOPDF_APP_STORE_BUILD=1
+export VITE_APP_STORE_BUILD=true
 cd app
 pnpm install --frozen-lockfile
 unset APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID

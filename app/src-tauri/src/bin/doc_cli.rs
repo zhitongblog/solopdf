@@ -18,7 +18,7 @@
 //   [{"page":1,"kind":"highlight","quads":[[x1,y1,x2,y2]],
 //     "color":[1,0.85,0.2],"contents":"…","author":"…"}]
 
-use solopdf_lib::{djvu, pdfops};
+use solopdf_lib::{crypto_sig, djvu, pdfops};
 
 fn die(msg: &str) -> ! {
     eprintln!("{msg}");
@@ -100,6 +100,14 @@ fn usage() -> ! {
   sanitize <src.pdf> <dest.pdf> [--annots 1] [--attachments 1] [--forms 1] [--password pw]
   flatten <src.pdf> <dest.pdf> [--password pw]
   redact <src.pdf> <dest.pdf> <rects.json> [--password pw]
+  outlines <src.pdf> [--password pw]
+  set-outlines <src.pdf> <dest.pdf> <outlines.json> [--password pw]
+  nup <src.pdf> <dest.pdf> [--cols 2] [--rows 2] [--landscape 0|1] [--margin 18] [--gap 12] [--border 0|1] [--password pw]
+  booklet <src.pdf> <dest.pdf> [--border 0|1] [--password pw]
+  grayscale <src.pdf> <dest.pdf> [--whiten 0|1] [--password pw]
+  resize <src.pdf> <dest.pdf> [--size A4|A3|Letter|Legal] [--width pt] [--height pt] [--password pw]
+  verify-signatures <src.pdf> [--password pw]
+  cert-sign <src.pdf> <dest.pdf> --signer <name> [--reason r] [--location l] [--page p] [--rect x,y,w,h] [--p12 path] [--pass pw] [--password pdf_pw]
   info <src.pdf> [--password pw]
   djvu-info <src.djvu>
   djvu-page <src.djvu> <dest.png> [--page 1] [--width 1400]
@@ -355,6 +363,103 @@ fn main() {
                 .unwrap_or_else(|e| die(&format!("rects.json 解析失败: {e}")));
             let strip_meta = arg(&args, "--strip-metadata").map(|v| v != "0" && v != "false").unwrap_or(true);
             write(dest, ok(pdfops::redact_pdf(&read(src), pw, &rects, strip_meta)));
+        }
+        "outlines" => {
+            let Some(src) = positional.first() else { usage() };
+            let tree = ok(pdfops::get_outlines(&read(src), pw));
+            println!("{}", serde_json::to_string_pretty(&tree).unwrap_or_default());
+        }
+        "set-outlines" => {
+            let (Some(src), Some(dest), Some(json)) =
+                (positional.first(), positional.get(1), positional.get(2))
+            else {
+                usage()
+            };
+            let outlines: Vec<pdfops::OutlineNode> = serde_json::from_slice(&read(json))
+                .unwrap_or_else(|e| die(&format!("outlines.json 解析失败: {e}")));
+            write(dest, ok(pdfops::set_outlines(&read(src), pw, &outlines)));
+        }
+        "nup" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            let cols = arg(&args, "--cols").and_then(|v| v.parse().ok()).unwrap_or(2);
+            let rows = arg(&args, "--rows").and_then(|v| v.parse().ok()).unwrap_or(2);
+            let landscape = arg(&args, "--landscape").map(|v| v == "1" || v == "true");
+            let margin = arg(&args, "--margin").and_then(|v| v.parse().ok()).unwrap_or(18.0);
+            let gap = arg(&args, "--gap").and_then(|v| v.parse().ok()).unwrap_or(12.0);
+            let border = arg(&args, "--border").map(|v| v == "1" || v == "true").unwrap_or(false);
+            let spec = pdfops::NupSpec {
+                cols,
+                rows,
+                landscape,
+                margin,
+                gap,
+                border,
+            };
+            write(dest, ok(pdfops::nup_pdf(&read(src), pw, &spec)));
+        }
+        "booklet" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            let border = arg(&args, "--border").map(|v| v == "1" || v == "true").unwrap_or(false);
+            write(dest, ok(pdfops::booklet_pdf(&read(src), pw, border)));
+        }
+        "grayscale" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            let whiten = arg(&args, "--whiten").map(|v| v == "1" || v == "true").unwrap_or(false);
+            write(dest, ok(pdfops::grayscale_pdf(&read(src), pw, whiten)));
+        }
+        "resize" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            let preset = arg(&args, "--size").map(|s| s.to_ascii_lowercase());
+            let (mut w, mut h) = match preset.as_deref() {
+                Some("a4") => (595.28f32, 841.89f32),
+                Some("a3") => (841.89f32, 1190.55f32),
+                Some("letter") => (612.0f32, 792.0f32),
+                Some("legal") => (612.0f32, 1008.0f32),
+                Some(other) => die(&format!("未知纸张规格: {other}（支持 A4|A3|Letter|Legal）")),
+                None => (0.0f32, 0.0f32),
+            };
+            if let Some( custom_w ) = arg(&args, "--width").and_then(|v| v.parse().ok()) {
+                w = custom_w;
+            }
+            if let Some( custom_h ) = arg(&args, "--height").and_then(|v| v.parse().ok()) {
+                h = custom_h;
+            }
+            if w <= 0.0 || h <= 0.0 {
+                die("需要 --size A4|A3|Letter|Legal 或 --width <pt> --height <pt>");
+            }
+            write(dest, ok(pdfops::normalize_page_size(&read(src), pw, w, h)));
+        }
+        "verify-signatures" => {
+            let Some(src) = positional.first() else { usage() };
+            let sigs = ok(crypto_sig::verify_signatures(&read(src), pw));
+            println!("{}", serde_json::to_string_pretty(&sigs).unwrap_or_default());
+        }
+        "cert-sign" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            let signer_name = arg(&args, "--signer")
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "SoloPDF Signer".to_string());
+            let reason = arg(&args, "--reason").map(|s| s.to_string());
+            let location = arg(&args, "--location").map(|s| s.to_string());
+            let contact = arg(&args, "--contact").map(|s| s.to_string());
+            let page = arg(&args, "--page").and_then(|v| v.parse().ok());
+            let rect = arg(&args, "--rect").and_then(|r| {
+                let v: Vec<f32> = r.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                (v.len() == 4).then(|| [v[0], v[1], v[2], v[3]])
+            });
+            let p12_bytes = arg(&args, "--p12").map(read);
+            let passphrase = arg(&args, "--pass").map(|s| s.to_string());
+            let spec = crypto_sig::CertSignSpec {
+                signer_name,
+                reason,
+                location,
+                contact,
+                page,
+                rect,
+                p12_bytes,
+                passphrase,
+            };
+            write(dest, ok(crypto_sig::sign_pdf_pkcs12(&read(src), pw, &spec)));
         }
         "info" => {
             let Some(src) = positional.first() else { usage() };

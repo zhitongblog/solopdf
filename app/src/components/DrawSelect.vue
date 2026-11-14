@@ -14,7 +14,19 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
-  drawBounds, normRect, translateDrawn, type Annotation, type AnchorData, type DrawData,
+  drawBounds,
+  normRect,
+  translateDrawn,
+  defaultMeasureScale,
+  calibrateMeasureScale,
+  measureDistance,
+  measurePerimeter,
+  measurePolygonArea,
+  type Annotation,
+  type AnchorData,
+  type DrawData,
+  type MeasureUnit,
+  type MeasureScale,
 } from '@solopdf/core'
 import { store, controllers, annotManagers } from '../store'
 import { t } from '../i18n'
@@ -348,6 +360,107 @@ function onKey(e: KeyboardEvent): void {
 const isShape = computed(() => ['rect', 'ellipse', 'textbox'].includes(sel.value?.kind ?? ''))
 const isLine = computed(() => sel.value?.kind === 'line' || sel.value?.kind === 'arrow')
 
+// ── physical scale measurement ──
+const MEASURE_UNITS: MeasureUnit[] = ['mm', 'cm', 'm', 'in', 'pt']
+const customScale = ref<MeasureScale | null>(null)
+const calibrating = ref(false)
+const calibInput = ref('')
+
+const activeScale = computed<MeasureScale>(() => {
+  if (customScale.value) return customScale.value
+  return defaultMeasureScale(store.settings.measureUnit || 'mm')
+})
+
+function cycleMeasureUnit(): void {
+  const cur = activeScale.value.unit
+  const idx = MEASURE_UNITS.indexOf(cur)
+  const next = MEASURE_UNITS[(idx + 1) % MEASURE_UNITS.length]
+  store.settings.measureUnit = next
+  customScale.value = null
+}
+
+const liveLinePts = computed<[number, number, number, number] | null>(() => {
+  const a = sel.value
+  if (!a || (a.kind !== 'line' && a.kind !== 'arrow')) return null
+  return liveLine(a)
+})
+
+function pageDimsFor(page: number): { x0: number; y0: number; w: number; h: number } {
+  const b = ctrl.value?.pageGeometry(page)?.box
+  return {
+    x0: b?.x0 ?? 0,
+    y0: b?.y0 ?? 0,
+    w: Math.max(1, b?.w ?? 595.28),
+    h: Math.max(1, b?.h ?? 841.89),
+  }
+}
+
+const measurementBadge = computed<string | null>(() => {
+  const a = sel.value
+  if (!a) return null
+  const scale = activeScale.value
+  const dims = pageDimsFor(a.anchor.page)
+  const norm = (x: number, y: number) => ({
+    x: (x - dims.x0) / dims.w,
+    y: (y - dims.y0) / dims.h,
+  })
+  if (a.kind === 'line' || a.kind === 'arrow') {
+    const l = liveLinePts.value ?? (a.anchor.quads[0] ? [a.anchor.quads[0].x1, a.anchor.quads[0].y1, a.anchor.quads[0].x2, a.anchor.quads[0].y2] : null)
+    if (!l) return null
+    const m = measureDistance(norm(l[0], l[1]), norm(l[2], l[3]), dims.w, dims.h, scale)
+    return `📏 ${m.formatted}`
+  }
+  if (a.kind === 'rect') {
+    const q = liveQuad(a)
+    if (!q) return null
+    const poly = [
+      norm(q.x1, q.y1),
+      norm(q.x2, q.y1),
+      norm(q.x2, q.y2),
+      norm(q.x1, q.y2),
+    ]
+    const area = measurePolygonArea(poly, dims.w, dims.h, scale)
+    const perim = measurePerimeter(poly, dims.w, dims.h, scale, true)
+    return `📐 ${area.formatted} · ${perim.formatted}`
+  }
+  return null
+})
+
+function applyCalibration(): void {
+  const a = sel.value
+  if (!a) return
+  const raw = calibInput.value.trim()
+  const match = raw.match(/^([\d.]+)\s*(pt|mm|cm|m|in|ft)?$/i)
+  if (!match) {
+    calibrating.value = false
+    return
+  }
+  const val = parseFloat(match[1])
+  const unit = ((match[2]?.toLowerCase() as MeasureUnit) || activeScale.value.unit)
+  const dims = pageDimsFor(a.anchor.page)
+  const norm = (x: number, y: number) => ({
+    x: (x - dims.x0) / dims.w,
+    y: (y - dims.y0) / dims.h,
+  })
+  if (val > 0) {
+    if (a.kind === 'line' || a.kind === 'arrow') {
+      const l = liveLinePts.value
+      if (l) {
+        customScale.value = calibrateMeasureScale(norm(l[0], l[1]), norm(l[2], l[3]), dims.w, dims.h, val, unit)
+        store.settings.measureUnit = unit
+      }
+    } else if (a.kind === 'rect') {
+      const q = liveQuad(a)
+      if (q) {
+        customScale.value = calibrateMeasureScale(norm(q.x1, q.y1), norm(q.x2, q.y1), dims.w, dims.h, val, unit)
+        store.settings.measureUnit = unit
+      }
+    }
+  }
+  calibrating.value = false
+  calibInput.value = ''
+}
+
 /** toolbar placement: above the box, below when there's no room; docked on phones */
 const barStyle = computed(() => {
   const b = box.value
@@ -432,6 +545,28 @@ defineExpose({ select, selId })
         ><i :style="{ width: 3 + w * 2 + 'px', height: 3 + w * 2 + 'px', background: cssColor(sel.color) }"></i></button>
       </template>
       <span class="dt-sep"></span>
+      <template v-if="measurementBadge">
+        <button
+          class="ds-measure-badge"
+          :title="t('dr.measureUnitTip')"
+          @click="cycleMeasureUnit"
+        >{{ measurementBadge }}</button>
+        <button
+          class="dt-act"
+          :title="t('dr.calibrateTip')"
+          @click="calibrating = !calibrating"
+        >⚖</button>
+        <span v-if="calibrating" class="ds-calib" @pointerdown.stop>
+          <input
+            v-model="calibInput"
+            :placeholder="t('dr.calibratePh')"
+            @keydown.enter="applyCalibration"
+            @keydown.esc="calibrating = false"
+          />
+          <button @click="applyCalibration">✓</button>
+        </span>
+        <span class="dt-sep"></span>
+      </template>
       <button class="dt-act ds-del" :title="t('dr.delete')" data-act="delete" @click="remove()">🗑</button>
     </div>
   </template>
@@ -449,3 +584,25 @@ defineExpose({ select, selId })
     @cancel="editing = null"
   />
 </template>
+
+<style scoped>
+.ds-measure-badge {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  white-space: nowrap;
+}
+.ds-calib {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.ds-calib input {
+  width: 68px;
+  font-size: 11.5px;
+  padding: 2px 5px;
+}
+</style>

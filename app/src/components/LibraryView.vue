@@ -16,6 +16,8 @@ import {
   removeFromLibrary, rescanAll, setTags, toggleFavorite, type LibraryItem,
 } from '../library'
 import { t } from '../i18n'
+import { isSupporter, initSupporterState } from '../supporter'
+import SupportDialog from './SupportDialog.vue'
 
 const emit = defineEmits<{
   open: [path: string]
@@ -33,6 +35,7 @@ const covers = ref<Record<string, string>>({})
 const busy = ref(false)
 const editingTags = ref<string | null>(null)
 const tagText = ref('')
+const showSupport = ref(false)
 const phone = computed(() => isMobile() || window.innerWidth < 700)
 
 const items = computed<LibraryItem[]>(() => {
@@ -64,6 +67,7 @@ async function loadCovers(): Promise<void> {
 onMounted(async () => {
   await loadCovers()
   void refreshMissing()
+  void initSupporterState()
 })
 watch(items, loadCovers)
 
@@ -113,6 +117,9 @@ const KIND_GLYPH: Record<string, string> = {
         <button v-if="isTauri() && !phone" :disabled="busy" @click="pickFolder">{{ t('lb.addFolder') }}</button>
         <button v-if="isTauri()" @click="emit('ocrImage')">{{ t('wc.ocrImage') }}</button>
         <button v-if="items.length" @click="emit('search')">{{ t('lb.searchAll') }}</button>
+        <button @click="showSupport = true" :title="t('sup.title')">
+          {{ isSupporter ? '✨ ' + t('sup.badge') : '❤️ ' + t('sup.btn') }}
+        </button>
       </div>
     </header>
 
@@ -189,5 +196,6 @@ const KIND_GLYPH: Record<string, string> = {
       </span>
       <button :disabled="busy" @click="rescan">{{ busy ? t('lb.scanning') : t('lb.rescan') }}</button>
     </footer>
+    <SupportDialog v-if="showSupport" @close="showSupport = false" />
   </div>
 </template>

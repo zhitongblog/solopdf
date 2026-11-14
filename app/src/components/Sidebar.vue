@@ -25,8 +25,17 @@ import {
 } from '../store'
 import { t } from '../i18n'
 import { jump } from '../nav'
-import { openExternal } from '../platform'
-import { resolveDestination, safeExternalUrl, SHAPE_KINDS, type Annotation, type AnnotationKind, type LinkDest } from '@solopdf/core'
+import { openExternal, platform } from '../platform'
+import {
+  resolveDestination,
+  safeExternalUrl,
+  SHAPE_KINDS,
+  toAnkiTsv,
+  toObsidianSr,
+  type Annotation,
+  type AnnotationKind,
+  type LinkDest,
+} from '@solopdf/core'
 import { cssColor } from '../annotations/drawing'
 import { attachView, openAttachment, saveAttachment, humanSize } from '../attachments'
 import { layerView, layerConfig, toggleLayer, resetLayers } from '../layers'
@@ -370,6 +379,20 @@ async function removeAnnot(a: Annotation): Promise<void> {
   await mgr.value?.remove(a.id)
 }
 
+async function quickExportFlashcards(fmt: 'anki' | 'obsidian'): Promise<void> {
+  if (!shownAnnots.value.length) return
+  const docTitle = (tab.value?.name ?? 'Document').replace(/\.[^.]+$/, '')
+  if (fmt === 'anki') {
+    const tsv = toAnkiTsv(shownAnnots.value, { docTitle })
+    await platform().saveText(`${docTitle}-anki.tsv`, tsv)
+    emit('toast', t('dt.ae.flashcardsDone', { fmt: 'Anki TSV' }))
+  } else {
+    const md = toObsidianSr(shownAnnots.value, { docTitle })
+    await platform().saveText(`${docTitle}-flashcards.md`, md)
+    emit('toast', t('dt.ae.flashcardsDone', { fmt: 'Obsidian SR' }))
+  }
+}
+
 // reload sidebar data when the document changes
 watch([doc, sbTab], async ([d]) => {
   if (!d) return
@@ -537,6 +560,17 @@ onBeforeUnmount(() => observer?.disconnect())
         <div class="af-sort">
           <button :class="{ on: sortBy === 'page' }" @click="sortBy = 'page'">{{ t('sb.byPage') }}</button>
           <button :class="{ on: sortBy === 'recent' }" @click="sortBy = 'recent'">{{ t('sb.byRecent') }}</button>
+          <span style="flex: 1"></span>
+          <button
+            v-if="shownAnnots.length"
+            :title="t('dt.ae.exportAnki')"
+            @click="quickExportFlashcards('anki')"
+          >🗂 Anki</button>
+          <button
+            v-if="shownAnnots.length"
+            :title="t('dt.ae.exportObsidian')"
+            @click="quickExportFlashcards('obsidian')"
+          >🧠 SR</button>
         </div>
       </div>
 

@@ -48,13 +48,13 @@ s = open(p).read()
 anchor = "      - sdk: Vision.framework\n"
 assert anchor in s, 'Vision.framework dependency anchor not found'
 add = ""
-for fw, weak in (("NaturalLanguage", False), ("Translation", True), ("_Translation_SwiftUI", True), ("SwiftUI", True)):
+for fw, weak in (("NaturalLanguage", False), ("StoreKit", False), ("Translation", True), ("_Translation_SwiftUI", True), ("SwiftUI", True)):
     if f"sdk: {fw}.framework" not in s:
         add += f"      - sdk: {fw}.framework\n" + ("        weak: true\n" if weak else "")
 if add:
     s = s.replace(anchor, anchor + add, 1)
     open(p, 'w').write(s)
-print('translation frameworks ok')
+print('translation + storekit frameworks ok')
 PY
 
 echo "==> Regenerating xcodeproj (tauri ios build does NOT re-run xcodegen)"
@@ -133,6 +133,8 @@ if [ -n "$IOS_BUILD_NUMBER" ]; then
 fi
 
 echo "==> Building signed .ipa (this takes a while)"
+export SOLOPDF_APP_STORE_BUILD=1
+export VITE_APP_STORE_BUILD=true
 cd app
 unset APPLE_SIGNING_IDENTITY
 pnpm tauri ios build --export-method app-store-connect

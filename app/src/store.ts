@@ -144,6 +144,8 @@ export interface Settings {
   aids: AidSettings
   /** Ask AI — off by default, bring-your-own endpoint (see ai.ts) */
   ai: AiSettings
+  /** physical measurement unit for line/arrow/rect annotations */
+  measureUnit?: import('@solopdf/core').MeasureUnit
 }
 
 export interface AidSettings {
@@ -267,6 +269,7 @@ export const DEFAULT_SETTINGS: Settings = {
     summaryBudget: 48000,
     approved: [],
   },
+  measureUnit: 'mm',
 }
 
 export function applyLanguage(): void {

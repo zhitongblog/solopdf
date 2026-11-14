@@ -1,6 +1,6 @@
 {
   "name": "@solopdf/cli",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "type": "module",
   "bin": {
     "solopdf": "src/index.mjs"

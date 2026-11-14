@@ -10,6 +10,8 @@ use tauri::{Emitter, Manager};
 
 pub mod ocr;
 pub mod pdfops;
+pub mod crypto_sig;
+pub mod iap;
 pub mod djvu;
 pub mod translate;
 #[cfg(target_os = "android")]
@@ -885,6 +887,139 @@ async fn pdf_redact(
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+async fn pdf_get_outlines(
+    src_path: String,
+    password: Option<String>,
+) -> Result<Vec<pdfops::OutlineNode>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        pdfops::get_outlines(&pdf, password.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_set_outlines(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    outlines: Vec<pdfops::OutlineNode>,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-outlines", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::set_outlines(&pdf, password.as_deref(), &outlines)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_nup(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    spec: pdfops::NupSpec,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-nup", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::nup_pdf(&pdf, password.as_deref(), &spec)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_booklet(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    border: Option<bool>,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-booklet", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::booklet_pdf(&pdf, password.as_deref(), border.unwrap_or(false))?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_grayscale(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    whiten_bg: Option<bool>,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-grayscale", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::grayscale_pdf(&pdf, password.as_deref(), whiten_bg.unwrap_or(false))?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_resize_pages(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    width: f32,
+    height: f32,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-resized", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(dest, pdfops::normalize_page_size(&pdf, password.as_deref(), width, height)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_verify_signatures(
+    src_path: String,
+    password: Option<String>,
+) -> Result<Vec<crypto_sig::SignatureInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        crypto_sig::verify_signatures(&pdf, password.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_cert_sign(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    mut spec: crypto_sig::CertSignSpec,
+    p12_path: Option<String>,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-cert-signed", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        if let Some(p) = p12_path.filter(|s| !s.is_empty()) {
+            spec.p12_bytes = Some(fs::read(&p).map_err(|e| format!("读取证书失败: {e}"))?);
+        }
+        write_out(dest, crypto_sig::sign_pdf_pkcs12(&pdf, password.as_deref(), &spec)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[derive(Serialize)]
 struct UserDict {
     name: String,
@@ -1620,6 +1755,18 @@ pub fn run() {
             pdf_sanitize,
             pdf_flatten,
             pdf_redact,
+            pdf_get_outlines,
+            pdf_set_outlines,
+            pdf_nup,
+            pdf_booklet,
+            pdf_grayscale,
+            pdf_resize_pages,
+            pdf_verify_signatures,
+            pdf_cert_sign,
+            iap::iap_get_state,
+            iap::iap_fetch_products,
+            iap::iap_purchase,
+            iap::iap_restore,
             define_word,
             translate_text,
             translate_prepare,
