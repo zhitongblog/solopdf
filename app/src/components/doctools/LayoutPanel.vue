@@ -206,6 +206,64 @@ async function runOverlay(): Promise<void> {
     busy.value = ''
   }
 }
+
+// ── 8. Scan Auto-Deskew & Border Cleanup ──
+const deskewMaxAngle = ref(12)
+const deskewCleanBorder = ref(true)
+
+async function runDeskew(): Promise<void> {
+  const src = tab.value?.path
+  if (!src) return
+  const suggested = src.replace(/\.pdf$/i, '') + '-deskewed.pdf'
+  const dest = await pickSavePath(suggested, 'pdf')
+  if (dest === undefined) return
+  busy.value = 'deskew'
+  try {
+    const res = await docOps.deskew(
+      src,
+      dest,
+      null,
+      deskewMaxAngle.value,
+      deskewCleanBorder.value ? 0.02 : 0,
+    )
+    emit('toast', t('dt.savedTo', { path: res.path }))
+    emit('open', res.path)
+  } catch (err) {
+    emit('toast', String((err as Error).message ?? err))
+  } finally {
+    busy.value = ''
+  }
+}
+
+// ── 9. Adaptive B&W Binarize (Sauvola) ──
+const binarizeWindow = ref(15)
+const binarizeK = ref(0.2)
+const binarizeCleanBorder = ref(true)
+
+async function runBinarize(): Promise<void> {
+  const src = tab.value?.path
+  if (!src) return
+  const suggested = src.replace(/\.pdf$/i, '') + '-binarized.pdf'
+  const dest = await pickSavePath(suggested, 'pdf')
+  if (dest === undefined) return
+  busy.value = 'binarize'
+  try {
+    const out = await docOps.binarize(
+      src,
+      dest,
+      null,
+      binarizeK.value,
+      binarizeWindow.value,
+      binarizeCleanBorder.value ? 0.02 : 0,
+    )
+    emit('toast', t('dt.savedTo', { path: out }))
+    emit('open', out)
+  } catch (err) {
+    emit('toast', String((err as Error).message ?? err))
+  } finally {
+    busy.value = ''
+  }
+}
 </script>
 
 <template>
@@ -398,6 +456,58 @@ async function runOverlay(): Promise<void> {
       <div class="ly-actions">
         <button class="primary" :disabled="!!busy || !overlayPath" @click="runOverlay">
           {{ busy === 'overlay' ? t('dt.working') : t('dt.ly.overlayBtn') }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 8. Scan Auto-Deskew & Border Cleanup -->
+    <div class="ly-card">
+      <div class="ly-head">
+        <h4>{{ t('dt.ly.deskewTitle') }}</h4>
+        <span class="dt-sub">{{ t('dt.ly.deskewSub') }}</span>
+      </div>
+      <div class="dt-form">
+        <label class="dt-field">
+          <span>{{ t('dt.ly.deskewMaxAngle') }}</span>
+          <input type="number" v-model.number="deskewMaxAngle" min="2" max="20" step="1" />
+        </label>
+        <label class="ly-check">
+          <input type="checkbox" v-model="deskewCleanBorder" />
+          <span>{{ t('dt.ly.deskewCleanBorder') }}</span>
+        </label>
+      </div>
+      <div class="ly-actions">
+        <button class="primary" :disabled="!!busy" @click="runDeskew">
+          {{ busy === 'deskew' ? t('dt.working') : t('dt.ly.deskewBtn') }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 9. Adaptive B&W Binarize (Sauvola) -->
+    <div class="ly-card">
+      <div class="ly-head">
+        <h4>{{ t('dt.ly.binarizeTitle') }}</h4>
+        <span class="dt-sub">{{ t('dt.ly.binarizeSub') }}</span>
+      </div>
+      <div class="dt-form">
+        <div class="ly-inline-fields">
+          <label class="dt-field">
+            <span>{{ t('dt.ly.binarizeWindow') }}</span>
+            <input type="number" v-model.number="binarizeWindow" min="5" max="40" step="2" />
+          </label>
+          <label class="dt-field">
+            <span>{{ t('dt.ly.binarizeK') }}</span>
+            <input type="number" v-model.number="binarizeK" min="0.05" max="0.5" step="0.05" />
+          </label>
+        </div>
+        <label class="ly-check">
+          <input type="checkbox" v-model="binarizeCleanBorder" />
+          <span>{{ t('dt.ly.deskewCleanBorder') }}</span>
+        </label>
+      </div>
+      <div class="ly-actions">
+        <button class="primary" :disabled="!!busy" @click="runBinarize">
+          {{ busy === 'binarize' ? t('dt.working') : t('dt.ly.binarizeBtn') }}
         </button>
       </div>
     </div>

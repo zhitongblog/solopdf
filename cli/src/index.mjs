@@ -49,6 +49,7 @@ import {
   extractTableFromItems, tableToMarkdown, tableToCsv,
   filterAnnotations, toAnkiTsv, toObsidianSr,
   suggestPdfFilename,
+  extractLatexFromItems, buildTopicDigest, computeVisualDiff,
 } from '@solopdf/core'
 import { formatOf, loadFb2, fb2InfoJson, tiffInfoJson, tiffPages } from './formats.mjs'
 
@@ -84,6 +85,7 @@ async function open(file, password = flag('password'), { soft = false } = {}) {
     password,
     // node has no DOM canvas; disable font rendering paths we don't need
     disableFontFace: true,
+    useSystemFonts: true,
     verbosity: 0,
     wasmUrl: `file://${root}/wasm/`,
     cMapUrl: `${root}/cmaps/`,
@@ -1238,6 +1240,183 @@ async function cmdAutoRename(file) {
   }
 }
 
+/**
+ * Extract a mathematical expression / equation from a PDF page or rectangular region
+ * as inline ($...$) or display ($$...$$) LaTeX.
+ */
+async function cmdExtractMath(file) {
+  const pageNum = Math.max(1, parseInt(flag('page') ?? '1', 10))
+  const block = args.includes('--block')
+  const doc = await open(file)
+  const p = Math.min(pageNum, doc.numPages)
+  const page = await doc.getPage(p)
+  const vp = page.getViewport({ scale: 1 })
+  const tc = await page.getTextContent()
+
+  let rect = undefined
+  const rectSpec = flag('rect')
+  if (rectSpec) {
+    const nums = rectSpec.split(',').map((s) => parseFloat(s.trim()))
+    if (nums.length !== 4 || nums.some(Number.isNaN)) {
+      die('--rect 格式: x,y,w,h')
+    }
+    if (nums.every((n) => n >= 0 && n <= 1) && nums[2] <= 1 && nums[3] <= 1) {
+      rect = {
+        x: nums[0] * vp.width,
+        y: nums[1] * vp.height,
+        width: nums[2] * vp.width,
+        height: nums[3] * vp.height,
+      }
+    } else {
+      rect = { x: nums[0], y: nums[1], width: nums[2], height: nums[3] }
+    }
+  }
+
+  const items = tc.items
+    .filter((it) => 'str' in it && it.str && it.str.trim())
+    .map((it) => {
+      const h = it.height || Math.abs(it.transform?.[3] ?? 0) || 10
+      return {
+        str: it.str,
+        x: it.transform[4],
+        y: vp.height - it.transform[5] - h,
+        width: it.width || 0,
+        height: h,
+      }
+    })
+
+  await doc.destroy()
+  const res = extractLatexFromItems(items, rect, { yDirection: 'down', block })
+  if (args.includes('--json')) {
+    console.log(JSON.stringify({ file: path.resolve(file), page: p, ...res }, null, 2))
+  } else {
+    console.log(res.latex || res.body)
+  }
+}
+
+/**
+ * Aggregate sidecar .annotations.md files across a folder or explicit list of PDFs
+ * into a cross-document #tag topic digest Markdown literature review.
+ */
+async function cmdExportDigest(targets) {
+  const { readdir, writeFile } = await import('node:fs/promises')
+  if (!targets.length) die('用法: solopdf export-digest <dir-or-files...> [--group-by tag|document] [--tag t1,t2] [--out digest.md] [--json]')
+  const sidecars = []
+  for (const t of targets) {
+    if (t.startsWith('--')) break
+    if (!existsSync(t)) die(`文件或目录不存在: ${t}`)
+    const st = statSync(t)
+    if (st.isDirectory()) {
+      const entries = await readdir(t, { withFileTypes: true })
+      for (const e of entries) {
+        if (e.isFile() && /\.annotations\.md$/i.test(e.name)) {
+          sidecars.push(path.join(t, e.name))
+        }
+      }
+    } else if (/\.annotations\.md$/i.test(t)) {
+      sidecars.push(t)
+    } else {
+      const sc = sidecarOf(t)
+      if (existsSync(sc)) sidecars.push(sc)
+    }
+  }
+  const docs = []
+  for (const scFile of sidecars) {
+    const parsed = parse(await readFile(scFile, 'utf-8'))
+    if (!parsed.annotations.length) continue
+    const rawName = parsed.meta?.pdfName || path.basename(scFile).replace(/\.annotations\.md$/i, '.pdf')
+    const docTitle = rawName.replace(/\.[^.]+$/, '')
+    const pdfCandidate = scFile.replace(/\.annotations\.md$/i, '.pdf')
+    docs.push({
+      docTitle,
+      filePath: existsSync(pdfCandidate) ? path.resolve(pdfCandidate) : rawName,
+      annotations: parsed.annotations,
+    })
+  }
+  const groupBy = flag('group-by') === 'document' ? 'document' : 'tag'
+  const filterTags = flag('tag')
+    ? flag('tag').split(/[,，]/).map((s) => s.trim()).filter(Boolean)
+    : undefined
+  const res = buildTopicDigest(docs, {
+    groupBy,
+    tags: filterTags,
+  })
+  const outFile = flag('out')
+  if (outFile) {
+    await writeFile(outFile, res.markdown, 'utf-8')
+    console.error(`✓ ${outFile}`)
+  }
+  if (args.includes('--json')) {
+    console.log(JSON.stringify(res, null, 2))
+  } else if (!outFile) {
+    process.stdout.write(res.markdown)
+  }
+}
+
+/**
+ * Pixel-by-pixel visual comparison of two PDFs (Red/Cyan overlay + hotspots).
+ */
+async function cmdVisualDiff(fileA, fileB) {
+  if (!fileB) die('用法: solopdf visual-diff <old.pdf> <new.pdf> [--page 1] [--mode anaglyph|tint|diff-only] [--threshold 28] [--out out.png] [--json]')
+  const { createCanvas } = await canvasBackend()
+  const { writeFile } = await import('node:fs/promises')
+  const pageNum = Math.max(1, parseInt(flag('page') ?? '1', 10))
+  const dpi = Number(flag('dpi') ?? 120)
+  const threshold = Number(flag('threshold') ?? 28)
+  const mode = flag('mode') ?? 'anaglyph'
+
+  const docA = await open(fileA)
+  const docB = await open(fileB, flag('password-b') ?? flag('password'))
+  const pgA = await docA.getPage(Math.min(pageNum, docA.numPages))
+  const pgB = await docB.getPage(Math.min(pageNum, docB.numPages))
+  const scale = dpi / 72
+  const vpA = pgA.getViewport({ scale })
+  const vpB = pgB.getViewport({ scale })
+  const w = Math.max(Math.floor(vpA.width), Math.floor(vpB.width))
+  const h = Math.max(Math.floor(vpA.height), Math.floor(vpB.height))
+
+  const cA = createCanvas(w, h)
+  const ctxA = cA.getContext('2d')
+  ctxA.fillStyle = '#ffffff'
+  ctxA.fillRect(0, 0, w, h)
+  await pgA.render({ canvasContext: ctxA, viewport: vpA }).promise
+
+  const cB = createCanvas(w, h)
+  const ctxB = cB.getContext('2d')
+  ctxB.fillStyle = '#ffffff'
+  ctxB.fillRect(0, 0, w, h)
+  await pgB.render({ canvasContext: ctxB, viewport: vpB }).promise
+
+  const imgA = ctxA.getImageData(0, 0, w, h)
+  const imgB = ctxB.getImageData(0, 0, w, h)
+  const res = computeVisualDiff(imgA.data, w, h, imgB.data, w, h, { mode, threshold })
+
+  const outPng = flag('out')
+  if (outPng) {
+    const cOut = createCanvas(w, h)
+    const ctxOut = cOut.getContext('2d')
+    const outData = ctxOut.createImageData(w, h)
+    outData.data.set(res.rgba)
+    ctxOut.putImageData(outData, 0, 0)
+    await writeFile(outPng, cOut.toBuffer('image/png'))
+  }
+  await docA.destroy()
+  await docB.destroy()
+
+  console.log(JSON.stringify({
+    a: path.resolve(fileA),
+    b: path.resolve(fileB),
+    page: pageNum,
+    width: res.width,
+    height: res.height,
+    diffPixels: res.diffPixels,
+    totalPixels: res.totalPixels,
+    diffRatio: +res.diffRatio.toFixed(6),
+    hotspots: res.hotspots,
+    ...(outPng ? { written: path.resolve(outPng) } : {}),
+  }, null, 2))
+}
+
 /** text items of every page, the same filter the viewer applies */
 async function compareInput(doc) {
   const pages = []
@@ -1250,7 +1429,11 @@ async function compareInput(doc) {
 
 /** compare two PDFs → change list (same core algorithm as the app's compare view) */
 async function cmdCompare(fileA, fileB) {
-  if (!fileB) die('用法: solopdf compare <old.pdf> <new.pdf> [--json] [--password pw] [--password-b pw]')
+  if (!fileB) die('用法: solopdf compare <old.pdf> <new.pdf> [--json] [--visual] [--password pw] [--password-b pw]')
+  if (args.includes('--visual')) {
+    await cmdVisualDiff(fileA, fileB)
+    return
+  }
   const docA = await open(fileA)
   const docB = await open(fileB, flag('password-b') ?? flag('password'))
   const r = compareDocuments(await compareInput(docA), await compareInput(docB))
@@ -1531,6 +1714,79 @@ async function cmdSelftest(dir) {
       console.log(`FAIL v1.1 Stirling suite: ${e.message}`)
       fail++
     }
+
+    // 7. v1.1.0 Scan Mastery Phase 2 (deskew, binarize), Batch Pipeline, Visual Diff, Math Snip, Topic Digest
+    try {
+      const deskewPdf = path.join(tmp, 'deskewed.pdf')
+      const binarizePdf = path.join(tmp, 'binarized.pdf')
+      const batchOutDir = path.join(tmp, 'batch-out')
+      const batchSpecFile = path.join(tmp, 'batch-steps.json')
+      await writeFile(batchSpecFile, JSON.stringify([
+        { op: 'grayscale', whiten_bg: true },
+        { op: 'page_numbers', format: '{n}/{total}', position: 'bottom-center', start_number: 1, font_size: 10 },
+      ]), 'utf-8')
+
+      const deskewOut = JSON.parse(execFileSync(docBin(), ['deskew', samplePdf, deskewPdf]).toString())
+      if (!existsSync(deskewPdf) || !Array.isArray(deskewOut.angles)) {
+        throw new Error('doc deskew 失败')
+      }
+      execFileSync(docBin(), ['binarize', samplePdf, binarizePdf, '--window', '15', '--k', '0.2'], { stdio: 'pipe' })
+      if (!existsSync(binarizePdf) || statSync(binarizePdf).size < 100) {
+        throw new Error('doc binarize 失败')
+      }
+      const batchRes = JSON.parse(
+        execFileSync(docBin(), ['batch-pipeline', batchOutDir, batchSpecFile, samplePdf, smartPdf]).toString(),
+      )
+      if (!Array.isArray(batchRes.outputs) || batchRes.outputs.length !== 2) {
+        throw new Error(`doc batch-pipeline 输出数量异常: ${JSON.stringify(batchRes)}`)
+      }
+
+      // Math snip + Topic digest + Visual diff
+      const mathRes = extractLatexFromItems([
+        { str: 'E', x: 10, y: 10, width: 8, height: 12 },
+        { str: '=', x: 22, y: 10, width: 8, height: 12 },
+        { str: 'mc', x: 34, y: 10, width: 14, height: 12 },
+        { str: '2', x: 49, y: 6, width: 5, height: 7 },
+      ], undefined, { yDirection: 'down' })
+      if (!mathRes.latex.includes('mc^2')) throw new Error(`extractLatexFromItems 异常: ${mathRes.latex}`)
+
+      const scPath = path.join(dir, 'chinese-wikipedia-hanzi.annotations.md')
+      const sc = parse(await readFile(scPath, 'utf-8'))
+      const digest = buildTopicDigest([{ docTitle: 'Hanzi', filePath: 'chinese-wikipedia-hanzi.pdf', annotations: sc.annotations }])
+      if (!digest.markdown.includes('# ') || digest.totalAnnotations < 1) {
+        throw new Error('buildTopicDigest 生成异常')
+      }
+
+      const v1Pdf = path.join(dir, 'form-irs-w9.pdf')
+      const v2Pdf = path.join(dir, 'scanned-no-textlayer.pdf')
+      const { createCanvas } = await canvasBackend()
+      const dA = await open(v1Pdf)
+      const dB = await open(v2Pdf)
+      const pA = await dA.getPage(1)
+      const pB = await dB.getPage(1)
+      const vp = pA.getViewport({ scale: 1 })
+      const w = Math.floor(vp.width)
+      const h = Math.floor(vp.height)
+      const cA = createCanvas(w, h)
+      const cB = createCanvas(w, h)
+      const xA = cA.getContext('2d')
+      const xB = cB.getContext('2d')
+      xA.fillStyle = '#fff'; xA.fillRect(0, 0, w, h)
+      xB.fillStyle = '#fff'; xB.fillRect(0, 0, w, h)
+      await pA.render({ canvasContext: xA, viewport: vp }).promise
+      await pB.render({ canvasContext: xB, viewport: pB.getViewport({ scale: 1 }) }).promise
+      const vdiff = computeVisualDiff(xA.getImageData(0, 0, w, h).data, w, h, xB.getImageData(0, 0, w, h).data, w, h)
+      await dA.destroy()
+      await dB.destroy()
+      if (vdiff.diffPixels <= 0 || vdiff.hotspots.length < 1) {
+        throw new Error(`computeVisualDiff 未检测到差异: diffPixels=${vdiff.diffPixels}`)
+      }
+      console.log(`PASS v1.1.0 Complete Suite (deskew, binarize, batch-pipeline, math-snip, topic-digest, visual-diff Δ=${(vdiff.diffRatio * 100).toFixed(2)}%)`)
+      pass++
+    } catch (e) {
+      console.log(`FAIL v1.1.0 Complete Suite: ${e.message}`)
+      fail++
+    }
   } finally {
     await rm(tmp, { recursive: true, force: true })
   }
@@ -1562,11 +1818,14 @@ switch (cmd) {
   case 'redact-text': await cmdRedactText(file ?? die('用法: solopdf redact-text <file.pdf> [--out x.pdf] [--terms a,b] [--presets phone,email,idcard] [--dry-run]')); break
   case 'outlines': await cmdOutlines(file ?? die('用法: solopdf outlines <file.pdf> [--auto] [--mode auto|fontsize|regex] [--regex pattern] [--import tree.json] [--out out.pdf] [--password pw]')); break
   case 'extract-table': await cmdExtractTable(file ?? die('用法: solopdf extract-table <file.pdf> [--page 1] [--rect x,y,w,h] [--format md|csv|json] [--password pw]')); break
+  case 'extract-math': await cmdExtractMath(file ?? die('用法: solopdf extract-math <file.pdf> [--page 1] [--rect x,y,w,h] [--block] [--json] [--password pw]')); break
   case 'export-flashcards': await cmdExportFlashcards(file ?? die('用法: solopdf export-flashcards <file.pdf> [--format anki|obsidian] [--tag tag] [--color color] [--cloze] [--out file]')); break
+  case 'export-digest': await cmdExportDigest(args.slice(1)); break
   case 'verify-signatures': await cmdVerifySignatures(file ?? die('用法: solopdf verify-signatures <file.pdf> [--password pw]')); break
   case 'cite': await cmdCite(file ?? die('用法: solopdf cite <file.pdf> [--format bibtex|apa|gbt|all|json] [--online]')); break
   case 'auto-rename': await cmdAutoRename(file ?? die('用法: solopdf auto-rename <file.pdf> [--template "{year} - {author} - {title}"] [--out-dir dir] [--json]')); break
-  case 'compare': await cmdCompare(file ?? die('用法: solopdf compare <old.pdf> <new.pdf> [--json]'), args[2]); break
+  case 'compare': await cmdCompare(file ?? die('用法: solopdf compare <old.pdf> <new.pdf> [--json] [--visual]'), args[2]); break
+  case 'visual-diff': await cmdVisualDiff(file ?? die('用法: solopdf visual-diff <old.pdf> <new.pdf> [--page 1] [--out diff.png]'), args[2]); break
   case 'ask': await cmdAsk(file ?? die('用法: solopdf ask <file.pdf> "问题"'), args[2]); break
   case 'summarize': await cmdSummarize(file ?? die('用法: solopdf summarize <file.pdf> [--page N]')); break
   case 'retrieve': await cmdRetrieve(file ?? die('用法: solopdf retrieve <file.pdf> "query"'), args[2]); break
@@ -1589,8 +1848,14 @@ switch (cmd) {
                                                    读取/智能生成/写入 PDF 目录书签（Outlines）
   solopdf extract-table <file.pdf> [--page 1] [--rect x,y,w,h] [--format md|csv|json]
                                                    页面或框选区域表格提取（Markdown / CSV / JSON）
+  solopdf extract-math <file.pdf> [--page 1] [--rect x,y,w,h] [--block] [--json]
+                                                   页面或框选区域数学公式识别与 LaTeX 转换（$...$ / $$...$$）
   solopdf export-flashcards <file.pdf> [--format anki|obsidian] [--tag t] [--color c] [--cloze] [--out file]
                                                    伴生批注导出为 Anki TSV 或 Obsidian SR 闪卡
+  solopdf export-digest <dir-or-files...> [--group-by tag|document] [--tag t1,t2] [--out digest.md]
+                                                   跨文档 #标签 专题综述导出（生成带目录与深链的 Markdown 文献综述）
+  solopdf visual-diff <old.pdf> <new.pdf> [--page 1] [--mode anaglyph|tint|diff-only] [--out diff.png]
+                                                   像素级视觉叠印对比（红/青差分图 + 变动热点框选 + 差异百分比）
   solopdf verify-signatures <file.pdf>             校验 PDF 数字签名（ByteRange 完整性、篡改检测、签署人信息）
   solopdf ocr <file.pdf|img> [--out x.pdf|x.md]    本地 OCR：扫描件 → 可搜索 PDF / Markdown
   solopdf annotate <file.pdf> [--out x.pdf]        伴生批注 → 标准 PDF 注释（副本）
@@ -1615,7 +1880,7 @@ switch (cmd) {
   extract-images / sanitize / flatten / redact / outlines / set-outlines /
   nup / booklet / grayscale / resize / verify-signatures / cert-sign /
   split-2up / single-page / detect-blank / remove-blank / overlay /
-  attachments-list / attachments-add / attachments-remove / pipeline /
-  info / djvu-info / djvu-page`)
+  deskew / binarize / attachments-list / attachments-add / attachments-remove /
+  pipeline / batch-pipeline / info / djvu-info / djvu-page`)
     process.exit(cmd ? 1 : 0)
 }

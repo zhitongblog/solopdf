@@ -1211,6 +1211,65 @@ async fn pdf_remove_attachments(
     .map_err(|e| e.to_string())?
 }
 
+#[derive(Serialize)]
+struct DeskewResult {
+    path: String,
+    angles: Vec<f32>,
+}
+
+#[tauri::command]
+async fn pdf_deskew(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    max_angle: Option<f32>,
+    clean_borders: Option<f32>,
+) -> Result<DeskewResult, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-deskewed", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        let (out_bytes, angles) = pdfops::deskew_pdf(
+            &pdf,
+            password.as_deref(),
+            max_angle.unwrap_or(12.0),
+            clean_borders.unwrap_or(0.02),
+        )?;
+        let path = write_out(dest, out_bytes)?;
+        Ok(DeskewResult { path, angles })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_binarize(
+    app: tauri::AppHandle,
+    src_path: String,
+    dest_path: Option<String>,
+    password: Option<String>,
+    k: Option<f32>,
+    window_size: Option<u32>,
+    clean_borders: Option<f32>,
+) -> Result<String, String> {
+    let dest = resolve_dest(&app, &src_path, dest_path, "-binarized", "pdf")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
+        write_out(
+            dest,
+            pdfops::binarize_pdf(
+                &pdf,
+                password.as_deref(),
+                k.unwrap_or(0.2),
+                window_size.unwrap_or(31),
+                clean_borders.unwrap_or(0.02),
+            )?,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 async fn pdf_run_pipeline(
     app: tauri::AppHandle,
@@ -1223,6 +1282,40 @@ async fn pdf_run_pipeline(
     tauri::async_runtime::spawn_blocking(move || {
         let pdf = fs::read(&src_path).map_err(|e| format!("读取失败: {e}"))?;
         write_out(dest, pdfops::run_pipeline(&pdf, password.as_deref(), &steps)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn pdf_batch_pipeline(
+    app: tauri::AppHandle,
+    src_paths: Vec<String>,
+    dest_dir: Option<String>,
+    password: Option<String>,
+    steps: Vec<pdfops::PipelineStep>,
+) -> Result<Vec<String>, String> {
+    if src_paths.is_empty() {
+        return Err("没有选择待处理的 PDF 文件".into());
+    }
+    let dir = match dest_dir {
+        Some(d) if !d.trim().is_empty() => PathBuf::from(d),
+        _ => app.path().document_dir().map_err(|e| e.to_string())?,
+    };
+    fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut outputs = Vec::with_capacity(src_paths.len());
+        for src in &src_paths {
+            let pdf = fs::read(src).map_err(|e| format!("读取 {src} 失败: {e}"))?;
+            let out_bytes = pdfops::run_pipeline(&pdf, password.as_deref(), &steps)?;
+            let stem = Path::new(src)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "document".into());
+            let out_path = dir.join(format!("{stem}-pipeline.pdf"));
+            outputs.push(write_out(out_path, out_bytes)?);
+        }
+        Ok(outputs)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1979,7 +2072,10 @@ pub fn run() {
             pdf_list_attachments,
             pdf_add_attachments,
             pdf_remove_attachments,
+            pdf_deskew,
+            pdf_binarize,
             pdf_run_pipeline,
+            pdf_batch_pipeline,
             iap::iap_get_state,
             iap::iap_fetch_products,
             iap::iap_purchase,

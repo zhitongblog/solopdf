@@ -4014,6 +4014,537 @@ pub fn remove_embedded_attachments(
     save(&mut doc)
 }
 
+// ── Scan Auto-Deskew, Border Cleanup & Sauvola Adaptive Binarization ────
+
+fn clean_scan_borders_luma(gray: &mut [u8], w: u32, h: u32, border_ratio: f32) {
+    let r = border_ratio.clamp(0.0, 0.15);
+    if r <= 0.0 || w < 8 || h < 8 {
+        return;
+    }
+    let bx = ((w as f32 * r).round() as u32).max(1).min(w / 4);
+    let by = ((h as f32 * r).round() as u32).max(1).min(h / 4);
+    let wu = w as usize;
+    let hu = h as usize;
+    let bxu = bx as usize;
+    let byu = by as usize;
+
+    for y in 0..hu {
+        let in_tb = y < byu || y >= hu - byu;
+        let row_off = y * wu;
+        if in_tb {
+            for x in 0..wu {
+                gray[row_off + x] = 255;
+            }
+        } else {
+            for x in 0..bxu {
+                gray[row_off + x] = 255;
+            }
+            for x in (wu - bxu)..wu {
+                gray[row_off + x] = 255;
+            }
+        }
+    }
+}
+
+fn clean_scan_borders_rgb(rgb: &mut [u8], w: u32, h: u32, border_ratio: f32) {
+    let r = border_ratio.clamp(0.0, 0.15);
+    if r <= 0.0 || w < 8 || h < 8 {
+        return;
+    }
+    let bx = ((w as f32 * r).round() as u32).max(1).min(w / 4);
+    let by = ((h as f32 * r).round() as u32).max(1).min(h / 4);
+    let wu = w as usize;
+    let hu = h as usize;
+    let bxu = bx as usize;
+    let byu = by as usize;
+
+    for y in 0..hu {
+        let in_tb = y < byu || y >= hu - byu;
+        let row_off = y * wu * 3;
+        if in_tb {
+            for x in 0..(wu * 3) {
+                rgb[row_off + x] = 255;
+            }
+        } else {
+            for x in 0..(bxu * 3) {
+                rgb[row_off + x] = 255;
+            }
+            for x in ((wu - bxu) * 3)..(wu * 3) {
+                rgb[row_off + x] = 255;
+            }
+        }
+    }
+}
+
+/// Detect the skew angle (in degrees, `[-max_angle, +max_angle]`) of a grayscale scan
+/// by maximizing the horizontal projection profile variance of dark ink pixels.
+/// Returns the correction angle in degrees to rotate counter-clockwise/clockwise so lines are horizontal.
+pub fn detect_skew_angle_luma(gray: &[u8], w: u32, h: u32, max_angle_deg: f32) -> f32 {
+    if w < 16 || h < 16 || gray.len() < (w * h) as usize {
+        return 0.0;
+    }
+    let max_a = max_angle_deg.clamp(1.0, 20.0);
+    let step_x = ((w as usize) / 480).max(1);
+    let step_y = ((h as usize) / 480).max(1);
+    let margin_x = (w as usize / 16).max(2);
+    let margin_y = (h as usize / 16).max(2);
+    let cx = w as f32 * 0.5;
+    let cy = h as f32 * 0.5;
+
+    let mut ink_pts: Vec<(f32, f32)> = Vec::new();
+    for y in (margin_y..(h as usize - margin_y)).step_by(step_y) {
+        let row = y * (w as usize);
+        for x in (margin_x..(w as usize - margin_x)).step_by(step_x) {
+            if gray[row + x] < 185 {
+                ink_pts.push((x as f32 - cx, y as f32 - cy));
+            }
+        }
+    }
+
+    if ink_pts.len() < 24 {
+        return 0.0;
+    }
+
+    let diag = ((w as f32).hypot(h as f32).ceil() as usize).max(32);
+    let half_diag = (diag / 2) as i32;
+    let mut hist = vec![0u32; diag + 4];
+
+    let score_angle = |deg: f32, hist: &mut [u32]| -> u64 {
+        hist.fill(0);
+        let rad = deg.to_radians();
+        let (sin_a, cos_a) = rad.sin_cos();
+        for &(dx, dy) in &ink_pts {
+            let ry = (-dx * sin_a + dy * cos_a).round() as i32 + half_diag;
+            if ry >= 0 && (ry as usize) + 1 < hist.len() {
+                hist[ry as usize] += 1;
+            }
+        }
+        let mut energy = 0u64;
+        for w2 in hist.windows(2) {
+            let diff = w2[0].abs_diff(w2[1]) as u64;
+            energy += diff * diff + (w2[0] as u64) * (w2[0] as u64);
+        }
+        energy
+    };
+
+    // Coarse search: 0.5 degree step
+    let mut best_deg = 0.0f32;
+    let mut best_score = score_angle(0.0, &mut hist);
+    let coarse_steps = (max_a * 2.0).round() as i32;
+    for s in -coarse_steps..=coarse_steps {
+        let deg = s as f32 * 0.5;
+        let sc = score_angle(deg, &mut hist);
+        if sc > best_score {
+            best_score = sc;
+            best_deg = deg;
+        }
+    }
+
+    // Fine search: 0.1 degree step around best coarse angle
+    let center = best_deg;
+    for s in -6..=6 {
+        let deg = (center + s as f32 * 0.1).clamp(-max_a, max_a);
+        let sc = score_angle(deg, &mut hist);
+        if sc > best_score {
+            best_score = sc;
+            best_deg = deg;
+        }
+    }
+
+    if best_deg.abs() < 0.15 {
+        0.0
+    } else {
+        (best_deg * 10.0).round() / 10.0
+    }
+}
+
+fn rotate_luma_bilinear(gray: &[u8], w: u32, h: u32, angle_deg: f32) -> Vec<u8> {
+    if angle_deg.abs() < 0.05 {
+        return gray[..(w * h) as usize].to_vec();
+    }
+    let wu = w as usize;
+    let hu = h as usize;
+    let mut out = vec![255u8; wu * hu];
+    let cx = w as f32 * 0.5;
+    let cy = h as f32 * 0.5;
+    // Forward transform aligned ink rows via: y' = -dx * sin(a) + dy * cos(a)
+    // So inverse mapping from destination (dx', dy') to source (dx, dy) is:
+    //   dx =  dx' * cos(a) - dy' * sin(a)
+    //   dy =  dx' * sin(a) + dy' * cos(a)
+    let rad = angle_deg.to_radians();
+    let (sin_a, cos_a) = rad.sin_cos();
+
+    for y in 0..hu {
+        let dy_p = y as f32 - cy;
+        for x in 0..wu {
+            let dx_p = x as f32 - cx;
+            let sx = dx_p * cos_a - dy_p * sin_a + cx;
+            let sy = dx_p * sin_a + dy_p * cos_a + cy;
+            if sx >= 0.0 && sy >= 0.0 && sx < (w - 1) as f32 && sy < (h - 1) as f32 {
+                let x0 = sx as usize;
+                let y0 = sy as usize;
+                let fx = sx - x0 as f32;
+                let fy = sy - y0 as f32;
+                let p00 = gray[y0 * wu + x0] as f32;
+                let p10 = gray[y0 * wu + x0 + 1] as f32;
+                let p01 = gray[(y0 + 1) * wu + x0] as f32;
+                let p11 = gray[(y0 + 1) * wu + x0 + 1] as f32;
+                let top = p00 + fx * (p10 - p00);
+                let bot = p01 + fx * (p11 - p01);
+                let val = (top + fy * (bot - top)).round().clamp(0.0, 255.0) as u8;
+                out[y * wu + x] = val;
+            }
+        }
+    }
+    out
+}
+
+fn rotate_rgb_bilinear(rgb: &[u8], w: u32, h: u32, angle_deg: f32) -> Vec<u8> {
+    if angle_deg.abs() < 0.05 {
+        return rgb[..(w * h * 3) as usize].to_vec();
+    }
+    let wu = w as usize;
+    let hu = h as usize;
+    let mut out = vec![255u8; wu * hu * 3];
+    let cx = w as f32 * 0.5;
+    let cy = h as f32 * 0.5;
+    let rad = angle_deg.to_radians();
+    let (sin_a, cos_a) = rad.sin_cos();
+
+    for y in 0..hu {
+        let dy_p = y as f32 - cy;
+        for x in 0..wu {
+            let dx_p = x as f32 - cx;
+            let sx = dx_p * cos_a - dy_p * sin_a + cx;
+            let sy = dx_p * sin_a + dy_p * cos_a + cy;
+            if sx >= 0.0 && sy >= 0.0 && sx < (w - 1) as f32 && sy < (h - 1) as f32 {
+                let x0 = sx as usize;
+                let y0 = sy as usize;
+                let fx = sx - x0 as f32;
+                let fy = sy - y0 as f32;
+                let i00 = (y0 * wu + x0) * 3;
+                let i10 = (y0 * wu + x0 + 1) * 3;
+                let i01 = ((y0 + 1) * wu + x0) * 3;
+                let i11 = ((y0 + 1) * wu + x0 + 1) * 3;
+                let dst = (y * wu + x) * 3;
+                for c in 0..3 {
+                    let p00 = rgb[i00 + c] as f32;
+                    let p10 = rgb[i10 + c] as f32;
+                    let p01 = rgb[i01 + c] as f32;
+                    let p11 = rgb[i11 + c] as f32;
+                    let top = p00 + fx * (p10 - p00);
+                    let bot = p01 + fx * (p11 - p01);
+                    out[dst + c] = (top + fy * (bot - top)).round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Auto-deskew embedded scan images in a PDF and optionally whiten dark scanner edge borders.
+/// Returns `(new_pdf_bytes, detected_angles_in_degrees)`.
+pub fn deskew_pdf(
+    pdf: &[u8],
+    password: Option<&str>,
+    max_angle: f32,
+    clean_borders: f32,
+) -> R<(Vec<u8>, Vec<f32>)> {
+    let mut doc = load(pdf, password)?;
+    let max_a = max_angle.clamp(1.0, 20.0);
+    let border_r = clean_borders.clamp(0.0, 0.15);
+    let mut angles = Vec::new();
+
+    let all_ids: Vec<ObjectId> = doc.objects.keys().copied().collect();
+    for id in all_ids {
+        let Ok(stream) = doc.get_object(id).and_then(Object::as_stream).cloned() else {
+            continue;
+        };
+        let subtype = stream
+            .dict
+            .get(b"Subtype")
+            .and_then(Object::as_name)
+            .unwrap_or(b"");
+        if subtype != b"Image" {
+            continue;
+        }
+        let w = stream.dict.get(b"Width").and_then(Object::as_i64).unwrap_or(0) as u32;
+        let h = stream.dict.get(b"Height").and_then(Object::as_i64).unwrap_or(0) as u32;
+        if w < 16 || h < 16 {
+            continue;
+        }
+        let bpc = stream
+            .dict
+            .get(b"BitsPerComponent")
+            .and_then(Object::as_i64)
+            .unwrap_or(8);
+        if bpc != 8 {
+            continue;
+        }
+        let cs = stream
+            .dict
+            .get(b"ColorSpace")
+            .and_then(Object::as_name)
+            .unwrap_or(b"")
+            .to_vec();
+        let filters = stream.filters().unwrap_or_default();
+        let is_jpeg = filters.iter().any(|f| *f == b"DCTDecode");
+
+        if is_jpeg {
+            let Ok(img) = image::load_from_memory(&stream.content) else {
+                continue;
+            };
+            let mut luma = img.to_luma8().into_raw();
+            if border_r > 0.0 {
+                clean_scan_borders_luma(&mut luma, w, h, border_r);
+            }
+            let angle = detect_skew_angle_luma(&luma, w, h, max_a);
+            angles.push(angle);
+            if angle.abs() < 0.15 && border_r <= 0.0 {
+                continue;
+            }
+            if cs == b"DeviceGray" {
+                let rotated = rotate_luma_bilinear(&luma, w, h, angle);
+                let mut dict = stream.dict.clone();
+                dict.set("ColorSpace", Object::Name(b"DeviceGray".to_vec()));
+                dict.set("BitsPerComponent", Object::Integer(8));
+                dict.remove(b"Filter");
+                dict.remove(b"DecodeParms");
+                let mut new_stream = Stream::new(dict, rotated);
+                let _ = new_stream.compress();
+                doc.objects.insert(id, Object::Stream(new_stream));
+            } else {
+                let mut rgb = img.to_rgb8().into_raw();
+                if border_r > 0.0 {
+                    clean_scan_borders_rgb(&mut rgb, w, h, border_r);
+                }
+                let rotated = rotate_rgb_bilinear(&rgb, w, h, angle);
+                let mut dict = stream.dict.clone();
+                dict.set("ColorSpace", Object::Name(b"DeviceRGB".to_vec()));
+                dict.set("BitsPerComponent", Object::Integer(8));
+                dict.remove(b"Filter");
+                dict.remove(b"DecodeParms");
+                let mut new_stream = Stream::new(dict, rotated);
+                let _ = new_stream.compress();
+                doc.objects.insert(id, Object::Stream(new_stream));
+            }
+        } else if let Ok(raw) = stream.decompressed_content() {
+            if cs == b"DeviceGray" && raw.len() >= (w * h) as usize {
+                let mut luma = raw[..(w * h) as usize].to_vec();
+                if border_r > 0.0 {
+                    clean_scan_borders_luma(&mut luma, w, h, border_r);
+                }
+                let angle = detect_skew_angle_luma(&luma, w, h, max_a);
+                angles.push(angle);
+                if angle.abs() < 0.15 && border_r <= 0.0 {
+                    continue;
+                }
+                let rotated = rotate_luma_bilinear(&luma, w, h, angle);
+                let mut dict = stream.dict.clone();
+                dict.remove(b"Filter");
+                dict.remove(b"DecodeParms");
+                let mut new_stream = Stream::new(dict, rotated);
+                let _ = new_stream.compress();
+                doc.objects.insert(id, Object::Stream(new_stream));
+            } else if cs == b"DeviceRGB" && raw.len() >= (w * h * 3) as usize {
+                let mut rgb = raw[..(w * h * 3) as usize].to_vec();
+                if border_r > 0.0 {
+                    clean_scan_borders_rgb(&mut rgb, w, h, border_r);
+                }
+                let mut luma = Vec::with_capacity((w * h) as usize);
+                for px in rgb.chunks_exact(3) {
+                    luma.push(((77u32 * px[0] as u32 + 150u32 * px[1] as u32 + 29u32 * px[2] as u32) >> 8) as u8);
+                }
+                let angle = detect_skew_angle_luma(&luma, w, h, max_a);
+                angles.push(angle);
+                if angle.abs() < 0.15 && border_r <= 0.0 {
+                    continue;
+                }
+                let rotated = rotate_rgb_bilinear(&rgb, w, h, angle);
+                let mut dict = stream.dict.clone();
+                dict.remove(b"Filter");
+                dict.remove(b"DecodeParms");
+                let mut new_stream = Stream::new(dict, rotated);
+                let _ = new_stream.compress();
+                doc.objects.insert(id, Object::Stream(new_stream));
+            }
+        }
+    }
+
+    Ok((save(&mut doc)?, angles))
+}
+
+/// Sauvola adaptive local thresholding using 2D integral images (`sum` and `sq_sum`)
+/// for O(1) window mean and standard deviation per pixel.
+pub fn sauvola_binarize_luma(gray: &[u8], w: u32, h: u32, k: f32, window_size: u32) -> Vec<u8> {
+    let wu = w as usize;
+    let hu = h as usize;
+    if wu == 0 || hu == 0 || gray.len() < wu * hu {
+        return Vec::new();
+    }
+    let k_val = k.clamp(0.02, 0.65);
+    let win = (window_size.clamp(7, 121) | 1) as usize;
+    let radius = win / 2;
+
+    let stride = wu + 1;
+    let mut sum = vec![0u64; stride * (hu + 1)];
+    let mut sq_sum = vec![0u64; stride * (hu + 1)];
+
+    for y in 0..hu {
+        let mut row_s = 0u64;
+        let mut row_sq = 0u64;
+        let src_off = y * wu;
+        let prev_off = y * stride;
+        let cur_off = (y + 1) * stride;
+        for x in 0..wu {
+            let v = gray[src_off + x] as u64;
+            row_s += v;
+            row_sq += v * v;
+            sum[cur_off + x + 1] = sum[prev_off + x + 1] + row_s;
+            sq_sum[cur_off + x + 1] = sq_sum[prev_off + x + 1] + row_sq;
+        }
+    }
+
+    let mut out = vec![255u8; wu * hu];
+    for y in 0..hu {
+        let y0 = y.saturating_sub(radius);
+        let y1 = (y + radius + 1).min(hu);
+        for x in 0..wu {
+            let px = gray[y * wu + x];
+            if px >= 244 {
+                continue;
+            }
+            let x0 = x.saturating_sub(radius);
+            let x1 = (x + radius + 1).min(wu);
+            let count = ((x1 - x0) * (y1 - y0)).max(1) as f32;
+
+            let s = sum[y1 * stride + x1] + sum[y0 * stride + x0]
+                - sum[y0 * stride + x1]
+                - sum[y1 * stride + x0];
+            let sq = sq_sum[y1 * stride + x1] + sq_sum[y0 * stride + x0]
+                - sq_sum[y0 * stride + x1]
+                - sq_sum[y1 * stride + x0];
+
+            let mean = s as f32 / count;
+            let variance = ((sq as f32 / count) - mean * mean).max(0.0);
+            let std_dev = variance.sqrt();
+            let threshold = mean * (1.0 + k_val * (std_dev / 128.0 - 1.0));
+
+            if (px as f32) <= threshold {
+                out[y * wu + x] = 0;
+            }
+        }
+    }
+    out
+}
+
+/// Convert a PDF (especially uneven/shadowed document scans or phone photos) into crisp
+/// black-and-white using Sauvola local adaptive thresholding (`k`, `window_size`, `clean_borders`).
+pub fn binarize_pdf(
+    pdf: &[u8],
+    password: Option<&str>,
+    k: f32,
+    window_size: u32,
+    clean_borders: f32,
+) -> R<Vec<u8>> {
+    let mut doc = load(pdf, password)?;
+    let border_r = clean_borders.clamp(0.0, 0.15);
+
+    // 1. Rewrite vector page content streams to grayscale
+    for page_id in page_ids(&doc) {
+        if let Ok(raw) = doc.get_page_content(page_id) {
+            if let Some(gray_bytes) = rewrite_stream_to_grayscale(&raw) {
+                let new_stream = doc.add_object(Stream::new(dictionary! {}, gray_bytes));
+                if let Ok(d) = doc.get_dictionary_mut(page_id) {
+                    d.set("Contents", Object::Reference(new_stream));
+                }
+            }
+        }
+    }
+
+    // 2. Binarize embedded Image XObjects with Sauvola local thresholding
+    let all_ids: Vec<ObjectId> = doc.objects.keys().copied().collect();
+    for id in all_ids {
+        let Ok(stream) = doc.get_object(id).and_then(Object::as_stream).cloned() else {
+            continue;
+        };
+        let subtype = stream
+            .dict
+            .get(b"Subtype")
+            .and_then(Object::as_name)
+            .unwrap_or(b"");
+        if subtype != b"Image" {
+            continue;
+        }
+        let w = stream.dict.get(b"Width").and_then(Object::as_i64).unwrap_or(0) as u32;
+        let h = stream.dict.get(b"Height").and_then(Object::as_i64).unwrap_or(0) as u32;
+        if w == 0 || h == 0 {
+            continue;
+        }
+        let bpc = stream
+            .dict
+            .get(b"BitsPerComponent")
+            .and_then(Object::as_i64)
+            .unwrap_or(8);
+        if bpc != 8 {
+            continue;
+        }
+        let cs = stream
+            .dict
+            .get(b"ColorSpace")
+            .and_then(Object::as_name)
+            .unwrap_or(b"");
+        if cs != b"DeviceRGB" && cs != b"DeviceGray" {
+            continue;
+        }
+
+        let filters = stream.filters().unwrap_or_default();
+        let is_jpeg = filters.iter().any(|f| *f == b"DCTDecode");
+
+        let gray_pixels: Option<Vec<u8>> = if is_jpeg {
+            image::load_from_memory(&stream.content)
+                .ok()
+                .map(|img| img.to_luma8().into_raw())
+        } else if let Ok(raw) = stream.decompressed_content() {
+            if cs == b"DeviceRGB" && raw.len() >= (w * h * 3) as usize {
+                let mut luma = Vec::with_capacity((w * h) as usize);
+                for rgb in raw[..(w * h * 3) as usize].chunks_exact(3) {
+                    let y = ((77u32 * rgb[0] as u32
+                        + 150u32 * rgb[1] as u32
+                        + 29u32 * rgb[2] as u32
+                        + 128)
+                        >> 8) as u8;
+                    luma.push(y);
+                }
+                Some(luma)
+            } else if cs == b"DeviceGray" && raw.len() >= (w * h) as usize {
+                Some(raw[..(w * h) as usize].to_vec())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(mut gray) = gray_pixels {
+            if border_r > 0.0 {
+                clean_scan_borders_luma(&mut gray, w, h, border_r);
+            }
+            let bw = sauvola_binarize_luma(&gray, w, h, k, window_size);
+            let mut dict = stream.dict.clone();
+            dict.set("ColorSpace", Object::Name(b"DeviceGray".to_vec()));
+            dict.set("BitsPerComponent", Object::Integer(8));
+            dict.remove(b"Filter");
+            dict.remove(b"DecodeParms");
+            let mut new_stream = Stream::new(dict, bw);
+            let _ = new_stream.compress();
+            doc.objects.insert(id, Object::Stream(new_stream));
+        }
+    }
+
+    save(&mut doc)
+}
+
 // ── Automated Multi-Step PDF Pipeline ────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4036,6 +4567,20 @@ pub enum PipelineStep {
         #[serde(default)]
         pages: Vec<u32>,
         degrees: i64,
+    },
+    Deskew {
+        #[serde(default = "default_deskew_max_angle")]
+        max_angle: f32,
+        #[serde(default = "default_deskew_clean_borders")]
+        clean_borders: f32,
+    },
+    Binarize {
+        #[serde(default = "default_binarize_k")]
+        k: f32,
+        #[serde(default = "default_binarize_window")]
+        window_size: u32,
+        #[serde(default = "default_deskew_clean_borders")]
+        clean_borders: f32,
     },
     Grayscale {
         #[serde(default)]
@@ -4070,6 +4615,18 @@ pub enum PipelineStep {
 fn default_blank_threshold() -> f32 {
     0.005
 }
+fn default_deskew_max_angle() -> f32 {
+    12.0
+}
+fn default_deskew_clean_borders() -> f32 {
+    0.02
+}
+fn default_binarize_k() -> f32 {
+    0.2
+}
+fn default_binarize_window() -> u32 {
+    31
+}
 fn default_compress_dim() -> u32 {
     1600
 }
@@ -4103,6 +4660,15 @@ pub fn run_pipeline(
             PipelineStep::Rotate { pages, degrees } => {
                 rotate_pages(&current, pw_ref, pages, *degrees)?
             }
+            PipelineStep::Deskew {
+                max_angle,
+                clean_borders,
+            } => deskew_pdf(&current, pw_ref, *max_angle, *clean_borders)?.0,
+            PipelineStep::Binarize {
+                k,
+                window_size,
+                clean_borders,
+            } => binarize_pdf(&current, pw_ref, *k, *window_size, *clean_borders)?,
             PipelineStep::Grayscale { whiten_bg } => grayscale_pdf(&current, pw_ref, *whiten_bg)?,
             PipelineStep::Resize { width, height } => {
                 normalize_page_size(&current, pw_ref, *width, *height)?
@@ -5096,5 +5662,82 @@ mod tests {
         assert!(c1.contains("/SoloWm0 Do"), "watermark applied by step 2");
         assert!(c1.contains("/SoloPn1 Do"), "page numbers applied by step 3");
     }
+
+    #[test]
+    fn deskew_detects_and_corrects_skewed_scan_and_cleans_borders() {
+        // Synthesize a 240x240 grayscale scan with horizontal text-like lines tilted by +4.0 degrees
+        // plus a dark scanner border along the top row.
+        let w = 240u32;
+        let h = 240u32;
+        let mut base = vec![255u8; (w * h) as usize];
+        for row_y in [60usize, 90, 120, 150, 180] {
+            for dy in 0..4 {
+                for x in 35..205 {
+                    base[(row_y + dy) * (w as usize) + x] = 20;
+                }
+            }
+        }
+        // Tilt the image by -4.0 degrees so the correction angle needed is +4.0 degrees
+        let mut tilted = rotate_luma_bilinear(&base, w, h, -4.0);
+        // Paint a dark scanner artifact along row 0..3
+        for y in 0..3 {
+            for x in 0..(w as usize) {
+                tilted[y * (w as usize) + x] = 10;
+            }
+        }
+
+        let mut png = Vec::new();
+        image::DynamicImage::ImageLuma8(
+            image::GrayImage::from_raw(w, h, tilted.clone()).unwrap(),
+        )
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+
+        let scan_pdf = images_to_pdf(&[png], 72.0).unwrap();
+        let (deskewed_pdf, angles) = deskew_pdf(&scan_pdf, None, 12.0, 0.03).unwrap();
+        assert_eq!(angles.len(), 1);
+        assert!(
+            (angles[0] - 4.0).abs() <= 0.8,
+            "expected detected skew ~4.0 deg, got {}",
+            angles[0]
+        );
+        // Re-running deskew on the already-deskewed PDF should find ~0 skew
+        let (_, after_angles) = deskew_pdf(&deskewed_pdf, None, 12.0, 0.0).unwrap();
+        assert!(
+            after_angles[0].abs() <= 0.6,
+            "residual skew after deskew must be near 0, got {}",
+            after_angles[0]
+        );
+    }
+
+    #[test]
+    fn sauvola_binarize_turns_shadowed_scan_into_crisp_bw() {
+        let w = 120u32;
+        let h = 80u32;
+        let mut img = image::RgbImage::from_pixel(w, h, image::Rgb([195, 190, 185]));
+        // Draw dark ink strokes on a shadowed background
+        for x in 20..100 {
+            for y in 36..42 {
+                img.put_pixel(x, y, image::Rgb([35, 35, 35]));
+            }
+        }
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let scan_pdf = images_to_pdf(&[png], 72.0).unwrap();
+
+        let bw_pdf = binarize_pdf(&scan_pdf, None, 0.2, 25, 0.02).unwrap();
+        let doc = Document::load_mem(&bw_pdf).unwrap();
+        assert_eq!(doc.get_pages().len(), 1);
+        let extracted = extract_images(&bw_pdf, None, 16).unwrap();
+        assert_eq!(extracted.len(), 1);
+        let decoded = image::load_from_memory(&extracted[0].bytes).unwrap().to_luma8();
+        // Every pixel in the binarized image must be pure 0 or pure 255
+        assert!(decoded.as_raw().iter().all(|&p| p == 0 || p == 255));
+        assert!(decoded.get_pixel(50, 38)[0] == 0, "ink pixel must be 0 (black)");
+        assert!(decoded.get_pixel(10, 10)[0] == 255, "shadowed background pixel must be 255 (white)");
+    }
 }
+
 

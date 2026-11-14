@@ -20,6 +20,7 @@ import {
 import { store, documents } from '../../store'
 import {
   docOps,
+  pickDirectory,
   pickOpenPaths,
   pickSavePath,
   type EmbeddedAttachmentInfo,
@@ -120,6 +121,12 @@ function addStep(): void {
     case 'compress':
       steps.value.push({ op: 'compress', max_dim: 1600, quality: 75 })
       break
+    case 'deskew':
+      steps.value.push({ op: 'deskew', max_angle: 12, clean_borders: 0.02 })
+      break
+    case 'binarize':
+      steps.value.push({ op: 'binarize', window_size: 31, k: 0.2, clean_borders: 0.02 })
+      break
   }
 }
 
@@ -167,6 +174,39 @@ function stepLabel(s: PipelineStepSpec): string {
       return `${t('dt.pl.opCompress')} (${s.max_dim ?? 1600}px, Q${s.quality ?? 75})`
     case 'protect':
       return t('dt.se.setTitle')
+    case 'deskew':
+      return t('dt.pl.opDeskew')
+    case 'binarize':
+      return t('dt.pl.opBinarize')
+  }
+}
+
+// ── 1b. Multi-File Batch Pipeline Queue ──
+const batchFiles = ref<string[]>([])
+
+async function pickBatchFiles(): Promise<void> {
+  const picked = await pickOpenPaths(['pdf'], true)
+  if (picked.length) {
+    const existing = new Set(batchFiles.value)
+    for (const p of picked) {
+      if (!existing.has(p)) batchFiles.value.push(p)
+    }
+  }
+}
+
+async function runBatchPipeline(): Promise<void> {
+  if (!batchFiles.value.length || !steps.value.length) return
+  const outDir = await pickDirectory()
+  if (outDir === null && !/iPhone|iPad|Android/i.test(navigator.userAgent)) return
+  busy.value = 'batch'
+  try {
+    const outs = await docOps.batchPipeline(batchFiles.value, outDir, null, steps.value)
+    emit('toast', t('dt.pl.batchDone', { n: outs.length }))
+    if (outs.length) emit('open', outs[0])
+  } catch (err) {
+    emit('toast', String((err as Error).message ?? err))
+  } finally {
+    busy.value = ''
   }
 }
 
@@ -337,6 +377,12 @@ watch(
           {{ t('dt.pl.presetScan') }}
         </button>
         <button
+          :class="{ primary: activePreset === 'scan_binarize' }"
+          @click="applyPreset('scan_binarize')"
+        >
+          {{ t('dt.pl.presetBinarize') }}
+        </button>
+        <button
           :class="{ primary: activePreset === 'confidential_share' }"
           @click="applyPreset('confidential_share')"
         >
@@ -380,6 +426,8 @@ watch(
       <div class="dt-actions">
         <select v-model="addOpKind">
           <option value="remove_blank">{{ t('dt.pl.opRemoveBlank') }}</option>
+          <option value="deskew">{{ t('dt.pl.opDeskew') }}</option>
+          <option value="binarize">{{ t('dt.pl.opBinarize') }}</option>
           <option value="split2up">{{ t('dt.pl.opSplit2up') }}</option>
           <option value="grayscale">{{ t('dt.pl.opGrayscale') }}</option>
           <option value="resize">{{ t('dt.pl.opResize') }}</option>
@@ -396,6 +444,38 @@ watch(
           @click="runPipeline"
         >
           {{ busy === 'pipeline' ? t('dt.working') : t('dt.pl.runBtn', { n: steps.length }) }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 1b. Multi-File Batch Pipeline Queue -->
+    <div class="pl-card">
+      <div class="pl-head">
+        <h4>{{ t('dt.pl.batchTitle') }}</h4>
+        <span class="dt-sub">{{ t('dt.pl.batchSub') }}</span>
+      </div>
+      <div class="dt-list" v-if="batchFiles.length">
+        <div v-for="(p, i) in batchFiles" :key="p + i" class="dt-list-row">
+          <span class="dt-list-idx">{{ i + 1 }}</span>
+          <span class="dt-list-name">{{ p.split('/').pop() }}</span>
+          <button @click="batchFiles.splice(i, 1)">✕</button>
+        </div>
+      </div>
+      <div class="dt-actions">
+        <button @click="pickBatchFiles">＋ {{ t('dt.pl.batchPick') }}</button>
+        <button v-if="batchFiles.length" @click="batchFiles = []">
+          {{ t('dt.pl.batchClear') }}
+        </button>
+        <button
+          class="primary"
+          :disabled="!!busy || !batchFiles.length || !steps.length"
+          @click="runBatchPipeline"
+        >
+          {{
+            busy === 'batch'
+              ? t('dt.working')
+              : t('dt.pl.batchRunBtn', { n: batchFiles.length })
+          }}
         </button>
       </div>
     </div>

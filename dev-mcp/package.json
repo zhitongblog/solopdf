@@ -1,6 +1,6 @@
 {
   "name": "@solopdf/dev-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "bin": {
     "solopdf-mcp": "src/index.mjs"

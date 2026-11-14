@@ -149,6 +149,11 @@ export interface RemoveBlankResult {
   removed: number[]
 }
 
+export interface DeskewResult {
+  path: string
+  angles: number[]
+}
+
 export interface EmbeddedAttachmentInfo {
   name: string
   size: number
@@ -356,6 +361,45 @@ export const docOps = {
     password: string | null,
     steps: PipelineStepSpec[],
   ) => call<string>('pdf_run_pipeline', { srcPath, destPath, password, steps }),
+
+  deskew: (
+    srcPath: string,
+    destPath: string | null,
+    password: string | null,
+    maxAngle = 12,
+    cleanBorders = 0.02,
+  ) =>
+    call<DeskewResult>('pdf_deskew', {
+      srcPath,
+      destPath,
+      password,
+      maxAngle,
+      cleanBorders,
+    }),
+
+  binarize: (
+    srcPath: string,
+    destPath: string | null,
+    password: string | null,
+    k = 0.2,
+    windowSize = 31,
+    cleanBorders = 0.02,
+  ) =>
+    call<string>('pdf_binarize', {
+      srcPath,
+      destPath,
+      password,
+      k,
+      windowSize,
+      cleanBorders,
+    }),
+
+  batchPipeline: (
+    srcPaths: string[],
+    destDir: string | null,
+    password: string | null,
+    steps: PipelineStepSpec[],
+  ) => call<string[]>('pdf_batch_pipeline', { srcPaths, destDir, password, steps }),
 
   // ── signature library (appData, never beside a document) ──
   async saveSignature(name: string, bytes: Uint8Array): Promise<string> {

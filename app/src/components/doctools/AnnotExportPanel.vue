@@ -13,7 +13,14 @@
  */
 import { computed, ref } from 'vue'
 import { store, controllers, annotManagers } from '../../store'
-import { exportSpec, isDrawn, toAnkiTsv, toObsidianSr } from '@solopdf/core'
+import {
+  buildTopicDigest,
+  exportSpec,
+  isDrawn,
+  toAnkiTsv,
+  toObsidianSr,
+  type DigestDocInput,
+} from '@solopdf/core'
 import { platform } from '../../platform'
 import { docOps, pickSavePath, type AnnotSpec } from '../../platform/docops'
 import { t } from '../../i18n'
@@ -98,6 +105,41 @@ async function exportObsidian(): Promise<void> {
   await platform().saveText(`${docTitle}-flashcards.md`, md)
   emit('toast', t('dt.ae.flashcardsDone', { fmt: 'Obsidian SR' }))
 }
+
+// ── Cross-Document #Tag Topic Digest (→ SoloMD) ──
+const digestGroupBy = ref<'tag' | 'document'>('tag')
+const digestFilterTags = ref('')
+
+async function exportTopicDigest(): Promise<void> {
+  const docs: DigestDocInput[] = []
+  for (const tb of store.tabs) {
+    const m = annotManagers.get(tb.id)
+    if (m && m.annotations.length > 0) {
+      docs.push({
+        docTitle: tb.name.replace(/\.pdf$/i, ''),
+        filePath: tb.path || tb.name,
+        annotations: m.annotations,
+      })
+    }
+  }
+  if (!docs.length) {
+    emit('toast', t('dt.ae.nothing'))
+    return
+  }
+  const filterTags = digestFilterTags.value
+    .split(/[,，\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const res = buildTopicDigest(docs, {
+    groupBy: digestGroupBy.value,
+    tags: filterTags.length ? filterTags : undefined,
+  })
+  await platform().saveText('topic-digest.md', res.markdown)
+  emit(
+    'toast',
+    t('dt.ae.digestDone', { docs: res.totalDocuments, annots: res.totalAnnotations }),
+  )
+}
 </script>
 
 <template>
@@ -135,6 +177,33 @@ async function exportObsidian(): Promise<void> {
       </button>
       <button :disabled="!marks.length" @click="exportObsidian">
         🧠 {{ t('dt.ae.exportObsidian') }}
+      </button>
+    </div>
+
+    <hr class="dt-divider" />
+
+    <h4>{{ t('dt.ae.digestTitle') }}</h4>
+    <p class="dt-hint">{{ t('dt.ae.digestHint') }}</p>
+    <div class="dt-actions">
+      <button
+        :class="{ primary: digestGroupBy === 'tag' }"
+        @click="digestGroupBy = 'tag'"
+      >
+        # {{ t('dt.ae.digestGroupTag') }}
+      </button>
+      <button
+        :class="{ primary: digestGroupBy === 'document' }"
+        @click="digestGroupBy = 'document'"
+      >
+        📄 {{ t('dt.ae.digestGroupDoc') }}
+      </button>
+    </div>
+    <div class="dt-field">
+      <input v-model="digestFilterTags" :placeholder="t('dt.ae.digestFilterPh')" />
+    </div>
+    <div class="dt-footer">
+      <button class="primary" @click="exportTopicDigest">
+        📚 {{ t('dt.ae.exportDigestBtn') }}
       </button>
     </div>
   </div>

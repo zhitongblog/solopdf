@@ -116,7 +116,10 @@ fn usage() -> ! {
   attachments-list <src.pdf> [--password pw]
   attachments-add <src.pdf> <dest.pdf> <file1> [file2 …] [--desc txt] [--password pw]
   attachments-remove <src.pdf> <dest.pdf> [--names a.txt,b.csv] [--password pw]
+  deskew <src.pdf> <dest.pdf> [--max-angle 12] [--clean-borders 0.02] [--password pw]
+  binarize <src.pdf> <dest.pdf> [--k 0.2] [--window 31] [--clean-borders 0.02] [--password pw]
   pipeline <src.pdf> <dest.pdf> <steps.json> [--password pw]
+  batch-pipeline <dest-dir> <steps.json> <a.pdf> [b.pdf …] [--password pw]
   info <src.pdf> [--password pw]
   djvu-info <src.djvu>
   djvu-page <src.djvu> <dest.png> [--page 1] [--width 1400]
@@ -564,6 +567,32 @@ fn main() {
                 .unwrap_or_default();
             write(dest, ok(pdfops::remove_embedded_attachments(&read(src), pw, &names)));
         }
+        "deskew" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            let max_angle = arg(&args, "--max-angle")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(12.0);
+            let clean_borders = arg(&args, "--clean-borders")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.02);
+            let (out, angles) = ok(pdfops::deskew_pdf(&read(src), pw, max_angle, clean_borders));
+            write(dest, out);
+            println!("{}", serde_json::json!({ "angles": angles, "count": angles.len() }));
+        }
+        "binarize" => {
+            let (Some(src), Some(dest)) = (positional.first(), positional.get(1)) else { usage() };
+            let k = arg(&args, "--k").and_then(|v| v.parse().ok()).unwrap_or(0.2);
+            let window_size = arg(&args, "--window")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(31);
+            let clean_borders = arg(&args, "--clean-borders")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.02);
+            write(
+                dest,
+                ok(pdfops::binarize_pdf(&read(src), pw, k, window_size, clean_borders)),
+            );
+        }
         "pipeline" => {
             let (Some(src), Some(dest), Some(json_arg)) =
                 (positional.first(), positional.get(1), positional.get(2))
@@ -578,6 +607,38 @@ fn main() {
             let steps: Vec<pdfops::PipelineStep> = serde_json::from_slice(&raw_json)
                 .unwrap_or_else(|e| die(&format!("pipeline steps 解析失败: {e}")));
             write(dest, ok(pdfops::run_pipeline(&read(src), pw, &steps)));
+        }
+        "batch-pipeline" => {
+            let (Some(dest_dir), Some(json_arg)) = (positional.first(), positional.get(1)) else {
+                usage()
+            };
+            if positional.len() < 3 {
+                die("需要至少一个待处理的 PDF 文件路径");
+            }
+            let raw_json = if std::path::Path::new(json_arg.as_str()).exists() {
+                read(json_arg)
+            } else {
+                json_arg.as_bytes().to_vec()
+            };
+            let steps: Vec<pdfops::PipelineStep> = serde_json::from_slice(&raw_json)
+                .unwrap_or_else(|e| die(&format!("pipeline steps 解析失败: {e}")));
+            std::fs::create_dir_all(dest_dir)
+                .unwrap_or_else(|e| die(&format!("创建目录失败 {dest_dir}: {e}")));
+            let mut outputs = Vec::new();
+            for src in &positional[2..] {
+                let stem = std::path::Path::new(src.as_str())
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "output".into());
+                let out_path = std::path::Path::new(dest_dir.as_str())
+                    .join(format!("{stem}-pipeline.pdf"))
+                    .to_string_lossy()
+                    .into_owned();
+                let bytes = ok(pdfops::run_pipeline(&read(src), pw, &steps));
+                write(&out_path, bytes);
+                outputs.push(out_path);
+            }
+            println!("{}", serde_json::json!({ "outputs": outputs, "count": outputs.len() }));
         }
         "info" => {
             let Some(src) = positional.first() else { usage() };

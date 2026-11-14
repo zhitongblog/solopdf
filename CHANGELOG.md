@@ -1,22 +1,32 @@
 # CHANGELOG
 
-## v1.1.0 — 对标 Stirling-PDF 全栈能力补齐：自动化流水线、双页扫描中缝切分、连续长页、空白页清理、矢量信纸叠印、智能重命名与附件写入
+## v1.1.0 — 扫描件精修闭环（自动纠偏 + Sauvola 二值化）、视觉级叠印/闪烁对比、公式转 LaTeX、跨文档 `#标签` 专题综述、多文件批量流水线与 Stirling 套件
 
-在 v1.0.0 基础上对标 **Stirling-PDF** 最受高频用户欢迎的扫描件精修与自动化能力，全量基于纯 Rust（`lopdf` + `image`）与 `@solopdf/core` 零外部依赖原生实现（严格遵循 Copy-out 铁律，UI / CLI / MCP 四端同步贯通）：
+在 v1.0.0 基础上一次性补齐 **Stirling-PDF 全栈能力** 与 **四大深度方向（A/B/C/D）**，全量基于纯 Rust（`lopdf` + `image`）与 `@solopdf/core` 零外部依赖原生实现（严格遵循 Copy-out 铁律，UI / CLI / MCP 四端同步贯通）：
 
-### 自动化多步流水线（Automated PDF Pipeline）
-- **内存级多步串联引擎（`run_pipeline`）**：在文档工具新增「流水线（Pipeline）」标签页，支持把**移除空白页、双页中缝切分、裁切白边、页面旋转、转灰度与底色漂白、统一页面尺寸、N-up 拼版、小册子折页、单张连续长页、添加水印、添加页码、扁平化、清理元数据、压缩体积、密码加密**等 15 种原子操作自由组合、调整顺序，在内存中一次性流转执行并输出最终 PDF，零中间临时文件
-- **三大高频场景预设**：内置「📚 扫描书籍清理（去空白页 → 双页切分 → 灰度漂白 → 页码）」、「📦 办公归档压缩（去空白页 → 扁平化 → 清理隐私 → 压缩）」与「🔒 发件脱敏定稿（扁平化 → 清理隐私 → 水印 → 页码）」一键载入
+### 方向 A：扫描件精修闭环 Phase 2（Scan Mastery Phase 2）
+- **扫描件自动纠偏与黑边清理（`deskew` / Auto-Deskew）**：通过 `[-max_angle, +max_angle]` 水平投影轮廓方差最大化（`0.5°` 粗搜 + `0.1°` 精搜）自动检测每页扫描图像倾斜角，使用双线性插值旋转扶正，并自动清除四周扫描仪阴影黑边（`clean_borders`）
+- **Sauvola 局部自适应黑白二值化（`binarize`）**：基于二维积分图（`sum` 与 `sq_sum`）实现 $O(1)$ 窗口均值与标准差局部自适应阈值算法，彻底消除手机拍照阴影与光照不均，输出高对比度锐利黑白文档（`DeviceGray`）
+- **双页扫描件中缝切分（`split-2up` / De-nup）**：将左右合扫（`vertical`）或上下合扫（`horizontal`）的双联页沿中缝无损切分为两张独立单页（深拷贝页面并通过 `/CropBox` + `/MediaBox` 精确限定半幅视口，零重编码损耗）；支持**仅切分宽幅跨页**（`onlyWide`）、**从右到左页序**（`rtl`，适配古籍竖排与日漫）以及**中缝重叠留白**（`overlap pt`）
+- **多页拼接为单张连续长页（`single-page` / Single Large Page）**：将整份或多页 PDF 从上到下垂直拼接为单张超长连续矢量页（封装为 `/Form XObject` 保持全部矢量文字与图形不栅格化）
+- **空白页智能检测与剔除（`detect-blank` / `remove-blank`）**：同时检测无绘制指令的空矢量流页面与扫描件内嵌图像墨迹占比（非白像素比例低于阈值 `threshold`）
+- **PDF 矢量信纸/底图叠印（`overlay` / Overlay PDF）**：将另一份 PDF 作为背景底图/企业信头（`under=true`）或前景套印/骑缝章（`under=false`）等比居中矢量叠加到目标文档各页
 
-### 扫描件与版面精修套件（Layout & Scan Mastery）
-- **双页扫描件中缝切分（`split-2up` / De-nup）**：将左右合扫（`vertical`）或上下合扫（`horizontal`）的双联页沿中缝无损切分为两张独立单页（深拷贝页面并通过 `/CropBox` + `/MediaBox` 精确限定半幅视口，零重编码损耗）；支持**仅切分宽幅跨页**（`onlyWide`，自动跳过单页封面）、**从右到左页序**（`rtl`，适配古籍竖排与日漫）以及**中缝重叠留白**（`overlap pt`，防止装订线压字被截断）
-- **多页拼接为单张连续长页（`single-page` / Single Large Page）**：将整份或多页 PDF 从上到下垂直拼接为单张超长连续矢量页（封装为 `/Form XObject` 保持全部矢量文字与图形不栅格化），可自定义页间距与页间浅灰分割线
-- **空白页智能检测与剔除（`detect-blank` / `remove-blank`）**：同时检测无绘制指令的空矢量流页面与扫描件内嵌图像墨迹占比（非白像素比例低于阈值 `threshold`），支持在「页面」面板一键自动勾选所有空白页，或在 CLI / MCP / 流水线中直接剔除
-- **PDF 矢量信纸/底图叠印（`overlay` / Overlay PDF）**：将另一份 PDF 作为背景底图/企业信头（`under=true`）或前景套印/骑缝章（`under=false`）等比居中矢量叠加到目标文档各页，支持多页底图循环复用（`repeat=true`）或按页一比一对应
+### 方向 B：视觉级页面对比（Visual Page Comparison — Overlay & Blink Diff）
+- **像素级红/青叠印差分（`computeVisualDiff` / Red-Cyan Anaglyph Overlay）**：针对无文字层的扫描合同、CAD 工程图纸、公章位置与排版微调，逐像素比对两页渲染结果（红色标识旧版独有墨迹、青色标识新版新增墨迹、中性灰保留未变区域，或切换为暖红高亮着色模式 `tint`）
+- **16×16 网格连通域变动热点聚类（`hotspots`）与差异率（`Δ X.XX%`）**：自动框选所有视觉变动区域并统计像素差异百分比
+- **闪烁切换对比（Blink Compare A ↔ B）**：在文档对比面板一键开启视觉对比弹窗，支持 650ms 自动交替闪烁旧版/新版页面，肉眼瞬间捕捉细微位移
 
-### 智能重命名与文档级内嵌附件读写
-- **智能 PDF 重命名（`auto-rename` / `suggestPdfFilename`）**：从 XMP、Info 字典与前几页标题排版中提取标题、第一作者、年份与 DOI，支持 `{year} - {author} - {title}` 等 4 种命名模板自动清洗非法路径字符并另存为规范命名的 PDF 副本
-- **文档级内嵌附件读写管理（`attachments-list` / `attachments-add` / `attachments-remove`）**：补齐 PDF `/Names -> /EmbeddedFiles` 名称树写入与剥离能力，支持向 PDF 打包嵌入原始数据表（`.xlsx`/`.csv`）、源码或说明文件，或一键剥离指定/全部内嵌附件
+### 方向 C：学术阅读与 SoloMD 深度互操作（Math Snip → LaTeX & Cross-PDF Topic Digest）
+- **框选公式转 LaTeX（`extract-math` / `extractLatexFromItems`）**：在区域框选工具栏新增 `∑ 复制公式 ($LaTeX$)` 与 `$$ 复制行间公式 ($$)`，基于基线偏移与字号几何关系自动还原上下标（`x^{2n}`、`a_{ij}`）、双行分式（`\frac{num}{den}`）、根号（`\sqrt{...}`）及全套希腊字母/微积分/集合论符号
+- **跨文档 `#标签` 专题综述导出（`export-digest` / `buildTopicDigest`）**：聚合多个已打开 PDF 或整个文献文件夹的 `.annotations.md` 伴生批注，按 `#标签`（如 `#方法`、`#实验`、`#局限性`）或按文档分组，自动生成含目录（TOC）、原文摘录、个人笔记、框选截图与 `solopdf://` 页码深链的 Markdown 文献综述，无缝用 SoloMD 打开研读
+
+### 方向 D：自动化流水线、多文件批量队列、智能重命名与附件管理（Workflow & Batch Suite）
+- **内存级多步串联引擎（`pipeline` / `run_pipeline`）**：支持把**移除空白页、自动纠偏、Sauvola 二值化、双页中缝切分、裁切白边、页面旋转、转灰度与底色漂白、统一页面尺寸、N-up 拼版、小册子折页、单张连续长页、添加水印、添加页码、扁平化、清理元数据、压缩体积、密码加密**等 17 种原子操作自由组合，在内存中一次性流转执行，内置「扫描件整理」「高清黑白扫描」「保密外发」「打印讲义」「归档瘦身」5 大预设
+- **多文件批量流水线队列（`batch-pipeline` / `pdf_batch_pipeline`）**：支持一次性选择多个 PDF 文件，批量执行当前配置的流水线步骤并输出到指定目录（源文件永不修改）
+- **智能 PDF 重命名（`auto-rename` / `suggestPdfFilename`）**：从 XMP、Info 字典与前几页标题排版中提取标题、第一作者、年份与 DOI，按命名模板生成规范文件名
+- **文档级内嵌附件读写管理（`attachments-list` / `attachments-add` / `attachments-remove`）**：补齐 PDF `/Names -> /EmbeddedFiles` 名称树写入与剥离能力
+- **CI 现代化**：GitHub Actions 全面升级至 Node 24 运行时（`FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` + `actions/setup-java@v5`）
 
 ## v1.0.0 — 目录智能生成、拼版印前套件、框选提表与闪卡、图章与比例尺测量、数字证书验签、支持者徽章
 

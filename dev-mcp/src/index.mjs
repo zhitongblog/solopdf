@@ -31,6 +31,7 @@ import {
   extractTableFromItems, tableToMarkdown, tableToCsv,
   filterAnnotations, toAnkiTsv, toObsidianSr,
   suggestPdfFilename,
+  extractLatexFromItems, buildTopicDigest, computeVisualDiff,
 } from '@solopdf/core'
 import { inflateSync } from 'node:zlib'
 // FB2 / TIFF go through the CLI's format module (same core parser as the app)
@@ -42,7 +43,7 @@ function checkWrite() {
   if (!ALLOW_WRITE) throw new Error('写入操作需要以 --allow-write 参数启动 MCP 服务')
 }
 
-const server = new McpServer({ name: 'solopdf', version: '1.0.0' })
+const server = new McpServer({ name: 'solopdf', version: '1.1.0' })
 
 /** pdfjs-dist package root: its packed CMaps are what turn non-embedded CJK
  *  fonts (STSong-Light + UniGB-UCS2-H …) into text instead of nothing */
@@ -863,6 +864,145 @@ server.tool(
   },
 )
 
+server.tool(
+  'solopdf_extract_math',
+  '从 PDF 指定页或矩形选区识别数学公式并转换为 LaTeX（自动识别上下标空间排布、分式与希腊/数学符号；只读）',
+  {
+    path: z.string(),
+    page: z.number().int().min(1).default(1),
+    rect: z.object({
+      x: z.number(),
+      y: z.number(),
+      width: z.number(),
+      height: z.number(),
+    }).optional(),
+    block: z.boolean().default(false),
+    password: z.string().optional(),
+  },
+  async ({ path, page, rect, block, password }) => {
+    const doc = await open(path, password)
+    const p = Math.min(page, doc.numPages)
+    const pg = await doc.getPage(p)
+    const vp = pg.getViewport({ scale: 1 })
+    const tc = await pg.getTextContent()
+    const items = tc.items
+      .filter((it) => 'str' in it && it.str && it.str.trim())
+      .map((it) => {
+        const h = it.height || Math.abs(it.transform?.[3] ?? 0) || 10
+        return {
+          str: it.str,
+          x: it.transform[4],
+          y: vp.height - it.transform[5] - h,
+          width: it.width || 0,
+          height: h,
+        }
+      })
+    await doc.destroy()
+    const res = extractLatexFromItems(items, rect, { yDirection: 'down', block })
+    return text({ page: p, ...res })
+  },
+)
+
+server.tool(
+  'solopdf_export_digest',
+  '跨文档 #标签 专题综述生成（只读）：聚合文件夹或多个 PDF 的 .annotations.md 伴生批注，按 #标签 或文档分组生成带目录与原文深链的 Markdown 文献综述',
+  {
+    paths: z.array(z.string()).min(1).describe('PDF 文件、.annotations.md 文件或文件夹路径列表'),
+    groupBy: z.enum(['tag', 'document']).default('tag'),
+    filterTags: z.array(z.string()).optional(),
+    title: z.string().optional(),
+  },
+  async ({ paths, groupBy, filterTags, title }) => {
+    const sidecars = []
+    for (const t of paths) {
+      if (!existsSync(t)) continue
+      const st = statSync(t)
+      if (st.isDirectory()) {
+        const entries = await readdir(t, { withFileTypes: true })
+        for (const e of entries) {
+          if (e.isFile() && /\.annotations\.md$/i.test(e.name)) {
+            sidecars.push(nodePath.join(t, e.name))
+          }
+        }
+      } else if (/\.annotations\.md$/i.test(t)) {
+        sidecars.push(t)
+      } else {
+        const sc = sidecarPath(t)
+        if (existsSync(sc)) sidecars.push(sc)
+      }
+    }
+    const docs = []
+    for (const scFile of sidecars) {
+      const parsed = parse(await readFile(scFile, 'utf-8'))
+      if (!parsed.annotations.length) continue
+      const rawName = parsed.meta?.pdfName || nodePath.basename(scFile).replace(/\.annotations\.md$/i, '.pdf')
+      const docTitle = rawName.replace(/\.[^.]+$/, '')
+      const pdfCandidate = scFile.replace(/\.annotations\.md$/i, '.pdf')
+      docs.push({
+        docTitle,
+        filePath: existsSync(pdfCandidate) ? nodePath.resolve(pdfCandidate) : rawName,
+        annotations: parsed.annotations,
+      })
+    }
+    return text(buildTopicDigest(docs, { groupBy, tags: filterTags, title }))
+  },
+)
+
+server.tool(
+  'solopdf_visual_diff',
+  '像素级视觉页面对比（只读）：将两份 PDF 的指定页渲染并逐像素比对，返回差异像素数、差异百分比与 16×16 连通区域变动热点框（适用于扫描件、CAD 图纸、公章与微调排版比对）',
+  {
+    a: z.string().describe('旧版本 PDF 路径'),
+    b: z.string().describe('新版本 PDF 路径'),
+    pageA: z.number().int().min(1).default(1),
+    pageB: z.number().int().min(1).optional(),
+    dpi: z.number().int().min(36).max(300).default(120),
+    threshold: z.number().int().min(1).max(255).default(28),
+    password: z.string().optional(),
+    passwordB: z.string().optional(),
+  },
+  async ({ a, b, pageA, pageB, dpi, threshold, password, passwordB }) => {
+    const { createCanvas } = await canvasBackend()
+    const docA = await open(a, password)
+    const docB = await open(b, passwordB ?? password)
+    const pgA = await docA.getPage(Math.min(pageA, docA.numPages))
+    const pgB = await docB.getPage(Math.min(pageB ?? pageA, docB.numPages))
+    const scale = dpi / 72
+    const vpA = pgA.getViewport({ scale })
+    const vpB = pgB.getViewport({ scale })
+    const w = Math.max(Math.floor(vpA.width), Math.floor(vpB.width))
+    const h = Math.max(Math.floor(vpA.height), Math.floor(vpB.height))
+
+    const cA = createCanvas(w, h)
+    const ctxA = cA.getContext('2d')
+    ctxA.fillStyle = '#ffffff'
+    ctxA.fillRect(0, 0, w, h)
+    await pgA.render({ canvasContext: ctxA, viewport: vpA }).promise
+
+    const cB = createCanvas(w, h)
+    const ctxB = cB.getContext('2d')
+    ctxB.fillStyle = '#ffffff'
+    ctxB.fillRect(0, 0, w, h)
+    await pgB.render({ canvasContext: ctxB, viewport: vpB }).promise
+
+    const imgA = ctxA.getImageData(0, 0, w, h)
+    const imgB = ctxB.getImageData(0, 0, w, h)
+    const res = computeVisualDiff(imgA.data, w, h, imgB.data, w, h, { threshold })
+    await docA.destroy()
+    await docB.destroy()
+    return text({
+      pageA,
+      pageB: pageB ?? pageA,
+      width: res.width,
+      height: res.height,
+      diffPixels: res.diffPixels,
+      totalPixels: res.totalPixels,
+      diffRatio: +res.diffRatio.toFixed(6),
+      hotspots: res.hotspots,
+    })
+  },
+)
+
 if (ALLOW_WRITE) {
   server.tool(
     'solopdf_extract_attachment',
@@ -1524,6 +1664,79 @@ if (ALLOW_WRITE) {
         if (password) argv.push('--password', password)
         execFileSync(docBin(), argv)
         return text({ written: outputPath, stepsCount: steps.length })
+      } finally {
+        await rm(tmp, { recursive: true, force: true })
+      }
+    },
+  )
+
+  server.tool(
+    'solopdf_deskew',
+    '扫描件自动纠偏与黑边清理（Auto-Deskew）：通过水平投影方差最大化自动检测每页扫描图像的倾斜角并双线性插值旋转扶正，同时去除四周扫描黑框，另存为新文件（需 --allow-write）',
+    {
+      path: z.string(),
+      outputPath: z.string(),
+      maxAngle: z.number().min(2).max(25).default(12),
+      cleanBorders: z.boolean().default(true),
+      password: z.string().optional(),
+    },
+    async ({ path, outputPath, maxAngle, cleanBorders, password }) => {
+      checkWrite()
+      const argv = [
+        'deskew', path, outputPath,
+        '--max-angle', String(maxAngle),
+        '--clean-borders', cleanBorders ? '0.02' : '0',
+      ]
+      if (password) argv.push('--password', password)
+      const stdout = execFileSync(docBin(), argv).toString()
+      return text(JSON.parse(stdout || JSON.stringify({ path: outputPath, angles: [] })))
+    },
+  )
+
+  server.tool(
+    'solopdf_binarize',
+    '扫描件自适应黑白二值化（Sauvola Adaptive Binarization）：使用积分图加速的局部阈值算法消除手机拍照阴影与底色不均，输出锐利黑白 PDF（需 --allow-write）',
+    {
+      path: z.string(),
+      outputPath: z.string(),
+      window: z.number().int().min(3).max(60).default(31),
+      k: z.number().min(0.02).max(0.6).default(0.2),
+      cleanBorders: z.boolean().default(true),
+      password: z.string().optional(),
+    },
+    async ({ path, outputPath, window, k, cleanBorders, password }) => {
+      checkWrite()
+      const argv = [
+        'binarize', path, outputPath,
+        '--window', String(window),
+        '--k', String(k),
+        '--clean-borders', cleanBorders ? '0.02' : '0',
+      ]
+      if (password) argv.push('--password', password)
+      execFileSync(docBin(), argv)
+      return text({ written: outputPath, window, k, cleanBorders })
+    },
+  )
+
+  server.tool(
+    'solopdf_batch_pipeline',
+    '多文件批量自动化 PDF 流水线（Batch Pipeline）：对多个输入 PDF 批量执行同一套内存流水线步骤并输出到目标文件夹，原文件永不修改（需 --allow-write）',
+    {
+      paths: z.array(z.string()).min(1),
+      outputDir: z.string(),
+      steps: z.array(z.record(z.string(), z.any())).min(1),
+      password: z.string().optional(),
+    },
+    async ({ paths, outputDir, steps, password }) => {
+      checkWrite()
+      const tmp = await mkdtemp(nodePath.join(os.tmpdir(), 'solopdf-bpipe-'))
+      try {
+        const specPath = nodePath.join(tmp, 'steps.json')
+        await writeFile(specPath, JSON.stringify(steps), 'utf-8')
+        const argv = ['batch-pipeline', outputDir, specPath, ...paths]
+        if (password) argv.push('--password', password)
+        const stdout = execFileSync(docBin(), argv).toString()
+        return text(JSON.parse(stdout || JSON.stringify({ outputs: [] })))
       } finally {
         await rm(tmp, { recursive: true, force: true })
       }

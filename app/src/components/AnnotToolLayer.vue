@@ -13,6 +13,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
+  extractLatexFromItems,
   extractTableFromItems,
   tableToMarkdown,
   tableToCsv,
@@ -221,6 +222,41 @@ async function snipTable(format: 'md' | 'csv'): Promise<void> {
   }
 }
 
+async function snipMath(block: boolean): Promise<void> {
+  const ed = editor.value
+  if (!ed) return
+  const doc = documents.get(props.tabId)
+  if (!doc) return
+  try {
+    const page = await doc.getPage(ed.page)
+    const tc = await page.getTextContent()
+    const items: SnipTextItem[] = []
+    for (const raw of tc.items) {
+      if (!('str' in raw) || !raw.str) continue
+      const tr = raw.transform
+      const h = raw.height || Math.abs(tr[3]) || Math.abs(tr[0]) || 10
+      const w = raw.width || raw.str.length * h * 0.5
+      items.push({ str: raw.str, x: tr[4], y: tr[5], width: w, height: h })
+    }
+    const rect = {
+      x: ed.quad.x1,
+      y: ed.quad.y1,
+      width: Math.max(1, ed.quad.x2 - ed.quad.x1),
+      height: Math.max(1, ed.quad.y2 - ed.quad.y1),
+    }
+    const res = extractLatexFromItems(items, rect, { yDirection: 'up', block })
+    if (!res.latex) {
+      snipFeedback.value = t('at.mathEmpty')
+      return
+    }
+    await copyText(res.latex)
+    if (!noteText.value.trim()) noteText.value = res.latex
+    snipFeedback.value = t('at.mathCopied', { latex: res.body.slice(0, 42) })
+  } catch (err) {
+    snipFeedback.value = String((err as Error).message ?? err)
+  }
+}
+
 function onKey(e: KeyboardEvent): void {
   if (e.key === 'Escape') {
     if (editor.value) closeEditor()
@@ -263,6 +299,8 @@ onBeforeUnmount(() => {
       <div v-if="editor.kind === 'region'" class="at-snip-bar">
         <button @click="snipTable('md')">📋 {{ t('at.copyTableMd') }}</button>
         <button @click="snipTable('csv')">📊 {{ t('at.exportTableCsv') }}</button>
+        <button @click="snipMath(false)">∑ {{ t('at.copyMathLatex') }}</button>
+        <button @click="snipMath(true)">$$ {{ t('at.copyMathBlock') }}</button>
         <span v-if="snipFeedback" class="at-snip-msg">{{ snipFeedback }}</span>
       </div>
       <textarea

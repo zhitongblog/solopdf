@@ -20,6 +20,8 @@ export type PipelineStepSpec =
       pages?: number[]
     }
   | { op: 'rotate'; pages?: number[]; degrees: number }
+  | { op: 'deskew'; max_angle?: number; clean_borders?: number }
+  | { op: 'binarize'; k?: number; window_size?: number; clean_borders?: number }
   | { op: 'grayscale'; whiten_bg?: boolean }
   | { op: 'resize'; width: number; height: number }
   | {
@@ -67,6 +69,7 @@ export type PipelineStepSpec =
 
 export type PipelinePresetId =
   | 'scan_clean'
+  | 'scan_binarize'
   | 'confidential_share'
   | 'print_handout'
   | 'archive_slim'
@@ -96,7 +99,14 @@ export function buildPresetPipeline(
           only_wide: true,
           overlap: 6,
         },
+        { op: 'deskew', max_angle: 12, clean_borders: 0.02 },
         { op: 'grayscale', whiten_bg: true },
+      ]
+    case 'scan_binarize':
+      return [
+        { op: 'remove_blank', threshold: 0.005 },
+        { op: 'deskew', max_angle: 12, clean_borders: 0.03 },
+        { op: 'binarize', k: 0.2, window_size: 31, clean_borders: 0.02 },
       ]
     case 'confidential_share': {
       const steps: PipelineStepSpec[] = [
@@ -191,6 +201,8 @@ export function validatePipelineSteps(steps: unknown): {
     'single_large_page',
     'crop',
     'rotate',
+    'deskew',
+    'binarize',
     'grayscale',
     'resize',
     'nup',
