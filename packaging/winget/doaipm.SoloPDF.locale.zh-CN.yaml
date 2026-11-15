@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.locale.1.6.0.schema.json
+PackageIdentifier: doaipm.SoloPDF
+PackageVersion: 1.1.0
+PackageLocale: zh-CN
+Publisher: doaipm
+PackageName: SoloPDF
+PackageUrl: https://solopdf.doaipm.com
+License: MIT
+ShortDescription: 免费无广告的本地 PDF 阅读器与全离线工具箱 —— 高亮自动保存为 Markdown 笔记。
+Description: |-
+  SoloPDF 是一款基于 Tauri 2 与 Rust 构建的极速、零广告、纯本地 PDF 阅读器与全离线文档工具箱。
+  你在 PDF 中划的每一条高亮与框选截图都会自动保存为同目录下的普通 Markdown 伴生文件（.annotations.md），支持 SoloMD、Obsidian 与 Git 版本管理。
+  内置离线 PP-OCRv4 文字识别、扫描件自动纠偏与 Sauvola 去阴影二值化、合同红青叠印与闪烁对比、框选公式转 LaTeX、框选提表、17 步批量流水线、底层真涂黑脱敏与数字签名验签。
+Tags:
+  - pdf
+  - 阅读器
+  - 批注
+  - markdown
+  - ocr
+  - 无广告
+ReleaseNotesUrl: https://github.com/zhitongblog/solopdf/releases/tag/v1.1.0
+ManifestType: locale
+ManifestVersion: 1.6.0

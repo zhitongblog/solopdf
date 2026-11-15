@@ -1,242 +1,192 @@
 # SoloPDF
 
-官网：https://solopdf.doaipm.com · GitHub：https://github.com/zhitongblog/solopdf
+> Free, ad-free, local-first PDF reader & offline document toolkit — where every highlight becomes a plain Markdown file.
 
-免费 · 无广告 · 本地化的跨平台 PDF 阅读器。**高亮即笔记**：你在 PDF 里划的每一条高亮，
-自动保存为 Markdown 伴生文件——[SoloMD](https://solomd.app) 能打开、RAG 能搜索、git 能做版本管理。
+[![Latest release](https://img.shields.io/github/v/release/zhitongblog/solopdf)](https://github.com/zhitongblog/solopdf/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/zhitongblog/solopdf?color=orange)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/zhitongblog/solopdf/total)](https://github.com/zhitongblog/solopdf/releases)
+[![GitHub stars](https://img.shields.io/github/stars/zhitongblog/solopdf?style=flat&logo=github&color=yellow)](https://github.com/zhitongblog/solopdf/stargazers)
+[![App Store](https://img.shields.io/badge/App_Store-iOS_%26_macOS-0D96F6?logo=apple&logoColor=white)](https://apps.apple.com/app/id6787712953)
+[![Website](https://img.shields.io/badge/website-solopdf.doaipm.com-2563eb.svg)](https://solopdf.doaipm.com)
 
-solo 套件成员：SoloMD（Markdown）· SoloPDF（PDF）——两个独立应用，通过 Markdown 文件互操作。
+🌐 **[English](README.md) · [简体中文](README.zh.md) · [日本語](README.ja.md)**
 
-## 为什么
+[**Download Latest Release**](https://github.com/zhitongblog/solopdf/releases/latest) · [**App Store (macOS & iOS)**](https://apps.apple.com/app/id6787712953) · [**What's New in v1.1**](CHANGELOG.md) · [**Website**](https://solopdf.doaipm.com) · [**Companion App: SoloMD**](https://solomd.app)
 
-Windows 上的 PDF 阅读器要么弹广告（Adobe/福昕/WPS），要么只能用 Edge 凑合。
-SoloPDF：秒开、零广告、零遥测（更新检查可完全关闭）、永远免费。
+⭐ **If SoloPDF earns a place on your machine, [star it on GitHub](https://github.com/zhitongblog/solopdf)** — it is 100% free, ad-free, MIT-licensed, and stars are how other readers, researchers, and developers find it.
 
-## 核心功能（v1.1）
+<p align="center">
+  <img src="appstore-assets/mac-1.png" alt="SoloPDF — Highlights become companion Markdown notes" width="88%" />
+</p>
 
-- **高亮 → `.annotations.md`**：批注含页码深链（`solopdf://`），点击跳回原文精确位置；
-  三重锚定（文字指纹 > 页码+坐标），PDF 更新后高亮自动重定位，失效则灰显降级、正文永不丢
-- **在 SoloMD 里改批注**：伴生文件是普通 Markdown，外部编辑窗口焦点回来即生效
-- 大文件流式加载：157MB / 1048 页冷启动 ~1s，虚拟滚动内存恒定
-- 全文搜索（CJK 友好，NFKC 归一化——连 Skia 导出 PDF 的康熙部首码位坑都处理了）
-- 目录树 / 缩略图 / 书签 / 多标签 / 阅读位置记忆（文件移动后靠内容哈希找回）
-- **标注不只有高亮**：下划线 / 删除线 / 波浪线 / 便签图钉 /
-  **框选截图**（截图存进 `<文档名>.annotations.assets/`，伴生 MD 里以
-  `![](…)` 引用——SoloMD、GitHub、任何 Markdown 阅读器都直接显示图）
-- **导入其他应用的注释**：Acrobat / 预览 / PDF Expert / Zotero / 福昕留在 PDF 里的高亮、
-  下划线、删除线、波浪线、便签（含回复）、文本框、手绘、矩形、椭圆、直线/箭头、多边形，
-  打开时提示一键导入伴生文件（原文摘录、作者、日期、颜色都保留；可撤销；重复导入不重复；
-  导入后原注释不再由 PDF 重复绘制；PDF 本身不改）
-- **导出带标准 PDF 注释的副本**：把伴生文件里的标注写成真正的 PDF 注释，
-  Preview / Acrobat / 福昕都能看到（原文件永不修改）
-- **视图**：整档或单页旋转（工具栏一键）、单页 / 双页对开、连续滚动 / 单屏翻页、
-  自动裁白边（移动端读双栏论文的关键）、纸张颜色、分屏（同一文档两个视口）、
-  全屏阅读与演示模式、自动滚动、阅读时屏幕常亮
-- **两个文档并排**（桌面 / iPad 宽度）：把另一个已打开的标签放到右侧（视图菜单、
-  标签右键「在右侧打开」，或把标签拖到文档区右半边），两边各用各的批注与伴生文件，
-  工具栏/侧栏/快捷键作用于有焦点的一侧；可选「同步滚动」（按页锁定）
-- **比较文档**（合同 v1 vs v2）：两版并排、按页文字相似度对齐（自动识别新增/删除的整页），
-  词级差异高亮（中文按字），两边同时标出修改/新增/删除；侧栏「差异」列表 + 上一处/下一处；
-  新增**视觉像素叠印与闪烁对比（Visual Overlay & Blink Compare）**：支持红/青像素差分叠印（`anaglyph`）、差异高亮着色（`tint`）、16×16 连通域热点框选与 **A ↔ B 闪烁切换对比**，扫描合同、CAD 图纸、印章与微调排版差异一目了然
-- **文档工具与学术增强（全本地 Copy-out，原文件永不修改）**：
-  - **自动化流水线（Pipeline）、多文件批量队列、智能重命名与内嵌附件管理**：**17 步内存流水线**（一键串联移除空白页 → 自动纠偏 → Sauvola 黑白二值化 → 双页中缝切分 → 白边裁切 → 灰度漂白 → 页码 → 压缩/加密，内置 5 大场景预设，零中间临时文件）、**多文件批量流水线（Batch Pipeline）**（一次选择多个 PDF 批量输出到目标目录）、**智能重命名（Auto-Rename）**（基于标题/作者/年份/DOI 自动生成规范文件名导出副本）、**PDF 文档级内嵌附件读写管理**（写入/查看/剥离 `/EmbeddedFiles` 附件）
-  - **扫描件精修闭环（Scan Mastery）**：**扫描件自动纠偏与去黑边（Auto-Deskew，水平投影方差最大化检测倾斜角 + 双线性插值扶正 + 扫描黑框切除）**、**自适应黑白二值化（Sauvola Binarize，积分图加速局部阈值彻底消除拍照阴影）**、**双页扫描件中缝切分（2-up Split / De-nup，支持跳过单页封面、古籍日漫从右到左页序与中缝留白）**、**多页拼接为单张连续长页（Single Continuous Page，全矢量不栅格化）**、**PDF 矢量信纸/底图叠印（Overlay PDF）**
-  - **学术公式识别与跨文档专题综述（SoloMD 深度互操作）**：**框选区域公式转 LaTeX（`$...$` / `$$...$$`，自动识别上下标空间排布、双行分式与数学符号）**、**跨文档 `#标签` 专题综述导出（Topic Digest → SoloMD，聚合多篇论文 `.annotations.md` 按 `#tag` 生成带目录与原文深链的 Markdown 文献综述）**
-  - **目录书签（Outlines）编辑与智能生成**：可视化增删改目录树层级，或**一键按正文字号梯度/章节正则自动生成 PDF 目录树**
-  - **页面管理**：旋转、删除、提取、拖拽重排、**插入同尺寸空白页**、**复制页面**、**一键自动检测并清理空白页（含纯白扫描页墨迹比检测）**
-  - **拼版与印前套件（Layout & Imposition）**：**双页扫描件中缝切分（2-up Split / De-nup，支持跳过单页封面、古籍日漫从右到左页序与中缝留白）**、**多页拼接为单张连续长页（Single Continuous Page，全矢量不栅格化）**、**PDF 矢量信纸/底图叠印（Overlay PDF，支持背景信头或前景套印循环叠加）**、**N-up 多页合一拼版**（2/4/6/9/16 页，保留矢量清晰度）、**小册子骑马钉对折拼版（Booklet）**、**PDF 转灰度与扫描底色漂白（Grayscale）**、**统一页面尺寸（Normalize to A4/A3/Letter）**
-  - **永久裁切（Crop PDF）**：按边距或区域永久更新 `/CropBox` 与 `/MediaBox`；支持**一键自动检测全书白边**（含扫描件像素墨迹检测）及奇偶页对称装订边距
-  - **合并与拆分**：多文件排序合并；按页码范围、每 N 页、均分 N 份、或**按 PDF 目录书签章节自动拆分**
-  - **水印与页码**：文字水印（支持中文/CJK、满页平铺、旋转、置底）与透明 PNG 图片水印；页码与 **Bates 编号**（`{n}/{total}`、`DOC-{n:06}`、奇偶页外侧对齐）
-  - **转换、提表与闪卡**：PDF ↔ 图片、**无损提取 PDF 内嵌原图**（JPEG 直出 / PNG 透明通道合成）、**导出结构化 Markdown**（自动还原标题层级、列表、Markdown 表格）、**框选区域提取表格（MD / CSV）**、**批注一键导出 Anki (`.tsv`) / Obsidian 复习闪卡**、重采样有损压缩
-  - **图章、比例尺测量与数字证书安全**：8 款多语言矢量标准图章 + 动态日期署名公章、**比例尺距离/周长/多边形面积测量**、手写签名、设置/移除 AES-256 打开密码、**X.509 / PKCS#7 数字签名验签（篡改检测）与本地证书签署**、**密文涂黑真脱敏（Redact PDF）**、**隐私与元数据清理（Sanitize）**、**扁平化（Flatten）**
-- 暗色模式智能反色（纯文字页反色，含图片页保持原样）
-- 加密 PDF：会话内记住密码；批注可选"仅存批注不存原文摘录"隐私模式
-- 扫描版无文字层自动提示并禁用高亮
-- **OCR 文字识别（全本地，不联网）**：扫描件/图片型 PDF 一键识别 →
-  **可搜索 PDF**（隐形文字层，可选中/复制/搜索/高亮批注）或 **Markdown**；
-  也支持直接打开图片转文字（iOS 上可拍照识别）。
-  引擎:macOS/iOS 用系统 Vision(零体积),Windows/Linux 内置 PP-OCRv4 ONNX(离线模型)
-- **表单填写**：AcroForm 文本框/勾选/下拉直接填写，"保存已填表单"导出副本（原文件永不改动）
-- **嵌入附件**：文档级附件与页面上的回形针（FileAttachment 注释）都列在「附件」侧栏
-  （仅当文档有附件时出现）；PDF/EPUB/图片直接在新标签页打开，其他类型交给系统默认应用，
-  可执行文件/脚本只允许另存、绝不打开
-- **图层（可选内容 OCG）**：「图层」侧栏显示/隐藏图层，遵守单选组与锁定图层；
-  分屏两侧、缩略图、打印都跟随当前可见性，每个文档单独记忆
-- 打印（分批渲染，500 页不爆内存）
-- **阅读辅助**：阅读标尺（行聚焦，读障/注意力辅助）——高亮当前 1/3/5 行、其余调暗，
-  跟随鼠标或 ↑↓ / j/k 按**分栏顺序**逐行移动（双栏论文先读完左栏），到页尾自动翻页；
-  PDF 视图（含分屏）与图书模式都可用，手机上拖动把手，快捷键 L；
-  **放大镜**（桌面）：按住 Z 悬停页面，2–4× 高清重渲染而非放大模糊位图
-- **复制引用**：从 XMP / 文档属性 / 首页排版识别标题、作者、年份、DOI、arXiv 号，
-  一键复制 BibTeX / APA / GB/T 7714（字段可就地修改）；「获取精确元数据」才联网查
-  doi.org（永不自动）；「复制本页链接」给出 `solopdf://` 深链
-- **格式**：PDF · EPUB · TXT · MOBI/AZW3 · FB2（含 .fbz / .fb2.zip，自动识别 windows-1251 等编码）·
-  CBZ/CBR 漫画 · DjVu · TIFF（多页，含 CCITT G4 传真 / LZW / Deflate / JPEG；可缩放、旋转、整页 OCR）
+<details>
+<summary>📸 More screenshots (Fillable AcroForms · Dark Mode & Large Spec Outline)</summary>
+<br />
+<p align="center">
+  <img src="appstore-assets/mac-2.png" alt="Fillable PDF AcroForms with copy-out save" width="48%" />
+  <img src="appstore-assets/mac-3.png" alt="Smart dark mode on 756-page ISO PDF 32000 spec" width="48%" />
+</p>
+</details>
 
-## 结构
+---
 
-```
-app/       Tauri 2 + Vue 3 桌面应用
-core/      共享逻辑：伴生文件格式 + 锚定算法 + 文档比较（app 与 CLI 同一实现）
-cli/       solopdf 命令行（与应用同一 pdf.js 引擎）
-dev-mcp/   MCP server（AI/自动化驱动接口）
-test-fixtures/  标准测试集（7 个真实样本，见其 README）
-```
+## Why SoloPDF?
 
-## CLI
+Desktop PDF readers today force an ugly trade-off: bloatware that nags you with ads and cloud upsells (Adobe / Foxit / WPS), barebones browser tabs (Edge / Chrome), or self-hosted web suites like Stirling-PDF that require running Docker + a 1.5 GB JVM just to deskew a scan or redact a contract. Meanwhile, PKM tools lock your highlights inside opaque SQLite databases.
 
-```bash
-node cli/src/index.mjs info <file.pdf> [--password pw]      # 页数/书签/元数据
-node cli/src/index.mjs info book.fb2                         # FB2/.fbz：书名/作者/编码/章节目录
-node cli/src/index.mjs info scan.tiff                        # TIFF：页数/每页尺寸/压缩方式
-node cli/src/index.mjs extract-text <file.pdf> [--pages A-B] # FB2 时 --pages 按章节
-node cli/src/index.mjs links <file.pdf> [--pages A-B]       # 超链接 → JSON
-node cli/src/index.mjs attachments <file.pdf> [--extract d] # 嵌入附件 → JSON / 导出到目录
-node cli/src/index.mjs layers <file.pdf>                    # 图层（OCG）→ JSON
-node cli/src/index.mjs translate "text" [--to zh-Hans]      # 本机翻译（macOS）
-node cli/src/index.mjs export-annotations <file.pdf>        # 伴生批注 → JSON
-node cli/src/index.mjs import-annotations <file.pdf> [--dry-run]  # PDF 内其他应用的注释 → 伴生文件（不重复导入）
-node cli/src/index.mjs annotate <file.pdf> --out x.pdf      # 伴生批注 → 标准 PDF 注释
-node cli/src/index.mjs to-images <file.pdf> --out-dir d     # 页面 → PNG/JPEG（TIFF 亦可）
-node cli/src/index.mjs search <dir> <query>                 # 跨文件搜索
-node cli/src/index.mjs dict 汉字                             # 内置离线词典
-node cli/src/index.mjs cite paper.pdf --format bibtex       # 引用（bibtex|apa|gbt|all|json；--online 才查 doi.org）
-node cli/src/index.mjs ocr scan.pdf --out scan-ocr.pdf      # 本地 OCR → 可搜索 PDF
-node cli/src/index.mjs ocr scan.pdf --out scan.md           # 本地 OCR → Markdown
-node cli/src/index.mjs ocr photo.jpg                        # 图片 → 文字（stdout）
-node cli/src/index.mjs compare old.pdf new.pdf [--json]     # 比较两版文档（按页对齐的差异列表）
-node cli/src/index.mjs ask paper.pdf "损失函数怎么定义的？"   # 问 AI（带 [p.N] 引用，流式输出）
-node cli/src/index.mjs summarize paper.pdf [--page 3]       # AI 摘要（长文档 map-reduce，--budget 字数）
-node cli/src/index.mjs retrieve paper.pdf "query" --k 6     # 本地检索最相关页段落 → JSON（不调模型）
-#   AI 服务：--endpoint http://localhost:11434/v1 --model qwen2.5:7b [--key k]
-#   或环境变量 SOLOPDF_AI_ENDPOINT / SOLOPDF_AI_MODEL / SOLOPDF_AI_KEY；--json 输出结构化结果
-node cli/src/index.mjs selftest test-fixtures               # 标准测试集验收
-node cli/src/index.mjs export-md a.pdf --out a.md           # 导出结构化 Markdown（含标题/列表/表格）
-node cli/src/index.mjs auto-crop a.pdf --out a-cropped.pdf  # 自动检测全书白边并永久裁切
-node cli/src/index.mjs split-bookmarks a.pdf --out-dir dir  # 按目录书签章节拆分 PDF
-node cli/src/index.mjs redact-text a.pdf --terms "机密" --presets phone,email,idcard --out a-redacted.pdf
-node cli/src/index.mjs outlines a.pdf --auto [--out a-outlines.pdf] # 智能识别正文标题生成目录（或读取现有目录）
-node cli/src/index.mjs extract-table a.pdf --page 1 [--format md|csv] # 提取页面/区域表格为 Markdown 或 CSV
-node cli/src/index.mjs export-flashcards a.pdf [--format anki|obsidian] # 导出伴生批注为 Anki / Obsidian 闪卡
-node cli/src/index.mjs verify-signatures signed.pdf                  # 校验 PDF 数字签名与篡改状态
-node cli/src/index.mjs auto-rename paper.pdf [--out-dir dir] [--json] # 智能重命名建议（{year} - {author} - {title}.pdf）
+**SoloPDF** is built on **Tauri 2 + Vue 3 + Rust** (~24 MB macOS Universal `.dmg`, native across **macOS, Windows x64/ARM64, Linux x64/ARM64, iOS/iPadOS, and Android**):
 
-# 文档操作（转发给原生驱动 solopdf-doc，全部写新文件）
-node cli/src/index.mjs doc pages a.pdf out.pdf --keep 1,0,3-5 --rotate 90   # 0 = 插入空白页
-node cli/src/index.mjs doc merge out.pdf a.pdf b.pdf
-node cli/src/index.mjs doc split a.pdf outdir --ranges 1-3,4-10
-node cli/src/index.mjs doc split-2up scan.pdf out.pdf --only-wide 1 --rtl 0 # 双页扫描件中缝切分为单页
-node cli/src/index.mjs doc single-page a.pdf out.pdf --gap 12 --border 1    # 多页垂直拼接为单张连续长页
-node cli/src/index.mjs doc detect-blank scan.pdf --threshold 0.005          # 检测空白页与纯白扫描页
-node cli/src/index.mjs doc remove-blank scan.pdf out.pdf --threshold 0.005  # 自动剔除空白页
-node cli/src/index.mjs doc overlay a.pdf out.pdf letterhead.pdf --under 1   # 矢量信纸/底图叠印
-node cli/src/index.mjs doc attachments-list a.pdf                           # 列出文档级内嵌附件
-node cli/src/index.mjs doc attachments-add a.pdf out.pdf data.csv note.txt  # 嵌入文档级附件
-node cli/src/index.mjs doc attachments-remove a.pdf out.pdf [--names a,b]   # 剥离指定或全部内嵌附件
-node cli/src/index.mjs doc pipeline a.pdf out.pdf steps.json                # 内存多步自动化流水线
-node cli/src/index.mjs doc outlines a.pdf
-node cli/src/index.mjs doc set-outlines a.pdf out.pdf outlines.json
-node cli/src/index.mjs doc nup a.pdf out.pdf --cols 2 --rows 2 --border 1
-node cli/src/index.mjs doc booklet a.pdf out.pdf --border 1
-node cli/src/index.mjs doc grayscale a.pdf out.pdf --whiten 1
-node cli/src/index.mjs doc resize a.pdf out.pdf --size A4
-node cli/src/index.mjs doc watermark a.pdf out.pdf --text "机密" --pos tile --opacity 0.2
-node cli/src/index.mjs doc page-numbers a.pdf out.pdf --format "{n} / {total}" --pos bottom-outside
-node cli/src/index.mjs doc crop a.pdf out.pdf --margins 20,15,20,15
-node cli/src/index.mjs doc extract-images a.pdf outdir --min-dim 32
-node cli/src/index.mjs doc sanitize a.pdf out.pdf --annots 1 --attachments 1 --forms 1
-node cli/src/index.mjs doc flatten a.pdf out.pdf
-node cli/src/index.mjs doc redact a.pdf out.pdf rects.json
-node cli/src/index.mjs doc verify-signatures signed.pdf
-node cli/src/index.mjs doc cert-sign a.pdf out.pdf --signer "Alice" --reason "Approved"
-node cli/src/index.mjs doc compress a.pdf out.pdf --max-dim 1600 --quality 72
-node cli/src/index.mjs doc protect a.pdf out.pdf --password pw
-node cli/src/index.mjs doc unprotect a.pdf out.pdf --password pw
-node cli/src/index.mjs doc djvu-page a.djvu p1.png --page 1
-```
+1. **Highlights = Plain Markdown (`.annotations.md`).** Every highlight, underline, sticky note, freehand sketch, and region screenshot is saved right next to your PDF as a human-readable Markdown file with `solopdf://` deep links. Open and edit it in [SoloMD](https://solomd.app), Obsidian, VS Code, or Git — triple-layer anchoring (`text fingerprint > page + coordinates`) keeps highlights attached even if the PDF is re-exported, and your notes never get overwritten.
+2. **20+ Offline PDF Tools in Pure Rust (Strict Copy-Out).** Auto-deskew, Sauvola adaptive binarization, 2-up scan split, 17-step batch pipelines, true content-stream redaction, N-up & saddle-stitch booklet imposition, X.509/PKCS#7 signature verification, lossless image extraction, and smart outline generation — zero Docker, zero Java, zero network uploads, and **your original PDF is never modified in place**.
+3. **Academic & Legal Superpowers.** Drag a box to snip math formulas into **LaTeX** (`$...$` / `$$...$$`) or tables into **Markdown / CSV**; aggregate `#tags` across dozens of papers into a **Cross-PDF Topic Digest**; export **Anki / Obsidian flashcards**; or run **Visual Pixel Overlay & A↔B Blink Compare** to catch subtle contract or CAD revisions in seconds.
+4. **AI-Native CLI + 56-Tool MCP Server.** Drive every reading, retrieval (offline BM25 with `[p.N]` citations), OCR, comparison, and document operation from your terminal or directly inside **Claude Code, Claude Desktop, Cursor, and Windsurf**.
 
-原生驱动有两个：`solopdf-doc`（页面/合并/拆分/标注/压缩/加密/DjVu）和
-`solopdf-ocr`（`cargo build --bin solopdf-ocr`，位于
-`app/src-tauri`）：`image` 子命令输出识别行（`--json` 带坐标），`overlay`
-把结果注入为隐形文字层（tesseract 同款 GlyphLessFont 方案，CJK 复制/搜索
-无需内嵌大字体）。macOS/iOS 走系统 Vision；Windows/Linux 走内置
-PP-OCRv4 ONNX（`assets/ppocr/`，可用 `SOLOPDF_PPOCR_DIR` 覆盖）。
+| Capability | SoloPDF | Adobe / Foxit | PDF Expert | Stirling-PDF | Zotero |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Price & License** | **Free · MIT** | Freemium / Sub | Paid ($80+/yr) | Free · Self-host | Free · AGPL |
+| **Install Footprint** | **~24 MB native** | 500 MB – 2 GB | ~180 MB (Apple only) | Docker + JVM (~1.5 GB) | ~250 MB |
+| **Ads / Telemetry / Account** | **Zero** | Heavy upsells | Account nag | Zero | Optional sync |
+| **Annotations Format** | **Plain `.annotations.md`** | Locked in PDF | Locked in PDF | N/A | SQLite DB |
+| **Visual Pixel & Blink Diff** | **Built-in (Anaglyph + Blink)** | Paid Pro only | No | Limited | No |
+| **Scan Deskew + Sauvola Binarize** | **17-step Rust pipeline** | Paid Pro only | No | Docker required | No |
+| **Math → LaTeX & Table → MD Snip** | **100% Offline** | No | No | No | Plugins needed |
+| **True Content-Stream Redaction** | **Built-in (Offline)** | Paid Pro only | Paid | Yes | No |
+| **CLI + MCP Server for AI Agents** | **CLI + 56 MCP Tools** | No | No | REST API | 3rd-party MCP |
+| **Platforms** | **Mac · Win · Linux · iOS · Android** | Mac · Win · Mobile | Mac · iOS | Web (Docker) | Mac · Win · Linux · iOS · Android |
 
-## MCP
+---
+
+## What's New in v1.1
+
+- **Scan Mastery Closed Loop** — **Auto-Deskew & border cleanup** (projection profile variance maximization + bilinear rotation), **Sauvola local adaptive binarization** ($O(1)$ integral-image windowing that eliminates phone-camera shadows), **2-up scan center-gutter split** (supports skipping single-page covers and RTL manga/ancient texts), **Single continuous vector page stitch**, **blank scan ink-ratio detection & removal**, and **vector PDF letterhead overlay**.
+- **Visual Page Comparison (Overlay & Blink Diff)** — Alongside word/character-level text diff, inspect scanned contracts, stamps, and CAD drawings with **Red/Cyan pixel anaglyph overlay**, **16×16 connected-component change hotspots (`Δ X.XX%`)**, and **650 ms A ↔ B Blink Compare**.
+- **Math Snip → LaTeX & Cross-PDF `#tag` Topic Digest** — Box-select equations on any page to copy inline `$...$` or display `$$...$$` LaTeX (superscripts/subscripts, stacked fractions, radicals, Greek/calculus symbols). Aggregate `.annotations.md` across open tabs or an entire literature folder by `#tag` (`#method`, `#limitation`, etc.) into a structured Markdown synthesis ready for SoloMD or Obsidian.
+- **17-Step In-Memory Pipeline & Multi-File Batch Queue** — Chain up to 17 atomic PDF operations in memory (5 built-in presets: *Scan Cleanup*, *Crisp B&W Scan*, *Confidential Share*, *Handout Print*, *Archive Slim*) and run them across a batch of PDFs in one go, plus **Smart Auto-Rename** (`{year} - {author} - {title}.pdf`) and `/EmbeddedFiles` attachment read/write/strip.
+
+---
+
+## Core Capabilities
+
+### Reading & Companion Markdown Notes
+- **Highlight → `.annotations.md`**: Highlights, underlines, strikethroughs, squiggly lines, sticky notes, freehand ink, and **region screenshots** (saved in `<doc>.annotations.assets/` and referenced via standard `![](...)` Markdown) sync live with your companion `.annotations.md` file.
+- **Bi-directional Round-Trip**: Import existing PDF annotations left by Acrobat, Apple Preview, PDF Expert, Zotero, or Foxit in one click (undoable, deduplicated, non-destructive). Export companion notes back into a new standard-annotated PDF copy anytime.
+- **Instant Streaming & CJK-First Search**: Cold-starts a 157 MB / 1,048-page PDF in ~1s with constant-memory virtual scrolling. Full-text search normalizes NFKC codepoints (fixing the notorious Kangxi radical mismatch in Skia-exported PDFs).
+- **Side-by-Side Split & Reading Aids**: View two sections of the same PDF or two separate PDFs side-by-side (with optional page-locked sync scroll), smart dark mode (inverts text pages while keeping photo-heavy pages intact), auto-crop margins for two-column papers, column-aware **Reading Ruler** (`L`), **2–4× HD Loupe** (hold `Z`), and built-in offline Chinese-English dictionary (CC-CEDICT).
+- **Multi-Format**: **PDF · EPUB · MOBI/AZW3 · FB2 (`.fb2`/`.fbz`, auto encoding detection) · TXT · CBZ/CBR comics · DjVu · Multi-page TIFF** (CCITT G3/G4 fax, LZW, Deflate, JPEG).
+
+### 100% Local OCR & Optional BYOK AI
+- **On-Device OCR (Zero Network)**: Turn scanned PDFs or camera photos into **searchable PDFs** (Tesseract-style invisible `GlyphLessFont` text layer — selectable, searchable, and highlightable without bloating file size) or structured **Markdown**. Uses Apple **Vision** on macOS/iOS (zero bundle overhead) and bundled **PP-OCRv4 ONNX** on Windows/Linux.
+- **Ask AI (Off by Default, BYOK / Local Ollama)**: Point SoloPDF at your own `http://localhost:11434/v1` (Ollama / LM Studio) or OpenAI-compatible key for streamed Q&A with `[p.N]` page citations and map-reduce long-document summaries. Explicit endpoint consent before a single byte leaves the app.
+
+### Complete Offline Document Toolkit (Copy-Out Only)
+- **Outlines / Bookmarks**: Visual tree editor + 1-click smart outline generator from heading font-size gradients or chapter regexes (`Chapter N`, `1.1`, `第X章`).
+- **Imposition & Prepress**: **N-up** (`2/4/6/9/16` pages per sheet, vector `/Form XObject`), **Saddle-stitch Booklet**, **2-up Split**, **Single Continuous Page**, **Grayscale + scan background whitening**, **Normalize Page Size** (`A4`/`A3`/`Letter`/`Legal`), and **Auto-Crop margins** (with symmetric odd/even binding gutters).
+- **Watermarks, Stamps & Measurement**: Tiled/diagonal CJK text & alpha PNG watermarks, **Bates numbering** (`DOC-{n:06}`, outside-edge alignment), **8 localized vector stamps** + dynamic signer/date stamps, and calibrated **scale ruler** for distance, perimeter, and polygon area (`mm`/`cm`/`m`/`in`/`pt`).
+- **Security, True Redaction & Digital Signatures**: AES-256 open passwords, **true content-stream Redaction** (strips underlying `Tj`/`TJ` operators — impossible to copy-paste underneath — with built-in phone/email/ID/card/IPv4 regex presets), metadata & script **Sanitization**, AcroForm filling & **Flattening**, and **X.509 / PKCS#7 signature verification & signing**.
+
+---
+
+## Install
 
 ```bash
-claude mcp add solopdf -- node /path/to/pdf/dev-mcp/src/index.mjs
-# 写操作（追加批注）需显式开启：
-claude mcp add solopdf -- node /path/to/pdf/dev-mcp/src/index.mjs --allow-write
+# macOS (Homebrew)
+brew install --cask zhitongblog/tap/solopdf
+
+# Windows (Scoop)
+scoop bucket add zhitongblog https://github.com/zhitongblog/scoop-bucket
+scoop install solopdf
 ```
 
-只读工具：`solopdf_info`（PDF / FB2 / TIFF）/ `solopdf_extract_text`（PDF / FB2）/ `solopdf_search` /
-`solopdf_search_library`（跨文件夹）/ `solopdf_read_annotations` /
-`solopdf_page_image` / `solopdf_define`（离线词典）/ `solopdf_links` /
-`solopdf_translate` / `solopdf_pdf_annotations`（PDF 内其他应用留下的注释及导入状态）/
-`solopdf_attachments`（嵌入附件）/ `solopdf_layers`（图层）/
-`solopdf_cite`（引用信息，`online: true` 才联网） /
-`solopdf_auto_rename`（基于标题/作者/年份/DOI 智能生成规范文件名建议） /
-`solopdf_detect_blank_pages`（空白页与纯白扫描页检测） /
-`solopdf_compare`（两版 PDF 的文字差异 + 页对齐） /
-`solopdf_export_markdown`（结构化 Markdown 导出） /
-`solopdf_retrieve`（本地 BM25 检索最相关的页段落，不调用模型、不联网——给外部 LLM 带页码引用作答用）。
+- **macOS (Apple Silicon & Intel Universal)**: Download `SoloPDF_*_universal.dmg` from [**GitHub Releases**](https://github.com/zhitongblog/solopdf/releases/latest), run `brew install --cask zhitongblog/tap/solopdf`, or install from the [**Mac App Store**](https://apps.apple.com/app/id6787712953).
+- **Windows (x64 & ARM64)**: Download `*-setup.exe` or `*.msi` from [**GitHub Releases**](https://github.com/zhitongblog/solopdf/releases/latest) (offline PP-OCRv4 models included), or install via Scoop above.
+- **Linux (x64 & ARM64)**: Download `*.AppImage` or `*.deb` from [**GitHub Releases**](https://github.com/zhitongblog/solopdf/releases/latest).
+- **iOS / iPadOS**: [**App Store**](https://apps.apple.com/app/id6787712953).
+- **Android**: Download `app-universal-release.apk` from [**GitHub Releases**](https://github.com/zhitongblog/solopdf/releases/latest).
 
-写门控（`--allow-write`）：`solopdf_add_annotation` /
-`solopdf_export_annotated_pdf` / `solopdf_import_annotations` / `solopdf_pages` / `solopdf_merge` /
-`solopdf_watermark` / `solopdf_page_numbers` / `solopdf_crop` / `solopdf_split_by_bookmarks` /
-`solopdf_extract_images` / `solopdf_sanitize` / `solopdf_flatten` / `solopdf_redact` / `solopdf_redact_by_text` /
-`solopdf_split_2up` / `solopdf_single_page` / `solopdf_remove_blank_pages` / `solopdf_overlay` /
-`solopdf_add_attachments` / `solopdf_remove_attachments` / `solopdf_pipeline` /
-`solopdf_extract_attachment`（把附件写到目录）。
+---
 
-## 开发
+## Drive PDFs from Claude Code, Cursor, or Terminal (MCP + CLI)
+
+### MCP Server (`56` tools: `25` read-only + `31` write-gated)
 
 ```bash
-pnpm install
-pnpm --filter @solopdf/core build   # CLI/MCP 依赖的共享模块
-pnpm --filter @solopdf/core test    # core 单元测试
-cargo test --lib --manifest-path app/src-tauri/Cargo.toml   # pdfops / djvu 测试
-node scripts/check-i18n.mjs         # 四语言文案完整性
-node scripts/mock-llm.mjs --port 11435   # 假的 OpenAI 兼容服务（SSE 流式、[p.N] 引用），测「问 AI」用
-pnpm dev                            # 浏览器模式（vite + fixtures API，供 E2E）
-pnpm tauri dev                      # 桌面应用
-pnpm tauri build                    # 打包
-scripts/build-dmg.sh                # macOS universal dmg（有签名凭据时顺带公证）
-scripts/build-android.sh            # Android debug APK（release 需自备 keystore）
-scripts/build-ios.sh                # iOS ipa
-scripts/build-mas.sh                # Mac App Store pkg
+# Read-only mode (safe inspection, search, BM25 retrieval, math/table snip, visual/text diff):
+claude mcp add solopdf -- node /path/to/solopdf/dev-mcp/src/index.mjs
+
+# Enable Copy-out document & annotation tools (--allow-write):
+claude mcp add solopdf -- node /path/to/solopdf/dev-mcp/src/index.mjs --allow-write
 ```
 
-发布产物覆盖的架构：macOS 单个 universal dmg（Apple Silicon + Intel）、
-Windows ARM64 与 x64（NSIS + MSI）、Linux ARM64 与 x64（deb + AppImage）、
-Android 四 ABI。CI（`.github/workflows/build.yml`）在推 `v*` tag 时全部构建。
+- **Read-only tools (25)**: `solopdf_info` · `solopdf_extract_text` · `solopdf_search` · `solopdf_search_library` · `solopdf_retrieve` *(local BM25 chunks with page numbers, zero LLM calls)* · `solopdf_read_annotations` · `solopdf_pdf_annotations` · `solopdf_page_image` · `solopdf_links` · `solopdf_attachments` · `solopdf_layers` · `solopdf_outlines` · `solopdf_cite` · `solopdf_auto_rename` · `solopdf_compare` · `solopdf_visual_diff` · `solopdf_extract_table` · `solopdf_extract_math` · `solopdf_export_markdown` · `solopdf_export_flashcards` · `solopdf_export_digest` · `solopdf_detect_blank_pages` · `solopdf_verify_signatures` · `solopdf_define` · `solopdf_translate`
+- **Write-gated tools (`--allow-write`, 31 — all Copy-out)**: `solopdf_add_annotation` · `solopdf_import_annotations` · `solopdf_export_annotated_pdf` · `solopdf_pages` · `solopdf_merge` · `solopdf_split_by_bookmarks` · `solopdf_split_2up` · `solopdf_single_page` · `solopdf_remove_blank_pages` · `solopdf_deskew` · `solopdf_binarize` · `solopdf_crop` · `solopdf_nup` · `solopdf_booklet` · `solopdf_grayscale` · `solopdf_resize_pages` · `solopdf_overlay` · `solopdf_watermark` · `solopdf_page_numbers` · `solopdf_write_outlines` · `solopdf_extract_images` · `solopdf_extract_attachment` · `solopdf_add_attachments` · `solopdf_remove_attachments` · `solopdf_sanitize` · `solopdf_flatten` · `solopdf_redact` · `solopdf_redact_by_text` · `solopdf_cert_sign` · `solopdf_pipeline` · `solopdf_batch_pipeline`
 
-内置词典由 CC-CEDICT 生成，需要重建时：
+### Command Line (`solopdf`)
 
 ```bash
-node scripts/build-dict.mjs path/to/cedict_ts.u8   # → app/public/dict/*.dic
+# Reading, Search, Citations, Snipping & Synthesis
+node cli/src/index.mjs info paper.pdf                        # pages, outlines, metadata (PDF / FB2 / TIFF)
+node cli/src/index.mjs extract-text paper.pdf --pages 1-5
+node cli/src/index.mjs search ./papers "transformer"         # cross-library search
+node cli/src/index.mjs retrieve paper.pdf "loss function" --k 6  # local BM25 top-k chunks -> JSON
+node cli/src/index.mjs cite paper.pdf --format bibtex        # bibtex | apa | gbt | all | json
+node cli/src/index.mjs auto-rename paper.pdf --out-dir ./clean
+node cli/src/index.mjs extract-table paper.pdf --page 3 --format md
+node cli/src/index.mjs extract-math paper.pdf --page 2 --rect 80,200,420,90
+node cli/src/index.mjs export-flashcards paper.pdf --format anki
+node cli/src/index.mjs export-digest ./papers --out review.md # cross-PDF #tag literature synthesis
+node cli/src/index.mjs compare v1.pdf v2.pdf --visual-page 1 --visual-out diff.png
+node cli/src/index.mjs ocr scan.pdf --out scan-searchable.pdf
+
+# Native Rust PDF Engine (solopdf-doc — strictly writes new files)
+node cli/src/index.mjs doc deskew scan.pdf fixed.pdf --clean-borders 1
+node cli/src/index.mjs doc binarize scan.pdf crisp-bw.pdf --window 31 --k 0.2
+node cli/src/index.mjs doc split-2up book-scan.pdf single.pdf --only-wide 1
+node cli/src/index.mjs doc pipeline raw.pdf clean.pdf steps.json
+node cli/src/index.mjs doc batch-pipeline out-dir/ steps.json a.pdf b.pdf c.pdf
+node cli/src/index.mjs redact-text contract.pdf --presets phone,email,idcard --out redacted.pdf
+node cli/src/index.mjs verify-signatures signed.pdf
 ```
 
-第三方组件与许可证见 [NOTICE.md](NOTICE.md)。
+---
 
-## 伴生文件格式
+## Companion Markdown Format
 
 ```markdown
-# 《文档名》批注
+# "Document Title" Annotations
 <!-- solopdf:meta v1 name=... -->
 
-## p.23 — 高亮 <!-- solopdf:id a1b2c3 -->
-> 被高亮的原文
-你的批注（可在任何编辑器里改，SoloPDF 不会覆盖）
-[跳回原文](solopdf://open?file=...&page=23&annot=a1b2c3)
+## p.23 — Highlight <!-- solopdf:id a1b2c3 -->
+> Quoted passage from the PDF
+Your own note (edit freely in SoloMD, Obsidian, or Vim — SoloPDF never clobbers your prose)
+[Jump to passage](solopdf://open?file=...&page=23&annot=a1b2c3)
 <!-- solopdf:anchor a1b2c3 {"page":23,...} -->
 ```
 
-规则：SoloPDF 只按 anchor id 定位替换/追加，从不整文件重写；
-删掉 anchor 注释行 = 该条降级为纯笔记；正文随便改。
+Rule: SoloPDF only updates or appends blocks by `anchor id` and never rewrites the whole file; deleting an anchor comment gracefully degrades that entry to a plain note.
+
+---
+
+## Architecture & Development
+
+```text
+app/            Tauri 2 + Vue 3 + Rust desktop & mobile app (pdfops, OCR, DjVu)
+core/           Shared domain logic: sidecar format, triple anchoring, diff, math/table snip, digest
+cli/            solopdf CLI (shares exact pdf.js + core engine with the app)
+dev-mcp/        56-tool Model Context Protocol server for AI agents
+test-fixtures/  Standard acceptance fixtures
+```
+
+```bash
+pnpm install
+pnpm --filter @solopdf/core build
+pnpm --filter @solopdf/core test                             # 311 unit tests
+cargo test --lib --manifest-path app/src-tauri/Cargo.toml    # Rust pdfops / signature / scan tests
+node scripts/check-i18n.mjs                                  # 4 locales parity check (zhCN/zhTW/en/ja)
+pnpm tauri dev
+```
+
+Third-party notices: [NOTICE.md](NOTICE.md).
 
 ## License
 
-MIT
+[MIT](LICENSE)

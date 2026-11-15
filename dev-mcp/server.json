@@ -1,0 +1,29 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.zhitongblog/solopdf",
+  "description": "56-tool local-first PDF MCP server: BM25 retrieval, math/table snip, visual diff, OCR, redaction & 17-step Rust pipelines.",
+  "repository": {
+    "url": "https://github.com/zhitongblog/solopdf",
+    "source": "github",
+    "subfolder": "dev-mcp"
+  },
+  "version": "1.1.0",
+  "packages": [
+    {
+      "registry_type": "npm",
+      "identifier": "@solopdf/dev-mcp",
+      "version": "1.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "package_arguments": [
+        {
+          "type": "named",
+          "name": "--allow-write",
+          "description": "Enable copy-out PDF manipulation and companion Markdown annotation tools (read-only by default).",
+          "is_required": false
+        }
+      ]
+    }
+  ]
+}

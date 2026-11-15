@@ -124,8 +124,13 @@ rm -rf app/src-tauri/gen/apple/Externals/*/debug
 /usr/bin/sed -i.bak '/^      - path: Externals$/d' "$PROJECT_YML" && rm -f "$PROJECT_YML.bak"
 (cd app/src-tauri/gen/apple && xcodegen generate >/dev/null)
 
-# xcodegen does NOT overwrite existing Info.plist keys — force the build
+# xcodegen does NOT overwrite existing Info.plist keys — force version & build
 # number directly (ASC rejects duplicate CFBundleVersion uploads)
+IOS_VERSION="${IOS_VERSION:-}"
+if [ -n "$IOS_VERSION" ]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $IOS_VERSION" app/src-tauri/gen/apple/solopdf_iOS/Info.plist
+  echo "    CFBundleShortVersionString -> $IOS_VERSION"
+fi
 IOS_BUILD_NUMBER="${IOS_BUILD_NUMBER:-}"
 if [ -n "$IOS_BUILD_NUMBER" ]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $IOS_BUILD_NUMBER" app/src-tauri/gen/apple/solopdf_iOS/Info.plist
