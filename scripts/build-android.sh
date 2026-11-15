@@ -7,7 +7,7 @@
 #
 # What this script adds to the generated Android project:
 #   - 16 KB ELF page alignment (-Wl,-z,max-page-size=16384) required by Google Play for Android 15+
-#   - com.android.vending.BILLING permission + com.android.billingclient:billing:7.1.1
+#   - com.android.vending.BILLING permission + com.android.billingclient:billing:8.0.0
 #   - MainActivity.kt Google Play Billing bridge for the 3-tier voluntary Tip Jar
 #   - VIEW intent filters so "open with" works for our document types, by
 #     MIME type AND by file extension (content:// URIs from Drive and friends
@@ -136,14 +136,18 @@ python3 - "$GEN/app/build.gradle.kts" << 'PYGRADLE'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1])
 s = p.read_text()
-if "com.android.billingclient:billing" not in s:
+if "com.android.billingclient:billing:7.1.1" in s:
+    s = s.replace("com.android.billingclient:billing:7.1.1", "com.android.billingclient:billing:8.0.0")
+    p.write_text(s)
+    print("    upgraded com.android.billingclient:billing to 8.0.0")
+elif "com.android.billingclient:billing" not in s:
     s = s.replace(
         'dependencies {',
-        'dependencies {\n    implementation("com.android.billingclient:billing:7.1.1")',
+        'dependencies {\n    implementation("com.android.billingclient:billing:8.0.0")',
         1,
     )
     p.write_text(s)
-    print("    added com.android.billingclient:billing:7.1.1")
+    print("    added com.android.billingclient:billing:8.0.0")
 else:
     print("    Play Billing dependency already present")
 PYGRADLE
@@ -299,9 +303,9 @@ class MainActivity : TauriActivity() {
           val params = QueryProductDetailsParams.newBuilder()
             .setProductList(productList)
             .build()
-          client.queryProductDetailsAsync(params) { _, productDetailsList ->
+          client.queryProductDetailsAsync(params) { _, productDetailsResult ->
             val out = JSONArray()
-            for (d in productDetailsList) {
+            for (d in productDetailsResult.productDetailsList) {
               productCache[d.productId] = d
               val price = d.oneTimePurchaseOfferDetails?.formattedPrice ?: ""
               out.put(
@@ -362,8 +366,8 @@ class MainActivity : TauriActivity() {
                 )
               )
               .build()
-            client.queryProductDetailsAsync(qParams) { _, productDetailsList ->
-              val found = productDetailsList.firstOrNull()
+            client.queryProductDetailsAsync(qParams) { _, productDetailsResult ->
+              val found = productDetailsResult.productDetailsList.firstOrNull()
               if (found != null) {
                 productCache[found.productId] = found
                 launchWith(found)
