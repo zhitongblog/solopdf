@@ -1,0 +1,27 @@
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "name": "solopdf",
+  "description": "56-tool local-first PDF Model Context Protocol (MCP) server — read, search, offline BM25 retrieve with page citations, math-to-LaTeX & table-to-Markdown snip, text & visual pixel diff, X.509 signature verification, true content-stream redaction, scan deskew/binarization, and 17-step PDF pipelines.",
+  "maintainers": [
+    "zhitongblog"
+  ],
+  "license": "MIT",
+  "categories": [
+    "file-systems",
+    "knowledge-and-memory",
+    "productivity"
+  ],
+  "keywords": [
+    "pdf",
+    "markdown",
+    "annotations",
+    "obsidian",
+    "ocr",
+    "latex",
+    "table-extraction",
+    "redaction",
+    "bm25",
+    "rag",
+    "document-processing"
+  ]
+}

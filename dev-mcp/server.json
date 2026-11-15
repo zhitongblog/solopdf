@@ -1,29 +1,22 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.zhitongblog/solopdf",
-  "description": "56-tool local-first PDF MCP server: BM25 retrieval, math/table snip, visual diff, OCR, redaction & 17-step Rust pipelines.",
+  "title": "SoloPDF",
+  "description": "Local PDF reader & toolkit: BM25 search, math/table snip, visual diff, OCR & redaction (56 tools).",
+  "version": "1.1.0",
   "repository": {
     "url": "https://github.com/zhitongblog/solopdf",
-    "source": "github",
-    "subfolder": "dev-mcp"
+    "source": "github"
   },
-  "version": "1.1.0",
+  "websiteUrl": "https://solopdf.doaipm.com",
   "packages": [
     {
-      "registry_type": "npm",
-      "identifier": "@solopdf/dev-mcp",
-      "version": "1.1.0",
+      "registryType": "mcpb",
+      "identifier": "https://github.com/zhitongblog/solopdf/releases/download/v1.1.0/solopdf-mcp-1.1.0.mcpb",
+      "fileSha256": "2fc191880198d5e357691b0957bc5f0599230fdcc74b21f5e267f38e8a0d40cd",
       "transport": {
         "type": "stdio"
-      },
-      "package_arguments": [
-        {
-          "type": "named",
-          "name": "--allow-write",
-          "description": "Enable copy-out PDF manipulation and companion Markdown annotation tools (read-only by default).",
-          "is_required": false
-        }
-      ]
+      }
     }
   ]
 }
