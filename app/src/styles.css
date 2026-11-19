@@ -427,9 +427,30 @@ html.dark .pv-page .annotationLayer :is(input, textarea, select) {
    only visible content (WKWebView native printOperation prints the page) */
 .print-overlay { display: none; }
 @media print {
-  .print-mode .app { display: none !important; }
-  .print-mode .print-overlay { display: block; }
-  .print-overlay img { display: block; width: 100%; page-break-after: always; }
+  html.print-mode, html.print-mode body {
+    height: auto !important;
+    width: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  html.print-mode #app { display: none !important; }
+  html.print-mode .print-overlay { display: block !important; margin: 0; padding: 0; }
+  .print-overlay img {
+    display: block;
+    max-width: 100%;
+    max-height: 99.5vh;
+    width: auto;
+    height: auto;
+    margin: 0 auto;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .print-overlay img:not(:last-child) {
+    page-break-after: always;
+    break-after: page;
+  }
   @page { margin: 0; }
 }
 

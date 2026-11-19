@@ -11,22 +11,25 @@ fn main() {
             .file("vision_shim/ocr_shim.m")
             .file("vision_shim/dict_shim.m")
             .file("vision_shim/iap_shim.m")
+            .file("vision_shim/print_shim.m")
             .flag("-fobjc-arc")
             .compile("solopdf_vision_shim");
         println!("cargo:rerun-if-changed=vision_shim/ocr_shim.m");
         println!("cargo:rerun-if-changed=vision_shim/dict_shim.m");
         println!("cargo:rerun-if-changed=vision_shim/iap_shim.m");
+        println!("cargo:rerun-if-changed=vision_shim/print_shim.m");
         println!("cargo:rustc-link-lib=framework=Vision");
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=ImageIO");
         println!("cargo:rustc-link-lib=framework=CoreGraphics");
         println!("cargo:rustc-link-lib=framework=CoreImage");
         println!("cargo:rustc-link-lib=framework=StoreKit");
-        // the system dictionary panel lives in UIKit on iOS, AppKit on macOS
+        // the system dictionary & print panels live in UIKit on iOS, AppKit+PDFKit on macOS
         if target.contains("ios") {
             println!("cargo:rustc-link-lib=framework=UIKit");
         } else {
             println!("cargo:rustc-link-lib=framework=AppKit");
+            println!("cargo:rustc-link-lib=framework=PDFKit");
         }
         build_translate_shim(&target);
     }

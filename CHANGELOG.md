@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## v1.1.2 — macOS 原生 PDFKit 矢量打印、原生菜单栏与打印排版修复
+
+### 新增与修复
+- **macOS / iOS 原生矢量 PDF 打印（`print_shim.m` / `print_pdf`）**：macOS 改为调用系统 `PDFKit`（`PDFDocument.printOperationForPrintInfo:scalingMode:kPDFPrintPageScaleToFit autoRotate:YES`），iOS 接入 `UIPrintInteractionController`（AirPrint），彻底消除旧版 WebView 截图打印因非阻塞弹窗提前清理 `.print-overlay` 导致的界面错位与模糊问题
+- **macOS 原生顶部菜单栏**：补齐 `File`（Open… `⌘O`、Close Tab `⌘W`、Print… `⌘P`）、`Edit`（含 Find… `⌘F`）、`View`（Zoom In/Out/Fit Width/Fullscreen）与 `Settings…` (`⌘,`) 原生菜单项并转发至前端
+- **修复 WebView 打印兜底排版**：`@media print` 改为隐藏 `#app` 并重置 `html/body` 高度与溢出，单页图片限制 `max-height: 99.5vh` 等比居中且消除末尾空白页；`printViaOverlay` 改为监听 `afterprint`（加 60s 兜底）延迟清理，避免 Windows/Linux 打印预览未完成时被提前销毁
+
 ## v1.1.1 — 修复移动端/单页模式翻页、页码同步与布局切换
 
 ### 修复与体验优化

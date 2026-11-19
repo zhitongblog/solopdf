@@ -1150,7 +1150,12 @@ async function doPrint(): Promise<void> {
   if (!tab || !doc) return
   showToast(t('app.printPrep'))
   try {
-    await printDocument(doc, undefined, layerConfig(tab.id))
+    await printDocument(doc, undefined, layerConfig(tab.id), {
+      path: tab.path,
+      name: tab.name,
+      formsDirty: tab.formsDirty,
+      encrypted: tab.encrypted,
+    })
   } catch (err) {
     showToast(t('app.printFail', { msg: (err as Error).message }))
   }
@@ -1336,6 +1341,20 @@ onMounted(async () => {
     }
     await listen<string[]>('solopdf://open-files', (e) => {
       for (const f of e.payload) openOsFile(f)
+    })
+    await listen<string>('solopdf://menu', (e) => {
+      const tab = store.activeTab
+      const ctrl = tab ? controllers.get(tab.id) : undefined
+      switch (e.payload) {
+        case 'open': void pickAndOpen(); break
+        case 'print': void doPrint(); break
+        case 'close-tab': if (tab) onCloseTab(tab.id); break
+        case 'find': if (tab) searchOpen.value = true; break
+        case 'settings': settingsOpen.value = !settingsOpen.value; break
+        case 'zoom-in': ctrl?.setZoom(ctrl.scale * 1.15); break
+        case 'zoom-out': ctrl?.setZoom(ctrl.scale / 1.15); break
+        case 'zoom-fit': ctrl?.setZoom('width'); break
+      }
     })
     const args = await invoke<string[]>('startup_files')
     for (const f of args) openOsFile(f)

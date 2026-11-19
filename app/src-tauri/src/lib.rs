@@ -2000,6 +2000,124 @@ fn print_webview() -> Result<(), String> {
     Err("printing is not supported on mobile yet".into())
 }
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+extern "C" {
+    fn solopdf_print_pdf(bytes: *const u8, len: usize, job_name_utf8: *const std::os::raw::c_char) -> i32;
+}
+
+/// Native vector PDF printing on macOS (PDFKit) and iOS (UIPrintInteractionController).
+/// Returns Ok(true) when handled natively, Ok(false) on other platforms so the
+/// frontend can fall back to webview printing.
+#[tauri::command]
+fn print_pdf(path: Option<String>, bytes: Option<Vec<u8>>, job_name: Option<String>) -> Result<bool, String> {
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        let data = if let Some(b) = bytes {
+            b
+        } else if let Some(p) = path {
+            std::fs::read(&p).map_err(|e| format!("failed to read PDF for printing: {e}"))?
+        } else {
+            return Ok(false);
+        };
+        if data.is_empty() {
+            return Ok(false);
+        }
+        let name = job_name.unwrap_or_else(|| "SoloPDF".into());
+        let cname = std::ffi::CString::new(name.replace('\0', "")).unwrap_or_else(|_| std::ffi::CString::new("SoloPDF").unwrap());
+        let rc = unsafe { solopdf_print_pdf(data.as_ptr(), data.len(), cname.as_ptr()) };
+        return match rc {
+            0 => Ok(true),
+            1 => Ok(false), // locked / invalid PDF — let frontend fall back to rendered pages
+            _ => Err("printing is unavailable on this device".into()),
+        };
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    {
+        let _ = (path, bytes, job_name);
+        Ok(false)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn build_macos_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+
+    let settings = MenuItemBuilder::with_id("settings", "Settings…")
+        .accelerator("CmdOrCtrl+,")
+        .build(app)?;
+    let app_menu = SubmenuBuilder::new(app, "SoloPDF")
+        .about(None)
+        .separator()
+        .item(&settings)
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .quit()
+        .build()?;
+
+    let open = MenuItemBuilder::with_id("open", "Open…")
+        .accelerator("CmdOrCtrl+O")
+        .build(app)?;
+    let close_tab = MenuItemBuilder::with_id("close-tab", "Close Tab")
+        .accelerator("CmdOrCtrl+W")
+        .build(app)?;
+    let print = MenuItemBuilder::with_id("print", "Print…")
+        .accelerator("CmdOrCtrl+P")
+        .build(app)?;
+    let file_menu = SubmenuBuilder::new(app, "File")
+        .item(&open)
+        .separator()
+        .item(&close_tab)
+        .separator()
+        .item(&print)
+        .build()?;
+
+    let find = MenuItemBuilder::with_id("find", "Find…")
+        .accelerator("CmdOrCtrl+F")
+        .build(app)?;
+    let edit_menu = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .separator()
+        .item(&find)
+        .build()?;
+
+    let zoom_in = MenuItemBuilder::with_id("zoom-in", "Zoom In")
+        .accelerator("CmdOrCtrl+=")
+        .build(app)?;
+    let zoom_out = MenuItemBuilder::with_id("zoom-out", "Zoom Out")
+        .accelerator("CmdOrCtrl+-")
+        .build(app)?;
+    let zoom_fit = MenuItemBuilder::with_id("zoom-fit", "Fit Width")
+        .accelerator("CmdOrCtrl+0")
+        .build(app)?;
+    let view_menu = SubmenuBuilder::new(app, "View")
+        .item(&zoom_in)
+        .item(&zoom_out)
+        .item(&zoom_fit)
+        .separator()
+        .fullscreen()
+        .build()?;
+
+    let window_menu = SubmenuBuilder::new(app, "Window")
+        .minimize()
+        .maximize()
+        .build()?;
+
+    MenuBuilder::new(app)
+        .items(&[&app_menu, &file_menu, &edit_menu, &view_menu, &window_menu])
+        .build()
+}
+
 fn collect_open_args(args: impl Iterator<Item = String>) -> Vec<String> {
     args.skip(1)
         .filter(|a| {
@@ -2125,11 +2243,27 @@ pub fn run() {
             debug_poll,
             debug_report,
             print_webview,
+            print_pdf,
         ])
         .setup(|app| {
             if debug_enabled_env() {
                 let bridge = app.state::<std::sync::Arc<DebugBridge>>();
                 start_debug_server(bridge.inner().clone());
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let menu = build_macos_menu(app.handle())?;
+                app.set_menu(menu)?;
+                app.on_menu_event(|app, event| {
+                    let id = event.id().as_ref();
+                    match id {
+                        "open" | "print" | "close-tab" | "find" | "settings"
+                        | "zoom-in" | "zoom-out" | "zoom-fit" => {
+                            let _ = app.emit("solopdf://menu", id);
+                        }
+                        _ => {}
+                    }
+                });
             }
             #[cfg(any(target_os = "linux", target_os = "windows"))]
             {

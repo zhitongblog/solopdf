@@ -46,7 +46,46 @@ async function renderPagesToImages(doc: PDFDocumentProxy, oc?: OcConfig | null):
   return urls
 }
 
-/** Tauri path: overlay in the main document + native WKWebView print */
+export interface PrintNativeHints {
+  path?: string
+  name?: string
+  formsDirty?: boolean
+  encrypted?: boolean
+}
+
+/** Tauri path: prefer native PDFKit/UIKit vector printing when possible;
+ *  fall back to DOM overlay + webview print (Windows/Linux, encrypted PDFs,
+ *  or documents with custom layer overrides). */
+async function printViaTauri(
+  doc: PDFDocumentProxy,
+  oc?: OcConfig | null,
+  hints?: PrintNativeHints,
+): Promise<void> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  // Native PDFKit / AirPrint: crisp vector output, zero HTML pagination drift.
+  // Skip when encrypted (PDFDocument would be locked without password) or when
+  // optional-content layers exist (user may have toggled layers in the UI).
+  if (!hints?.encrypted && !oc) {
+    try {
+      const payload = hints?.formsDirty
+        ? { bytes: Array.from(await doc.saveDocument()), jobName: hints.name }
+        : hints?.path
+          ? { path: hints.path, jobName: hints.name }
+          : null
+      if (payload) {
+        const handled = await invoke<boolean>('print_pdf', payload)
+        if (handled) return
+      }
+    } catch {
+      // fall through to webview overlay path
+    }
+  }
+  await printViaOverlay(doc, oc)
+}
+
+/** Webview overlay path: keep .print-mode alive until the print dialog closes
+ *  (wry's print() is non-blocking on macOS, so immediate finally cleanup would
+ *  rip out the overlay before the print preview finishes rendering). */
 async function printViaOverlay(doc: PDFDocumentProxy, oc?: OcConfig | null): Promise<void> {
   const { invoke } = await import('@tauri-apps/api/core')
   const urls = await renderPagesToImages(doc, oc)
@@ -59,6 +98,16 @@ async function printViaOverlay(doc: PDFDocumentProxy, oc?: OcConfig | null): Pro
   }
   document.body.appendChild(overlay)
   document.documentElement.classList.add('print-mode')
+
+  let cleaned = false
+  const cleanup = (): void => {
+    if (cleaned) return
+    cleaned = true
+    window.removeEventListener('afterprint', cleanup)
+    document.documentElement.classList.remove('print-mode')
+    overlay.remove()
+  }
+
   try {
     await new Promise<void>((resolve) => {
       const imgs = [...overlay.querySelectorAll('img')]
@@ -68,11 +117,13 @@ async function printViaOverlay(doc: PDFDocumentProxy, oc?: OcConfig | null): Pro
         if (!i.complete) i.onload = i.onerror = () => { if (--pending === 0) resolve() }
       }
     })
+    window.addEventListener('afterprint', cleanup, { once: true })
     await invoke('print_webview')
-  } finally {
-    // native print dialog is modal on macOS — safe to clean up right after
-    document.documentElement.classList.remove('print-mode')
-    overlay.remove()
+    // Fallback if the platform webview never fires `afterprint`
+    setTimeout(cleanup, 60_000)
+  } catch (err) {
+    cleanup()
+    throw err
   }
 }
 
@@ -82,9 +133,10 @@ export async function printDocument(
   trigger?: (w: Window) => void,
   /** optional-content config carrying the reader's layer choices */
   oc?: OcConfig | null,
+  hints?: PrintNativeHints,
 ): Promise<void> {
   if (isTauri() && !trigger) {
-    return printViaOverlay(doc, oc)
+    return printViaTauri(doc, oc, hints)
   }
   const doTrigger = trigger ?? ((w: Window) => w.print())
   const frame = document.createElement('iframe')
@@ -94,7 +146,9 @@ export async function printDocument(
     const fdoc = frame.contentDocument!
     fdoc.open()
     fdoc.write('<!doctype html><html><head><style>' +
-      '@page{margin:0}body{margin:0}img{display:block;width:100%;page-break-after:always}' +
+      '@page{margin:0}html,body{margin:0;padding:0;background:#fff}' +
+      'img{display:block;max-width:100%;max-height:99.5vh;width:auto;height:auto;margin:0 auto;page-break-inside:avoid;break-inside:avoid}' +
+      'img:not(:last-child){page-break-after:always;break-after:page}' +
       '</style></head><body></body></html>')
     fdoc.close()
 
