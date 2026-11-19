@@ -1,6 +1,6 @@
 {
   "name": "@solopdf/dev-mcp",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "56-tool local-first PDF Model Context Protocol (MCP) server — read, search, BM25 retrieve, math/table snip, visual diff, OCR, redact, deskew & batch-process PDFs locally.",
   "license": "MIT",
   "homepage": "https://solopdf.doaipm.com",

@@ -1375,7 +1375,7 @@ watch(() => store.settings.keepAwake, (on) => setKeepAwake(on))
 // speech that keeps reading a document you navigated away from is a bug
 watch(() => store.activeTabId, () => { readAloud.value = false })
 
-// zoom / dark-pdf propagation
+// zoom / dark-pdf / layout propagation
 watch(() => store.settings.darkPdf, (m) => {
   for (const c of controllers.values()) c.setDarkPdf(m)
   for (const c of splitControllers.values()) c.setDarkPdf(m)
@@ -1383,6 +1383,12 @@ watch(() => store.settings.darkPdf, (m) => {
 watch(() => store.settings.theme, () => {
   for (const c of controllers.values()) c.setDarkPdf(store.settings.darkPdf)
   for (const c of splitControllers.values()) c.setDarkPdf(store.settings.darkPdf)
+})
+watch(() => store.settings.scrollMode, (m) => {
+  for (const c of controllers.values()) c.setScrollMode(m)
+})
+watch(() => [store.settings.spread, store.settings.coverAlone] as const, ([sp, ca]) => {
+  for (const c of controllers.values()) c.setSpread(sp, ca)
 })
 // the sidebar squeezes the content area on desktop: re-fit split panes
 watch(() => store.settings.sidebarOpen, () => {

@@ -216,6 +216,7 @@ export class PdfViewerController {
   private hoverRaf = 0
   private pressTimer = 0
   private pressStart: { x: number; y: number } | null = null
+  private swipe: { x: number; y: number; t: number; scrollLeft: number } | null = null
   private suppressClick = false
   private pointerType = 'mouse'
   private refMarks: HTMLElement[] = []
@@ -250,6 +251,10 @@ export class PdfViewerController {
     scroll.addEventListener('pointerup', this.onPointerEnd)
     scroll.addEventListener('pointercancel', this.onPointerEnd)
     scroll.addEventListener('contextmenu', this.onContextMenu)
+    scroll.addEventListener('touchstart', this.onTouchStart, { passive: true })
+    scroll.addEventListener('touchmove', this.onTouchMove, { passive: true })
+    scroll.addEventListener('touchend', this.onTouchEnd, { passive: true })
+    scroll.addEventListener('touchcancel', this.onTouchCancel, { passive: true })
   }
 
   async init(): Promise<void> {
@@ -569,11 +574,13 @@ export class PdfViewerController {
     const row = this.rows[ri]
     if (!row) return
     if (this.scrollMode === 'paged') {
-      if (ri !== this.currentRow) {
+      const changed = ri !== this.currentRow
+      if (changed) {
         this.currentRow = ri
         this.relayout()
       }
       this.scroll.scrollTop = row.height * offsetRatio
+      if (changed) this.settle()
     } else {
       this.scroll.scrollTop = row.top + row.height * offsetRatio
     }
@@ -591,8 +598,10 @@ export class PdfViewerController {
       this.onVisiblePage(this.currentPage())
       return
     }
-    const p = this.currentPage() + (this.spread === 2 ? 2 : 1) * dir
-    this.scrollToPage(Math.min(Math.max(p, 1), this.numPages))
+    const ri = this.rowOfPage[this.currentPage() - 1] ?? 0
+    const next = Math.min(Math.max(ri + dir, 0), this.rows.length - 1)
+    const row = this.rows[next]
+    if (row) this.scrollToPage(row.pages[0] + 1)
   }
 
   /** scroll so the given PDF-space quad on `page` is visible */
@@ -1277,6 +1286,61 @@ export class PdfViewerController {
     this.pressStart = null
   }
 
+  private onTouchStart = (e: TouchEvent): void => {
+    if (this.scrollMode !== 'paged' || e.touches.length !== 1) {
+      this.swipe = null
+      return
+    }
+    const tag = (e.target as HTMLElement | null)?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') {
+      this.swipe = null
+      return
+    }
+    const t = e.touches[0]
+    this.swipe = { x: t.clientX, y: t.clientY, t: performance.now(), scrollLeft: this.scroll.scrollLeft }
+  }
+
+  private onTouchMove = (e: TouchEvent): void => {
+    if (e.touches.length !== 1) {
+      this.swipe = null
+      return
+    }
+    if (this.pressStart) {
+      const t = e.touches[0]
+      if (Math.hypot(t.clientX - this.pressStart.x, t.clientY - this.pressStart.y) > 10) {
+        clearTimeout(this.pressTimer)
+        this.pressStart = null
+      }
+    }
+  }
+
+  private onTouchCancel = (): void => {
+    this.swipe = null
+  }
+
+  private onTouchEnd = (e: TouchEvent): void => {
+    const s = this.swipe
+    this.swipe = null
+    if (!s || this.scrollMode !== 'paged' || e.touches.length > 0 || !e.changedTouches.length) return
+    if (performance.now() - s.t > 800) return
+    if (window.getSelection()?.toString()) return
+    const t = e.changedTouches[0]
+    const dx = t.clientX - s.x
+    const dy = t.clientY - s.y
+    if (Math.abs(dx) <= 48 || Math.abs(dx) <= Math.abs(dy) * 1.4) return
+    // zoomed wider than the viewport: let the user pan horizontally, and only
+    // turn the page when swiping past an edge they were already sitting on
+    const canPanX = this.scroll.scrollWidth > this.scroll.clientWidth + 2
+    if (canPanX) {
+      if (Math.abs(this.scroll.scrollLeft - s.scrollLeft) >= 4) return
+      const atLeft = s.scrollLeft <= 4
+      const atRight = s.scrollLeft + this.scroll.clientWidth >= this.scroll.scrollWidth - 4
+      if (dx < 0 && !atRight) return
+      if (dx > 0 && !atLeft) return
+    }
+    this.turnPage(dx < 0 ? 1 : -1)
+  }
+
   private onContextMenu = (e: MouseEvent): void => {
     // iOS/Android long-press menu on a link would fight the preview
     if (this.pointerType !== 'mouse' && (e.target as HTMLElement).closest?.('.pv-link')) e.preventDefault()
@@ -1927,6 +1991,10 @@ export class PdfViewerController {
     this.scroll.removeEventListener('pointerup', this.onPointerEnd)
     this.scroll.removeEventListener('pointercancel', this.onPointerEnd)
     this.scroll.removeEventListener('contextmenu', this.onContextMenu)
+    this.scroll.removeEventListener('touchstart', this.onTouchStart)
+    this.scroll.removeEventListener('touchmove', this.onTouchMove)
+    this.scroll.removeEventListener('touchend', this.onTouchEnd)
+    this.scroll.removeEventListener('touchcancel', this.onTouchCancel)
     clearTimeout(this.hoverTimer)
     clearTimeout(this.pressTimer)
     clearTimeout(this.hoverRaf)

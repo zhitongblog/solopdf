@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## v1.1.1 — 修复移动端/单页模式翻页、页码同步与布局切换
+
+### 修复与体验优化
+- **修复单页模式（`paged`）无法切换页面与页码显示错误**：`PdfViewerController.scrollToPage()` 在单页模式切换行后不再依赖可能不触发的 `scroll` 事件，直接调用 `settle()` 渲染目标页并同步 `currentPage`，根治 Android / iOS（默认单页模式）及桌面单页模式下点工具栏 `‹`/`›` 卡页、恢复阅读进度白屏、快捷键与跳转页码不同步等问题
+- **补齐 PDF 单页模式触摸左右滑动翻页**：支持单指左滑下一页 / 右滑上一页，自动避让多指缩放、文本选中、表单控件以及放大后的水平平移（滑到边缘再继续滑动才翻页），并在滑动时取消链接长按预览防误触
+- **修复工具栏翻页按钮与移动端页码输入**：`‹`/`›` 按钮改走 `turnPage()`（同时修复双页对开模式下点 `›` 无法前进的问题）；页码输入框为普通数字文档启用 `inputmode="numeric"` 与 `enterkeyhint="go"`
+- **修复设置面板切换布局/双页不生效**：在 `App.vue` 补齐对 `scrollMode`、`spread`、`coverAlone` 的响应式监听，在设置中切换连续滚动 / 单页翻页 / 双页对开立即同步到所有已打开标签页与分屏视口
+- **Android 合规与分发准备**：升级 Google Play Billing Client 至 `8.0.0`，补齐 MIT License、多语言 README、Glama Dockerfile、MCP Registry 与 WinGet 清单
+
 ## v1.1.0 — 扫描件精修闭环（自动纠偏 + Sauvola 二值化）、视觉级叠印/闪烁对比、公式转 LaTeX、跨文档 `#标签` 专题综述、多文件批量流水线与 Stirling 套件
 
 在 v1.0.0 基础上一次性补齐 **Stirling-PDF 全栈能力** 与 **四大深度方向（A/B/C/D）**，全量基于纯 Rust（`lopdf` + `image`）与 `@solopdf/core` 零外部依赖原生实现（严格遵循 Copy-out 铁律，UI / CLI / MCP 四端同步贯通）：

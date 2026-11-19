@@ -54,9 +54,10 @@ function gotoPage(e: Event): void {
   const n = resolvePageInput(el.value, tb.pageLabels, tb.numPages)
   // a real page change is a jump: it goes on the back/forward history
   if (n && n !== tb.currentPage) jump(tb.id, () => { c.scrollToPage(n); c.settle() })
-  // on a miss (or a jump that lands on the same page) put the label back —
-  // on the element too, since the model may already hold that same string
-  pageInput.value = el.value = labelOf(tb, n ?? tb.currentPage)
+  // on a miss (or a jump that lands on the same page / left side of a spread)
+  // put the landed label back — on the element too, since the model may already
+  // hold that same string
+  pageInput.value = el.value = labelOf(tb, tb.currentPage)
 }
 function zoom(dir: 1 | -1): void {
   ctrl.value?.setZoom((ctrl.value.scale) * (dir > 0 ? 1.15 : 1 / 1.15))
@@ -70,11 +71,13 @@ function zoom(dir: 1 | -1): void {
     <button v-if="nav?.back" class="nav-back" :title="t('nav.backTip')" @click="goBack(tab.id)">↩</button>
     <button v-if="nav?.fwd" class="nav-fwd" :title="t('nav.forwardTip')" @click="goForward(tab.id)">↪</button>
     <div class="page-nav">
-      <button :title="t('tb.prev')" @click="ctrl?.scrollToPage(Math.max(1, tab.currentPage - 1))">‹</button>
+      <button :title="t('tb.prev')" @click="ctrl?.turnPage(-1)">‹</button>
       <input
         v-model="pageInput"
         class="page-box"
         :class="{ labelled }"
+        :inputmode="labelled ? 'text' : 'numeric'"
+        enterkeyhint="go"
         :title="labelled ? t('tb.pageLabelTip') : ''"
         @focus="($event.target as HTMLInputElement).select()"
         @keydown.enter="gotoPage($event); ($event.target as HTMLInputElement).blur()"
@@ -82,7 +85,7 @@ function zoom(dir: 1 | -1): void {
       />
       <span v-if="labelled" class="page-phys">({{ tab.currentPage }} / {{ tab.numPages }})</span>
       <span v-else class="page-phys">/ {{ tab.numPages }}</span>
-      <button :title="t('tb.next')" @click="ctrl?.scrollToPage(Math.min(tab.numPages, tab.currentPage + 1))">›</button>
+      <button :title="t('tb.next')" @click="ctrl?.turnPage(1)">›</button>
     </div>
     <div class="sep" />
     <button :title="t('tb.zoomOut')" @click="zoom(-1)">−</button>
