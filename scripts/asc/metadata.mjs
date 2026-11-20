@@ -24,11 +24,11 @@ const zhHans = {
   keywords: 'pdf,阅读器,无广告,批注,笔记,markdown,扫描去阴影,文档对比,公式latex,脱敏,拼版,闪卡',
   promotionalText: '干净、快速、全本地的 PDF 阅读器与全离线工具箱 —— 高亮自动变成 Markdown 笔记。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `SoloPDF 1.1 更新内容:
-• 扫描件精修闭环:新增扫描件自动纠偏与黑边切除(Auto-Deskew),以及 Sauvola 自适应黑白二值化(一键消除手机拍照阴影与光照不均)
-• 视觉级页面对比:新增像素红青叠印差分、变动区域热点框选与 A/B 闪烁切换对比(Blink Compare),扫描合同、印章与工程图纸微调一目了然
-• 学术增强与 SoloMD 互操作:框选区域一键识别数学公式转 LaTeX;新增跨文档 #标签 专题综述导出,一键汇总多篇论文批注生成带深链的文献综述
-• 批量自动化流水线:内存流水线扩展至 17 种原子操作(含高清黑白扫描等 5 大预设),并支持多文件批量队列一键输出`,
+  whatsNew: `更新内容:
+• 修复单页模式翻页与页码同步:新增单指左右滑动翻页手势,修复工具栏上一页/下一页按钮与页码显示不同步的问题,并优化移动端页码数字键盘体验
+• 原生矢量 PDF 打印:macOS 改用系统 PDFKit 原生矢量打印(自动适配纸张与旋转,解决排版错位),iOS 同步支持原生 AirPrint 打印
+• macOS 原生菜单栏:补齐文件(打开、打印、关闭标签页)、编辑(查找)与视图(缩放、全屏)原生菜单项
+• 修复设置面板切换连续滚动/单页翻页/双页对开不立即生效的问题`,
 };
 
 const zhHant = {
@@ -45,11 +45,11 @@ const zhHant = {
   keywords: 'pdf,閱讀器,無廣告,批註,筆記,markdown,掃描去陰影,文件對比,公式latex,脫敏,拼版,閃卡',
   promotionalText: '乾淨、快速、全本地的 PDF 閱讀器與全離線工具箱 —— 螢光標記自動變成 Markdown 筆記。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `SoloPDF 1.1 更新內容:
-• 掃描檔精修閉環:新增掃描自動糾偏與黑邊切除(Auto-Deskew),以及 Sauvola 自適應黑白二值化(一鍵消除手機拍照陰影與光照不均)
-• 視覺級頁面對比:新增像素紅青疊印差分、變動區域熱點框選與 A/B 閃爍切換對比(Blink Compare),掃描合約、印章與工程圖紙微調一目了然
-• 學術增強與 SoloMD 互操作:框選區域一鍵識別數學公式轉 LaTeX;新增跨文件 #標籤 專題綜述匯出,一鍵彙總多篇論文批註生成帶深鏈的文獻綜述
-• 批次自動化流水線:記憶體流水線擴展至 17 種原子操作(含高清黑白掃描等 5 大預設),並支援多檔案批次佇列一鍵輸出`,
+  whatsNew: `更新內容:
+• 修復單頁模式翻頁與頁碼同步:新增單指左右滑動翻頁手勢,修復工具列上一頁/下一頁按鈕與頁碼顯示不同步的問題,並優化行動端頁碼數字鍵盤體驗
+• 原生向量 PDF 列印:macOS 改用系統 PDFKit 原生向量列印(自動適配紙張與旋轉,解決排版錯位),iOS 同步支援原生 AirPrint 列印
+• macOS 原生選單列:補齊檔案(開啟、列印、關閉分頁)、編輯(尋找)與檢視(縮放、全螢幕)原生選單項目
+• 修復設定面板切換連續捲動/單頁翻頁/雙頁對開不立即生效的問題`,
 };
 
 const enUS = {
@@ -66,11 +66,11 @@ Everything runs on your device. No data collection.`,
   keywords: 'pdf,reader,markdown,annotate,ocr,deskew,redact,compare,latex,booklet,flashcards,obsidian',
   promotionalText: 'A clean, fast, local-first PDF reader & toolkit — highlights become Markdown notes.',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `What's New in SoloPDF 1.1:
-• Scan Mastery Suite: added Auto-Deskew & dark border cleanup plus Sauvola local adaptive B&W binarization to eliminate phone-camera shadows in one click
-• Visual Page Diff & Blink Compare: added pixel-level Red/Cyan overlay diff, change hotspot clustering, and A/B Blink Compare for scanned contracts, stamps, and CAD drawings
-• Math to LaTeX & Cross-PDF Topic Digest: snip any equation region directly to inline or display LaTeX; aggregate #tag annotations across multiple PDFs into a structured Markdown literature review for SoloMD or Obsidian
-• 17-Step Batch Pipeline: expanded the in-memory pipeline to 17 operations with 5 presets and multi-file batch queue processing`,
+  whatsNew: `What's New:
+• Paged-Mode Navigation & Touch Swipe: added horizontal swipe page turning in PDF paged mode, fixed toolbar prev/next buttons and page number sync, and enabled numeric keypad for page-number input on mobile
+• Native Vector PDF Printing: switched macOS printing to native PDFKit (crisp vector output with auto-scale & auto-rotate, fixing alignment issues) and added native AirPrint support on iOS
+• macOS Native Menu Bar: added standard File (Open, Print, Close Tab), Edit (Find), View (Zoom, Fullscreen), and Settings menu items
+• Fixed layout settings (continuous/paged, single/facing spread) in Settings not applying immediately to open tabs`,
 };
 
 const ja = {
@@ -85,11 +85,11 @@ const ja = {
   keywords: 'pdf,リーダー,注釈,markdown,ノート,スキャン補正,影除去,差分比較,数式latex,墨消し,面付け,暗記',
   promotionalText: '広告なし・完全ローカルの PDF リーダー＆ツール。ハイライトが Markdown ノートになります。',
   supportUrl: 'https://solopdf.doaipm.com', marketingUrl: 'https://solopdf.doaipm.com',
-  whatsNew: `SoloPDF 1.1 アップデート:
-• スキャン高度補正:スキャン傾き自動補正＆黒枠除去(Auto-Deskew)と、スマホ撮影の影や照明ムラを除去する Sauvola 適応白黒二値化を追加
-• ビジュアル差分＆点滅比較:赤青ピクセルオーバーレイ、変更箇所ホットスポット枠表示、A/B 点滅比較(Blink Compare)を追加し、スキャン契約書や図面の微細な変更を瞬時に検出
-• 数式 LaTeX 抽出＆論文横断ダイジェスト:範囲選択した数式を LaTeX としてコピー可能に。複数 PDF の #タグ 注釈を集約して Markdown 総説ノートを出力する機能を追加
-• 17ステップ一括バッチパイプライン:メモリ内パイプラインを17操作・5プリセットに拡張し、複数PDFの一括バッチ処理に対応`,
+  whatsNew: `アップデート内容:
+• 単ページ表示のページ送り＆ページ番号同期を修正:スワイプでのページ送りに対応し、ツールバーの前後ボタンとページ番号の同期不具合を修正、モバイルのページ番号入力を数値キーボードに最適化
+• ネイティブベクター PDF 印刷:macOS で PDFKit によるネイティブ印刷に対応(自動スケーリング・自動回転でズレを解消)、iOS でもネイティブ AirPrint に対応
+• macOS ネイティブメニューバー:ファイル(開く・印刷・タブを閉じる)、編集(検索)、表示(ズーム・フルスクリーン)、設定メニューを追加
+• 設定パネルでのレイアウト切替(連続スクロール・単ページ・見開き)が開いているタブへ即時反映されない問題を修正`,
 };
 
 export const versionLocalizations = { 'zh-Hans': zhHans, 'zh-Hant': zhHant, 'en-US': enUS, 'ja': ja };
@@ -143,6 +143,6 @@ export const screenshots = {
 
 // Per-platform release plan: store version string must match the attached build's train.
 export const platforms = {
-  IOS:    { versionString: '1.1.0', buildVersion: '1.1.0' },
-  MAC_OS: { versionString: '1.10.0', buildVersion: '1.10.0' },
+  IOS:    { versionString: '1.1.2', buildVersion: '1.1.2' },
+  MAC_OS: { versionString: '1.10.1', buildVersion: '1.10.1' },
 };
