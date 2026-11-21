@@ -158,7 +158,17 @@ package app.solopdf
 
 import android.content.Context
 import android.os.Bundle
+import android.os.CancellationSignal
+import android.os.ParcelFileDescriptor
+import android.print.PageRange
+import android.print.PrintAttributes
+import android.print.PrintDocumentAdapter
+import android.print.PrintDocumentInfo
+import android.print.PrintManager
 import androidx.activity.enableEdgeToEdge
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import com.android.billingclient.api.AcknowledgePurchaseParams
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
@@ -417,6 +427,69 @@ class MainActivity : TauriActivity() {
 
     @JvmStatic
     fun iapPollRestore(): String = iapRestorePoll.getAndSet("")
+
+    @JvmStatic
+    fun printPdf(filePath: String, jobName: String): Boolean {
+      val act = instance ?: return false
+      val file = File(filePath)
+      if (!file.exists() || file.length() <= 0L) return false
+      val title = jobName.ifBlank { file.name }
+      act.runOnUiThread {
+        val pm = act.getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return@runOnUiThread
+        val adapter = object : PrintDocumentAdapter() {
+          override fun onLayout(
+            oldAttributes: PrintAttributes?,
+            newAttributes: PrintAttributes?,
+            cancellationSignal: CancellationSignal?,
+            callback: LayoutResultCallback?,
+            extras: Bundle?
+          ) {
+            if (cancellationSignal?.isCanceled == true) {
+              callback?.onLayoutCancelled()
+              return
+            }
+            val info = PrintDocumentInfo.Builder(title)
+              .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+              .setPageCount(PrintDocumentInfo.PAGE_COUNT_UNKNOWN)
+              .build()
+            callback?.onLayoutFinished(info, true)
+          }
+
+          override fun onWrite(
+            pages: Array<out PageRange>?,
+            destination: ParcelFileDescriptor?,
+            cancellationSignal: CancellationSignal?,
+            callback: WriteResultCallback?
+          ) {
+            if (destination == null) {
+              callback?.onWriteFailed("Invalid print destination")
+              return
+            }
+            try {
+              FileInputStream(file).use { input ->
+                FileOutputStream(destination.fileDescriptor).use { output ->
+                  val buf = ByteArray(16384)
+                  while (true) {
+                    if (cancellationSignal?.isCanceled == true) {
+                      callback?.onWriteCancelled()
+                      return
+                    }
+                    val n = input.read(buf)
+                    if (n <= 0) break
+                    output.write(buf, 0, n)
+                  }
+                }
+              }
+              callback?.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
+            } catch (e: Exception) {
+              callback?.onWriteFailed(e.message ?: "Print write error")
+            }
+          }
+        }
+        pm.print(title, adapter, PrintAttributes.Builder().build())
+      }
+      return true
+    }
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
