@@ -379,6 +379,18 @@ async function removeAnnot(a: Annotation): Promise<void> {
   await mgr.value?.remove(a.id)
 }
 
+async function insertReadingCard(): Promise<void> {
+  const tb = tab.value
+  const m = mgr.value
+  if (!tb || !m) return
+  const a = await m.addNote(tb.currentPage || 1, 48, 720, t('sb.readCardTpl'))
+  editingId.value = a.id
+  editText.value = a.note
+  editColor.value = a.color
+  editKind.value = a.kind ?? 'note'
+  emit('toast', t('sb.readCardAdded'))
+}
+
 async function quickExportFlashcards(fmt: 'anki' | 'obsidian'): Promise<void> {
   if (!shownAnnots.value.length) return
   const docTitle = (tab.value?.name ?? 'Document').replace(/\.[^.]+$/, '')
@@ -561,6 +573,10 @@ onBeforeUnmount(() => observer?.disconnect())
           <button :class="{ on: sortBy === 'page' }" @click="sortBy = 'page'">{{ t('sb.byPage') }}</button>
           <button :class="{ on: sortBy === 'recent' }" @click="sortBy = 'recent'">{{ t('sb.byRecent') }}</button>
           <span style="flex: 1"></span>
+          <button
+            :title="t('sb.readCardTip')"
+            @click="insertReadingCard"
+          >📝 {{ t('sb.readCard') }}</button>
           <button
             v-if="shownAnnots.length"
             :title="t('dt.ae.exportAnki')"

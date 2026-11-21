@@ -146,7 +146,7 @@ function zoom(dir: 1 | -1): void {
     <button :class="{ active: speaking }" :title="t('tb.speak')" @click="$emit('speak')">🔊</button>
     <button class="ask-btn" :class="{ active: aiOpen }" :title="t('ai.open')" data-testid="tb-ai" @click="$emit('ai')">AI</button>
     <button :title="t('tb.search')" @click="$emit('search')">🔍</button>
-    <button v-if="!isMobile()" :title="t('tb.print')" @click="$emit('print')">🖨</button>
+    <button :title="t('tb.print')" @click="$emit('print')">🖨</button>
     <button :title="t('tb.settings')" @click="$emit('settings')">⚙︎</button>
   </div>
 </template>

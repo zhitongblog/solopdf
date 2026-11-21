@@ -67,10 +67,11 @@ import PresentationView from './components/PresentationView.vue'
 import ReadingRuler from './components/ReadingRuler.vue'
 import MagnifierLoupe from './components/MagnifierLoupe.vue'
 import CitePanel from './components/CitePanel.vue'
+import QuickCiteModal from './components/QuickCiteModal.vue'
 import { clipboardLog } from './clipboard'
 import AskPanel from './components/AskPanel.vue'
 import { aiState, aiSupported } from './ai'
-import { noteOpened, captureCover, addToLibrary } from './library'
+import { noteOpened, captureCover, addToLibrary, setLibraryCite } from './library'
 import { startStats, stopStats, noteTurn } from './stats'
 import { speaker, startReading, stopReading } from './readaloud'
 import type { AnnotationKind } from '@solopdf/core'
@@ -102,6 +103,7 @@ const dictWord = ref<{ word: string; anchor: DOMRect | null } | null>(null)
 const translateReq = ref<{ text: string; anchor: DOMRect | null; sel: SelectionInfo | null; tabId: number } | null>(null)
 const statsOpen = ref(false)
 const citeOpen = ref(false)
+const quickCiteOpen = ref(false)
 const rulerRef = ref<InstanceType<typeof ReadingRuler>>()
 const loupeRef = ref<InstanceType<typeof MagnifierLoupe>>()
 const citeRef = ref<InstanceType<typeof CitePanel>>()
@@ -432,6 +434,16 @@ async function openPath(rawPath: string, jumpTo?: { page: number; annot?: string
     if (jumpTo) jumpAfterLoad(tab.id, jumpTo)
     // shelf cover: one extra small render, after the page the reader wanted
     void ctrl.renderToCanvas(1, 0.35).then((c) => captureCover(path, c)).catch(() => {})
+    // academic shelf metadata: cache title/authors/year/DOI in the background
+    if (!store.library[path]?.cite) {
+      void import('@solopdf/core')
+        .then(async ({ readCitationInput, extractCitation }) => {
+          const inp = await readCitationInput(doc as never, tab.name)
+          const meta = extractCitation(inp)
+          if (store.library[path] && !store.library[path].cite) setLibraryCite(path, meta)
+        })
+        .catch(() => {})
+    }
   } catch (err) {
     // an import failure is the real cause when the open then fails too —
     // showing only "no such file" would send debugging the wrong way
@@ -647,6 +659,30 @@ function followPreview(): void {
   if (!p) return
   if (p.req.url) { void openExternal(p.req.url); return }
   if (p.req.dest) controllers.get(p.tabId)?.goToDest(p.req.dest)
+}
+
+async function openPreviewPaper(path: string, sideBySide: boolean): Promise<void> {
+  preview.value = null
+  if (sideBySide) {
+    const id = await openForCompare(path)
+    if (id) await pairWith(id, 'right')
+    return
+  }
+  await openPath(path)
+}
+
+async function pinPreviewToSplit(): Promise<void> {
+  const p = preview.value
+  preview.value = null
+  if (!p?.req.dest) return
+  const tab = store.tabs.find((x) => x.id === p.tabId)
+  if (!tab || tab.kind !== 'pdf' || tab.bookMode) return
+  if (pairVisible.value) await closePair()
+  if (!tab.split) {
+    await openSplit(tab, store.settings.splitDir, (c) => wireController(tab, c))
+  }
+  const peer = splitControllers.get(tab.id)
+  if (peer) peer.goToDest(p.req.dest)
 }
 
 // ── back / forward ──
@@ -915,6 +951,7 @@ function onKey(e: KeyboardEvent): void {
     void undoAnnot(chord)
     return
   }
+  if (mod && e.shiftKey && e.key.toLowerCase() === 'k') { e.preventDefault(); quickCiteOpen.value = !quickCiteOpen.value; return }
   if (mod && e.key === 'o') { e.preventDefault(); void pickAndOpen() }
   else if (mod && e.key === 'f') { e.preventDefault(); if (tab) searchOpen.value = true }
   else if (mod && e.key === 'w') { e.preventDefault(); if (tab) onCloseTab(tab.id) }
@@ -1655,6 +1692,15 @@ watch(() => store.settings.sidebarOpen, () => {
       @follow="followPreview"
       @close="preview = null"
       @hover="onPreviewHover"
+      @open-paper="openPreviewPaper"
+      @pin-split="pinPreviewToSplit"
+      @toast="showToast"
+    />
+    <QuickCiteModal
+      v-if="quickCiteOpen"
+      @close="quickCiteOpen = false"
+      @open="(p) => openPath(p)"
+      @toast="showToast"
     />
 
     <AnnotToolLayer

@@ -23,7 +23,7 @@ import {
   pickTarget, guessLang, providerReady, translateWithProvider,
   collectAttachments, uniqueNames, layerRows, findLockedOcgs, radioGroups,
   scanPdfAnnotations, buildImports, spliceImports, importSummary, importedRefs, needsLineFix, fixLineDirections,
-  readCitationInput, extractCitation, formatCitation, fetchDoiMetadata, CITE_FORMATS, pageDeepLink,
+  readCitationInput, extractCitation, formatCitation, fetchDoiMetadata, CITE_FORMATS, pageDeepLink, exportBibtexLibrary,
   compareDocuments,
   textFromItems, indexDocument, retrieve,
   pdfToMarkdown, findRedactionRects, computeAutoCropMargins, splitByBookmarks,
@@ -900,6 +900,45 @@ server.tool(
     await doc.destroy()
     const res = extractLatexFromItems(items, rect, { yDirection: 'down', block })
     return text({ page: p, ...res })
+  },
+)
+
+server.tool(
+  'solopdf_export_bib',
+  '批量导出 BibTeX 文献库（只读）：扫描文件夹或多个 PDF，自动提取每篇论文的 XMP/Info 与首页元数据并生成自动去重 citeKey 的 .bib 文本',
+  {
+    paths: z.array(z.string()).min(1).describe('PDF 文件或文件夹路径列表'),
+  },
+  async ({ paths }) => {
+    const pdfs = []
+    for (const p of paths) {
+      if (!existsSync(p)) continue
+      const st = statSync(p)
+      if (st.isDirectory()) {
+        const entries = await readdir(p, { withFileTypes: true })
+        for (const e of entries) {
+          if (e.isFile() && /\.pdf$/i.test(e.name)) pdfs.push(nodePath.join(p, e.name))
+        }
+      } else if (/\.pdf$/i.test(p)) {
+        pdfs.push(p)
+      }
+    }
+    const items = []
+    for (const f of pdfs) {
+      try {
+        const doc = await open(f)
+        try {
+          const meta = extractCitation(await readCitationInput(doc, nodePath.basename(f), 2))
+          items.push({ file: nodePath.resolve(f), meta })
+        } finally {
+          await doc.destroy()
+        }
+      } catch {
+        /* skip encrypted or unreadable PDF */
+      }
+    }
+    const { bib, keys } = exportBibtexLibrary(items.map((x) => ({ meta: x.meta })))
+    return text({ count: items.length, keys, bib })
   },
 )
 

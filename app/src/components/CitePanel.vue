@@ -8,12 +8,13 @@
  * beats re-typing a BibTeX entry. "Fetch exact metadata" is the only path
  * that goes online, and only when clicked: it asks doi.org for the record.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   readCitationInput, extractCitation, formatCitation, fetchDoiMetadata, splitAuthors, parseAuthorName,
   pageDeepLink, doiUrl, type CitationMeta, type CiteFormat,
 } from '@solopdf/core'
 import { store, documents } from '../store'
+import { setLibraryCite } from '../library'
 import { openExternal } from '../platform'
 import { copyText } from '../clipboard'
 import { t } from '../i18n'
@@ -35,14 +36,25 @@ onMounted(async () => {
   const doc = tb && documents.get(tb.id)
   if (!tb || !doc) { loading.value = false; return }
   try {
-    const input = await readCitationInput(doc as never, tb.path.split('/').pop() ?? '')
-    meta.value = extractCitation(input)
+    const cached = store.library[tb.path]?.cite
+    if (cached) {
+      meta.value = JSON.parse(JSON.stringify(cached)) as CitationMeta
+    } else {
+      const input = await readCitationInput(doc as never, tb.path.split('/').pop() ?? '')
+      meta.value = extractCitation(input)
+      setLibraryCite(tb.path, JSON.parse(JSON.stringify(meta.value)) as CitationMeta)
+    }
   } catch (err) {
     emit('toast', String((err as Error).message ?? err))
   } finally {
     loading.value = false
   }
 })
+
+watch(meta, (m) => {
+  const tb = tab.value
+  if (tb && m) setLibraryCite(tb.path, JSON.parse(JSON.stringify(m)) as CitationMeta)
+}, { deep: true })
 
 const authorsText = computed({
   get: () => (meta.value?.authors ?? []).map((a) => a.literal ?? (a.given ? `${a.given} ${a.family}` : a.family)).join('; '),

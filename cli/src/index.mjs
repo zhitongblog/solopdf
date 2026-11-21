@@ -40,7 +40,7 @@ import {
   pickTarget, guessLang, providerReady, translateWithProvider,
   genId, scanPdfAnnotations, buildImports, spliceImports, importSummary, needsLineFix, fixLineDirections,
   collectAttachments, uniqueNames, layerRows, findLockedOcgs, radioGroups,
-  readCitationInput, extractCitation, formatCitation, fetchDoiMetadata, CITE_FORMATS, pageDeepLink,
+  readCitationInput, extractCitation, formatCitation, fetchDoiMetadata, CITE_FORMATS, pageDeepLink, exportBibtexLibrary,
   compareDocuments,
   txtToBlocks, textFromItems, indexDocument, searchChunks, askDocument, summarizeDocument, summarizePage,
   aiProviderReady, citedPages, uiLangToTarget,
@@ -1295,6 +1295,54 @@ async function cmdExtractMath(file) {
 }
 
 /**
+ * Scan one or more PDF files / folders, extract citation metadata from each
+ * PDF's XMP/Info + first 2 pages, and emit a single deduplicated `.bib` file.
+ */
+async function cmdExportBib(targets) {
+  const { readdir, writeFile } = await import('node:fs/promises')
+  if (!targets.length) die('用法: solopdf export-bib <dir-or-pdfs...> [--out references.bib] [--json]')
+  const pdfs = []
+  for (const t of targets) {
+    if (t.startsWith('--')) break
+    if (!existsSync(t)) die(`文件或目录不存在: ${t}`)
+    const st = statSync(t)
+    if (st.isDirectory()) {
+      const entries = await readdir(t, { withFileTypes: true })
+      for (const e of entries) {
+        if (e.isFile() && /\.pdf$/i.test(e.name)) pdfs.push(path.join(t, e.name))
+      }
+    } else if (/\.pdf$/i.test(t)) {
+      pdfs.push(t)
+    }
+  }
+  const items = []
+  for (const f of pdfs) {
+    try {
+      const doc = await open(f, undefined, { soft: true })
+      try {
+        const meta = extractCitation(await readCitationInput(doc, path.basename(f), 2))
+        items.push({ file: path.resolve(f), meta })
+      } finally {
+        await doc.destroy()
+      }
+    } catch {
+      /* encrypted or unreadable PDF — skip */
+    }
+  }
+  const { bib, keys } = exportBibtexLibrary(items.map((x) => ({ meta: x.meta })))
+  const outIdx = args.indexOf('--out')
+  const outPath = outIdx >= 0 ? args[outIdx + 1] : null
+  if (outPath) {
+    await writeFile(outPath, bib, 'utf8')
+    console.log(JSON.stringify({ out: path.resolve(outPath), count: items.length, keys }, null, 2))
+  } else if (args.includes('--json')) {
+    console.log(JSON.stringify({ count: items.length, keys, bib }, null, 2))
+  } else {
+    process.stdout.write(bib)
+  }
+}
+
+/**
  * Aggregate sidecar .annotations.md files across a folder or explicit list of PDFs
  * into a cross-document #tag topic digest Markdown literature review.
  */
@@ -1821,6 +1869,7 @@ switch (cmd) {
   case 'extract-math': await cmdExtractMath(file ?? die('用法: solopdf extract-math <file.pdf> [--page 1] [--rect x,y,w,h] [--block] [--json] [--password pw]')); break
   case 'export-flashcards': await cmdExportFlashcards(file ?? die('用法: solopdf export-flashcards <file.pdf> [--format anki|obsidian] [--tag tag] [--color color] [--cloze] [--out file]')); break
   case 'export-digest': await cmdExportDigest(args.slice(1)); break
+  case 'export-bib': await cmdExportBib(args.slice(1)); break
   case 'verify-signatures': await cmdVerifySignatures(file ?? die('用法: solopdf verify-signatures <file.pdf> [--password pw]')); break
   case 'cite': await cmdCite(file ?? die('用法: solopdf cite <file.pdf> [--format bibtex|apa|gbt|all|json] [--online]')); break
   case 'auto-rename': await cmdAutoRename(file ?? die('用法: solopdf auto-rename <file.pdf> [--template "{year} - {author} - {title}"] [--out-dir dir] [--json]')); break
@@ -1854,6 +1903,8 @@ switch (cmd) {
                                                    伴生批注导出为 Anki TSV 或 Obsidian SR 闪卡
   solopdf export-digest <dir-or-files...> [--group-by tag|document] [--tag t1,t2] [--out digest.md]
                                                    跨文档 #标签 专题综述导出（生成带目录与深链的 Markdown 文献综述）
+  solopdf export-bib <dir-or-pdfs...> [--out references.bib] [--json]
+                                                   批量扫描 PDF 元数据并导出自动去重的 BibTeX 文献库（.bib）
   solopdf visual-diff <old.pdf> <new.pdf> [--page 1] [--mode anaglyph|tint|diff-only] [--out diff.png]
                                                    像素级视觉叠印对比（红/青差分图 + 变动热点框选 + 差异百分比）
   solopdf verify-signatures <file.pdf>             校验 PDF 数字签名（ByteRange 完整性、篡改检测、签署人信息）

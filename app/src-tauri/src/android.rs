@@ -155,6 +155,27 @@ fn read_stream(env: &mut JNIEnv, resolver: &JObject, uri: &JObject) -> R<Vec<u8>
     Ok(out)
 }
 
+/// Hand a local PDF file path to Android's native PrintManager via MainActivity.printPdf.
+pub fn print_pdf_file(path: &str, job_name: &str) -> R<bool> {
+    let (vm, activity) = android_context()?;
+    let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+    let act = unsafe { JObject::from_raw(activity.cast()) };
+    let cls = env.get_object_class(&act).map_err(|e| format!("get_object_class: {e}"))?;
+    let jpath: JString = env.new_string(path).map_err(|e| e.to_string())?;
+    let jname: JString = env.new_string(job_name).map_err(|e| e.to_string())?;
+    let res = env.call_static_method(
+        cls,
+        "printPdf",
+        "(Ljava/lang/String;Ljava/lang/String;)Z",
+        &[JValue::Object(&jpath), JValue::Object(&jname)],
+    );
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_clear();
+        return Err("JNI exception in MainActivity.printPdf".into());
+    }
+    res.and_then(|v| v.z()).map_err(|e| format!("printPdf: {e}"))
+}
+
 /// Content providers can hand back anything as a display name.
 fn sanitize(name: &str) -> String {
     let cleaned: String = name

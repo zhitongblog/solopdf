@@ -146,6 +146,8 @@ export interface Settings {
   ai: AiSettings
   /** physical measurement unit for line/arrow/rect annotations */
   measureUnit?: import('@solopdf/core').MeasureUnit
+  /** shelf layout: cover grid vs academic metadata table */
+  libraryView?: 'grid' | 'table'
 }
 
 export interface AidSettings {

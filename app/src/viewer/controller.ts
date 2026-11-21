@@ -216,7 +216,9 @@ export class PdfViewerController {
   private hoverRaf = 0
   private pressTimer = 0
   private pressStart: { x: number; y: number } | null = null
-  private swipe: { x: number; y: number; t: number; scrollLeft: number } | null = null
+  private swipe: { x: number; y: number; t: number; scrollLeft: number; interactive: boolean } | null = null
+  private pinch: { dist: number; scale: number; target: number } | null = null
+  private lastTap: { x: number; y: number; t: number } | null = null
   private suppressClick = false
   private pointerType = 'mouse'
   private refMarks: HTMLElement[] = []
@@ -1121,6 +1123,26 @@ export class PdfViewerController {
     return canvas
   }
 
+  /** Extract plain text inside a PDF-space region (used by citation preview
+   *  to match the referenced paper against the local shelf). */
+  async readRegionText(pageNum: number, region: Quad): Promise<string> {
+    const page = await this.doc.getPage(pageNum)
+    const tc = await page.getTextContent()
+    const pad = 6
+    const parts: string[] = []
+    for (const raw of tc.items) {
+      const it = raw as { str?: string; transform?: number[]; width?: number; height?: number }
+      if (typeof it.str !== 'string' || !it.str || !it.transform) continue
+      const x = it.transform[4]
+      const y = it.transform[5]
+      if (x + (it.width ?? 0) >= region.x1 - pad && x <= region.x2 + pad &&
+          y + (it.height ?? 10) >= region.y1 - pad && y <= region.y2 + pad) {
+        parts.push(it.str)
+      }
+    }
+    return parts.join(' ').replace(/\s+/g, ' ').trim()
+  }
+
   /** what a link's preview shows: the destination's neighbourhood */
   private async regionForDest(dest: LinkDest): Promise<Quad> {
     const box = boxOf(await this.doc.getPage(dest.page))
@@ -1287,20 +1309,39 @@ export class PdfViewerController {
   }
 
   private onTouchStart = (e: TouchEvent): void => {
-    if (this.scrollMode !== 'paged' || e.touches.length !== 1) {
+    if (e.touches.length === 2) {
+      this.swipe = null
+      this.lastTap = null
+      clearTimeout(this.pressTimer)
+      const [a, b] = [e.touches[0], e.touches[1]]
+      const dist = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY)
+      if (dist > 10) this.pinch = { dist, scale: this.scale, target: this.scale }
+      return
+    }
+    if (e.touches.length !== 1) {
       this.swipe = null
       return
     }
-    const tag = (e.target as HTMLElement | null)?.tagName
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') {
-      this.swipe = null
-      return
-    }
+    const el = e.target as HTMLElement | null
+    const tag = el?.tagName
+    const interactive =
+      tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON' ||
+      !!el?.closest?.('.pv-link, .pv-attach, .pv-draw-hit, .pv-textbox')
     const t = e.touches[0]
-    this.swipe = { x: t.clientX, y: t.clientY, t: performance.now(), scrollLeft: this.scroll.scrollLeft }
+    this.swipe = { x: t.clientX, y: t.clientY, t: performance.now(), scrollLeft: this.scroll.scrollLeft, interactive }
   }
 
   private onTouchMove = (e: TouchEvent): void => {
+    if (this.pinch && e.touches.length === 2) {
+      const [a, b] = [e.touches[0], e.touches[1]]
+      const dist = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY)
+      const ratio = dist / Math.max(10, this.pinch.dist)
+      const target = Math.min(Math.max(this.pinch.scale * ratio, 0.25), 6)
+      this.pinch.target = target
+      this.area.style.transformOrigin = 'top center'
+      this.area.style.transform = `scale(${target / this.pinch.scale})`
+      return
+    }
     if (e.touches.length !== 1) {
       this.swipe = null
       return
@@ -1316,17 +1357,43 @@ export class PdfViewerController {
 
   private onTouchCancel = (): void => {
     this.swipe = null
+    if (this.pinch) {
+      this.area.style.transform = ''
+      this.pinch = null
+    }
   }
 
   private onTouchEnd = (e: TouchEvent): void => {
+    if (this.pinch && e.touches.length < 2) {
+      const p = this.pinch
+      this.pinch = null
+      this.area.style.transform = ''
+      if (Math.abs(p.target - p.scale) / p.scale > 0.03) this.setZoom(p.target)
+      return
+    }
     const s = this.swipe
     this.swipe = null
-    if (!s || this.scrollMode !== 'paged' || e.touches.length > 0 || !e.changedTouches.length) return
-    if (performance.now() - s.t > 800) return
-    if (window.getSelection()?.toString()) return
+    if (!s || e.touches.length > 0 || !e.changedTouches.length) return
+    const now = performance.now()
+    const dt = now - s.t
     const t = e.changedTouches[0]
     const dx = t.clientX - s.x
     const dy = t.clientY - s.y
+    if (window.getSelection()?.toString()) return
+
+    // double-tap to toggle zoom between fit-width and 1.65×
+    if (!s.interactive && dt < 280 && Math.abs(dx) < 12 && Math.abs(dy) < 12) {
+      if (this.lastTap && now - this.lastTap.t < 320 && Math.hypot(t.clientX - this.lastTap.x, t.clientY - this.lastTap.y) < 32) {
+        this.lastTap = null
+        if (this.fitMode === 'width') this.setZoom(this.scale * 1.65)
+        else this.setZoom('width')
+        return
+      }
+      this.lastTap = { x: t.clientX, y: t.clientY, t: now }
+      return
+    }
+
+    if (s.interactive || this.scrollMode !== 'paged' || dt > 800) return
     if (Math.abs(dx) <= 48 || Math.abs(dx) <= Math.abs(dy) * 1.4) return
     // zoomed wider than the viewport: let the user pan horizontally, and only
     // turn the page when swiping past an edge they were already sitting on

@@ -16,6 +16,13 @@
  */
 import { store, type TabState } from './store'
 import { isTauri } from './platform'
+import {
+  citeKey, extractCitation, findArxivId, findDoi, parseBibtex, readCitationInput,
+  type CitationMeta,
+} from '@solopdf/core'
+import { openDocument } from './viewer/loader'
+
+export type ReadStatus = 'unread' | 'reading' | 'done'
 
 export interface LibraryItem {
   path: string
@@ -30,6 +37,12 @@ export interface LibraryItem {
   cover?: string
   /** false once a scan or an open finds the file gone */
   missing?: boolean
+  /** explicit reading status; falls back to progressOf(item) when unset */
+  readStatus?: ReadStatus
+  /** cached academic citation metadata (from PDF or imported .bib) */
+  cite?: CitationMeta
+  /** custom or derived BibTeX citekey */
+  citeKey?: string
 }
 
 export function kindOf(path: string): LibraryItem['kind'] {
@@ -108,6 +121,170 @@ export function progressOf(item: LibraryItem): number {
   const pos = store.positions[item.path]
   if (!pos || !item.pages) return 0
   return Math.min(1, Math.max(0, (pos.page - 1 + (pos.ratio || 0)) / item.pages))
+}
+
+/** effective reading status: explicit user choice overrides progress heuristic */
+export function statusOf(item: LibraryItem): ReadStatus {
+  if (item.readStatus) return item.readStatus
+  const p = progressOf(item)
+  if (p >= 0.98) return 'done'
+  if (p > 0.001) return 'reading'
+  return 'unread'
+}
+
+export function setReadStatus(path: string, status: ReadStatus): void {
+  const item = store.library[path]
+  if (item) item.readStatus = status
+}
+
+export function cycleReadStatus(path: string): ReadStatus {
+  const item = store.library[path]
+  if (!item) return 'unread'
+  const cur = statusOf(item)
+  const next: ReadStatus = cur === 'unread' ? 'reading' : cur === 'reading' ? 'done' : 'unread'
+  item.readStatus = next
+  return next
+}
+
+export function setLibraryCite(path: string, meta: CitationMeta, customKey?: string): void {
+  const item = store.library[path]
+  if (!item) return
+  item.cite = meta
+  item.citeKey = (customKey?.trim() || citeKey(meta)).replace(/[\s,{}]/g, '') || 'ref'
+}
+
+/** citation metadata for a shelf item, synthesizing a minimal fallback from filename */
+export function citeOf(item: LibraryItem): CitationMeta {
+  if (item.cite) return item.cite
+  const stem = item.name.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').trim() || item.name
+  return {
+    title: stem,
+    authors: [],
+    type: 'misc',
+    source: { title: 'fileName', authors: 'none', year: 'none' },
+  }
+}
+
+export function citeKeyOf(item: LibraryItem): string {
+  return item.citeKey || citeKey(citeOf(item))
+}
+
+function normTitle(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '')
+}
+
+/**
+ * Import a `.bib` file into the local shelf: match parsed entries against
+ * existing local documents by DOI → arXiv ID → normalized title / citekey,
+ * enriching their cached `cite` + `citeKey`.
+ */
+export function importBibtexToLibrary(bibText: string): { total: number; matched: number } {
+  const entries = parseBibtex(bibText)
+  const items = Object.values(store.library)
+  let matched = 0
+  for (const e of entries) {
+    const eDoi = e.meta.doi?.toLowerCase()
+    const eArxiv = e.meta.arxiv?.toLowerCase()
+    const eTitle = normTitle(e.meta.title)
+    const eKey = e.key.toLowerCase()
+
+    const hit = items.find((it) => {
+      const c = it.cite
+      if (eDoi && c?.doi?.toLowerCase() === eDoi) return true
+      if (eArxiv && (c?.arxiv?.toLowerCase() === eArxiv || it.name.toLowerCase().includes(eArxiv))) return true
+      if (eKey.length >= 4 && (it.citeKey?.toLowerCase() === eKey || it.name.toLowerCase().includes(eKey))) return true
+      if (eTitle.length >= 8) {
+        const iTitle = normTitle(c?.title || it.name.replace(/\.[^.]+$/, ''))
+        if (iTitle === eTitle || (iTitle.length >= 8 && (iTitle.includes(eTitle) || eTitle.includes(iTitle)))) return true
+      }
+      return false
+    })
+    if (hit) {
+      setLibraryCite(hit.path, e.meta, e.key)
+      matched++
+    }
+  }
+  return { total: entries.length, matched }
+}
+
+/**
+ * Batch-extract academic citation metadata (title, authors, year, DOI, arXiv)
+ * for PDFs on the shelf that haven't been indexed yet. Opens each PDF silently
+ * (skipping encrypted ones), reads only XMP/Info + first 2 pages, and destroys
+ * the document immediately so RAM stays flat.
+ */
+export async function extractMissingMetadata(
+  items: LibraryItem[],
+  onProgress: (done: number, total: number) => void,
+  signal: { cancelled: boolean },
+): Promise<{ done: number; updated: number }> {
+  const todo = items.filter((it) => it.kind === 'pdf' && !it.missing && !it.cite)
+  const total = todo.length
+  let done = 0
+  let updated = 0
+  onProgress(0, total)
+  for (const it of todo) {
+    if (signal.cancelled) break
+    try {
+      const { doc } = await openDocument(it.path, async () => null)
+      try {
+        const inp = await readCitationInput(doc as never, it.name, 2)
+        const meta = extractCitation(inp)
+        setLibraryCite(it.path, meta)
+        if (!it.pages && doc.numPages) {
+          const cur = store.library[it.path]
+          if (cur) cur.pages = doc.numPages
+        }
+        updated++
+      } finally {
+        await doc.destroy().catch(() => {})
+      }
+    } catch {
+      /* password-protected or unreadable PDF — skip gracefully */
+    }
+    done++
+    onProgress(done, total)
+    await new Promise((r) => setTimeout(r, 0))
+  }
+  return { done, updated }
+}
+
+/**
+ * Given a reference snippet from an in-text citation preview (e.g. "[12] Vaswani
+ * et al., Attention Is All You Need, 2017, arXiv:1706.03762"), try to find a
+ * matching paper already on the user's local shelf.
+ */
+export function findLibraryPaper(refText: string, excludePath?: string): LibraryItem | null {
+  const clean = refText.trim()
+  if (clean.length < 8) return null
+  const doi = findDoi(clean)?.toLowerCase()
+  const arxiv = findArxivId(clean)?.id.toLowerCase()
+  const normRef = normTitle(clean)
+  const candidates = Object.values(store.library).filter((it) => !it.missing && it.path !== excludePath)
+
+  // 1. Exact DOI match
+  if (doi) {
+    const hit = candidates.find((it) => it.cite?.doi?.toLowerCase() === doi)
+    if (hit) return hit
+  }
+  // 2. Exact arXiv ID match
+  if (arxiv) {
+    const hit = candidates.find((it) =>
+      it.cite?.arxiv?.toLowerCase() === arxiv || it.name.toLowerCase().includes(arxiv),
+    )
+    if (hit) return hit
+  }
+  // 3. Normalized title substring match (require >= 14 normalized chars to avoid false positives)
+  let best: LibraryItem | null = null
+  let bestLen = 0
+  for (const it of candidates) {
+    const t0 = normTitle(it.cite?.title || it.name.replace(/\.[^.]+$/, ''))
+    if (t0.length >= 14 && normRef.includes(t0) && t0.length > bestLen) {
+      best = it
+      bestLen = t0.length
+    }
+  }
+  return best
 }
 
 // ── folders (desktop) ────────────────────────────────────────────────────

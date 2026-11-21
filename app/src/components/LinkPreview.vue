@@ -10,16 +10,27 @@
  * bottom edge so it never covers the line the finger is on.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { controllers } from '../store'
+import { controllers, store } from '../store'
+import { findLibraryPaper, type LibraryItem } from '../library'
+import { copyText } from '../clipboard'
 import { t } from '../i18n'
 import type { PreviewRequest } from '../viewer/controller'
 
 const props = defineProps<{ req: PreviewRequest; tabId: number }>()
-const emit = defineEmits<{ follow: []; close: []; hover: [inside: boolean] }>()
+const emit = defineEmits<{
+  follow: []
+  close: []
+  hover: [inside: boolean]
+  openPaper: [path: string, sideBySide: boolean]
+  pinSplit: []
+  toast: [msg: string]
+}>()
 
 const host = ref<HTMLDivElement>()
 const loading = ref(true)
 const failed = ref(false)
+const matchedPaper = ref<LibraryItem | null>(null)
+const refSnippet = ref('')
 const phone = computed(() => window.innerWidth < 560)
 /** box the rendered crop must fit in */
 const maxW = computed(() => Math.min(420, window.innerWidth - 24))
@@ -61,6 +72,8 @@ async function render(): Promise<void> {
   const my = ++seq
   loading.value = true
   failed.value = false
+  matchedPaper.value = null
+  refSnippet.value = ''
   const r = props.req
   const ctrl = controllers.get(props.tabId)
   const slot = host.value
@@ -71,11 +84,26 @@ async function render(): Promise<void> {
     const canvas = await ctrl.renderRegion(r.page, r.region, maxW.value, maxH.value)
     if (my !== seq) return
     slot.appendChild(canvas)
+    // Citation penetration: check if the referenced paper already lives on the local shelf
+    if (r.kind === 'citation' || r.kind === 'link') {
+      const text = await ctrl.readRegionText(r.page, r.region).catch(() => '')
+      if (my !== seq) return
+      if (text) {
+        refSnippet.value = text
+        const curPath = store.tabs.find((x) => x.id === props.tabId)?.path
+        matchedPaper.value = findLibraryPaper(text, curPath)
+      }
+    }
   } catch {
     if (my === seq) failed.value = true
   } finally {
     if (my === seq) loading.value = false
   }
+}
+
+async function copyRef(): Promise<void> {
+  if (!refSnippet.value) return
+  emit('toast', (await copyText(refSnippet.value)) ? t('lp.refCopied') : t('app.copyFail'))
 }
 onMounted(render)
 watch(() => props.req, render, { flush: 'post' })
@@ -111,6 +139,12 @@ onBeforeUnmount(() => {
     <div class="lp-head">
       <span class="lp-kind">{{ kindLabel }}</span>
       <span class="lp-label" :title="req.label">{{ req.label }}</span>
+      <button
+        v-if="!phone && req.dest"
+        class="lp-pin"
+        :title="t('lp.pinSplit')"
+        @click.stop="emit('pinSplit')"
+      >◫</button>
       <button v-if="req.touch" class="lp-close" :title="t('lp.close')" @click.stop="emit('close')">✕</button>
     </div>
     <button v-if="req.kind === 'url'" class="lp-open" @click="emit('follow')">{{ t('lp.openUrl') }}</button>
@@ -118,6 +152,19 @@ onBeforeUnmount(() => {
       <div ref="host" class="lp-canvas"></div>
       <div v-if="loading" class="lp-status">…</div>
       <div v-else-if="failed" class="lp-status">{{ t('lp.failed') }}</div>
+    </div>
+    <div v-if="matchedPaper" class="lp-shelf-hit" @click.stop>
+      <div class="lp-shelf-name" :title="matchedPaper.cite?.title || matchedPaper.name">
+        <span class="lp-shelf-tag">{{ t('lp.inShelf') }}</span>
+        {{ matchedPaper.cite?.title || matchedPaper.name }}
+      </div>
+      <div class="lp-shelf-acts">
+        <button class="primary" @click="emit('openPaper', matchedPaper.path, false)">{{ t('lp.openPaper') }}</button>
+        <button v-if="!phone" @click="emit('openPaper', matchedPaper.path, true)">{{ t('lp.pairPaper') }}</button>
+      </div>
+    </div>
+    <div v-else-if="req.kind === 'citation' && refSnippet" class="lp-shelf-foot" @click.stop>
+      <button @click="copyRef">{{ t('lp.copyRef') }}</button>
     </div>
   </div>
 </template>

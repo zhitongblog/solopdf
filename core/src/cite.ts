@@ -617,7 +617,7 @@ function bibName(a: CiteAuthor): string {
   return a.given ? `${bibEscape(a.family)}, ${bibEscape(a.given)}` : bibEscape(a.family)
 }
 
-export function toBibtex(m: CitationMeta): string {
+export function toBibtex(m: CitationMeta, keyOverride?: string): string {
   const entry = m.type === 'article' ? 'article' : m.type === 'book' ? 'book' : 'misc'
   const f: [string, string][] = []
   if (m.title) f.push(['title', `{${bibEscape(m.title)}}`])
@@ -634,8 +634,201 @@ export function toBibtex(m: CitationMeta): string {
   }
   if (m.doi) f.push(['doi', m.doi])
   if (m.url) f.push(['url', m.url])
+  const key = (keyOverride?.trim() || citeKey(m)).replace(/[\s,{}]/g, '') || 'ref'
   const body = f.map(([k, v]) => `  ${k} = {${v}}`).join(',\n')
-  return `@${entry}{${citeKey(m)},\n${body}\n}`
+  return `@${entry}{${key},\n${body}\n}`
+}
+
+export interface BibtexLibraryItem {
+  meta: CitationMeta
+  key?: string
+}
+
+/**
+ * Export a collection of papers as one valid `.bib` file, deduplicating
+ * colliding citekeys with `b`, `c`, … suffixes (Better BibTeX convention).
+ */
+export function exportBibtexLibrary(items: BibtexLibraryItem[]): { bib: string; keys: string[] } {
+  const used = new Set<string>()
+  const blocks: string[] = []
+  const keys: string[] = []
+  for (const item of items) {
+    const base = (item.key?.trim() || citeKey(item.meta)).replace(/[\s,{}]/g, '') || 'ref'
+    let k = base
+    let idx = 1
+    while (used.has(k.toLowerCase())) {
+      const suffix = idx < 26 ? String.fromCharCode(97 + idx) : String(idx + 1)
+      k = `${base}${suffix}`
+      idx++
+    }
+    used.add(k.toLowerCase())
+    keys.push(k)
+    blocks.push(toBibtex(item.meta, k))
+  }
+  return { bib: blocks.join('\n\n') + (blocks.length ? '\n' : ''), keys }
+}
+
+/** Compact author display for table rows: "Vaswani et al." / "张三 等" */
+export function formatAuthorsShort(authors: CiteAuthor[]): string {
+  if (!authors.length) return ''
+  const name = (a: CiteAuthor) => a.literal || a.family
+  const cjk = authors.some((a) => !!a.literal && isCjkName(a.literal))
+  if (authors.length === 1) return name(authors[0])
+  if (authors.length === 2) return cjk ? `${name(authors[0])}、${name(authors[1])}` : `${name(authors[0])} & ${name(authors[1])}`
+  return cjk ? `${name(authors[0])} 等` : `${name(authors[0])} et al.`
+}
+
+export interface ParsedBibEntry {
+  key: string
+  meta: CitationMeta
+}
+
+function bibUnescape(raw: string): string {
+  return raw
+    .replace(/\\textbackslash\{\}/g, '\\')
+    .replace(/\\textasciitilde\{\}/g, '~')
+    .replace(/\\([&%$#_{}])/g, '$1')
+    .replace(/[{}]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Lightweight BibTeX parser for importing `.bib` files into the shelf.
+ * Handles nested `{...}`, `"..."` strings, bare numbers, and `@article` /
+ * `@inproceedings` / `@book` / `@misc` entries.
+ */
+export function parseBibtex(text: string): ParsedBibEntry[] {
+  const out: ParsedBibEntry[] = []
+  let i = 0
+  const n = text.length
+  while (i < n) {
+    const at = text.indexOf('@', i)
+    if (at < 0) break
+    i = at + 1
+    const typeMatch = /^[A-Za-z]+/.exec(text.slice(i))
+    if (!typeMatch) continue
+    const rawType = typeMatch[0].toLowerCase()
+    i += rawType.length
+    while (i < n && /\s/.test(text[i])) i++
+    if (i >= n || (text[i] !== '{' && text[i] !== '(')) continue
+    const closeCh = text[i] === '{' ? '}' : ')'
+    i++
+    // find matching closing brace for the entry
+    let depth = 1
+    const bodyStart = i
+    let inQuote = false
+    while (i < n && depth > 0) {
+      const ch = text[i]
+      if (ch === '"' && text[i - 1] !== '\\') inQuote = !inQuote
+      else if (!inQuote) {
+        if (ch === '{' || (closeCh === ')' && ch === '(')) depth++
+        else if (ch === closeCh || (closeCh === ')' && ch === '}')) depth--
+      }
+      i++
+    }
+    if (rawType === 'comment' || rawType === 'preamble' || rawType === 'string') continue
+    const body = text.slice(bodyStart, i - 1)
+    const comma = body.indexOf(',')
+    if (comma < 0) continue
+    const key = body.slice(0, comma).trim()
+    if (!key) continue
+
+    const fields: Record<string, string> = {}
+    let p = comma + 1
+    const m = body.length
+    while (p < m) {
+      while (p < m && /[\s,]/.test(body[p])) p++
+      if (p >= m) break
+      const fm = /^([A-Za-z0-9_-]+)\s*=\s*/.exec(body.slice(p))
+      if (!fm) { p++; continue }
+      const fname = fm[1].toLowerCase()
+      p += fm[0].length
+      let val = ''
+      if (body[p] === '{') {
+        p++
+        let d = 1
+        const vs = p
+        while (p < m && d > 0) {
+          if (body[p] === '{' && body[p - 1] !== '\\') d++
+          else if (body[p] === '}' && body[p - 1] !== '\\') d--
+          p++
+        }
+        val = body.slice(vs, p - 1)
+      } else if (body[p] === '"') {
+        p++
+        const vs = p
+        let d = 0
+        while (p < m) {
+          if (body[p] === '{' && body[p - 1] !== '\\') d++
+          else if (body[p] === '}' && body[p - 1] !== '\\') d = Math.max(0, d - 1)
+          else if (body[p] === '"' && body[p - 1] !== '\\' && d === 0) break
+          p++
+        }
+        val = body.slice(vs, p)
+        if (p < m && body[p] === '"') p++
+      } else {
+        const vs = p
+        while (p < m && body[p] !== ',' && body[p] !== '\n') p++
+        val = body.slice(vs, p).trim()
+      }
+      fields[fname] = val
+    }
+
+    const title = fields.title ? bibUnescape(fields.title) : ''
+    const authors: CiteAuthor[] = fields.author
+      ? fields.author
+          .split(/\s+and\s+/i)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .map((raw) => {
+            const trimmed = raw.replace(/^\{|\}$/g, '').trim()
+            if (raw.startsWith('{') && raw.endsWith('}') && !trimmed.includes(',')) {
+              return { family: trimmed, literal: trimmed }
+            }
+            return parseAuthorName(bibUnescape(raw))
+          })
+      : []
+    const yearNum = fields.year ? parseInt(bibUnescape(fields.year), 10) : NaN
+    const year = Number.isFinite(yearNum) && yearNum > 1000 && yearNum < 3000 ? yearNum : undefined
+    const journal = fields.journal || fields.booktitle ? bibUnescape(fields.journal || fields.booktitle) : undefined
+    const doi = fields.doi ? (findDoi(bibUnescape(fields.doi)) ?? bibUnescape(fields.doi)) : undefined
+    const eprint = fields.eprint ? bibUnescape(fields.eprint) : undefined
+    const arxiv = eprint && (!fields.archiveprefix || /arxiv/i.test(fields.archiveprefix))
+      ? (findArxivId(eprint)?.id ?? eprint)
+      : undefined
+    const type: CiteType = rawType === 'article' || rawType === 'inproceedings' || rawType === 'conference'
+      ? 'article'
+      : rawType === 'book'
+        ? 'book'
+        : arxiv
+          ? 'preprint'
+          : 'misc'
+
+    out.push({
+      key,
+      meta: {
+        title: title || key,
+        authors,
+        year,
+        journal,
+        volume: fields.volume ? bibUnescape(fields.volume) : undefined,
+        issue: fields.number ? bibUnescape(fields.number) : undefined,
+        pages: fields.pages ? bibUnescape(fields.pages) : undefined,
+        publisher: fields.publisher ? bibUnescape(fields.publisher) : undefined,
+        doi,
+        arxiv,
+        url: fields.url ? bibUnescape(fields.url) : undefined,
+        type,
+        source: {
+          title: title ? 'info' : 'none',
+          authors: authors.length ? 'info' : 'none',
+          year: year ? 'info' : 'none',
+        },
+      },
+    })
+  }
+  return out
 }
 
 function apaName(a: CiteAuthor): string {

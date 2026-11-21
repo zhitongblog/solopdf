@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## v1.2.0 — 轻量学术文献管理闭环、引文穿透、图表钉住分屏与全平台原生打印
+
+### 轻量学术文献管理（Paperlib / JabRef / Sioyek 级本地体验）
+- **学术书架表格视图与阅读状态**：书架支持「封面网格 ⊞ / 学术列表 ☰」自由切换，展示论文标题、作者、年份、期刊/会议、DOI 与标签；支持点击状态胶囊循环切换 `未读 / 在读 / 已精读`，按标题、作者、年份、DOI、arXiv、CiteKey、标签检索，并按年份或作者排序
+- **一键批量提取文献元数据 & DOI/arXiv 联网补全**：打开 PDF 后台自动缓存元数据，书架支持一键批量扫描未索引 PDF（仅读 XMP/Info + 前 2 页，可随时取消）；行内元数据编辑弹窗支持按 DOI / arXiv 手动联网从 CrossRef / DataCite 补全并与 `CitePanel` 双向同步
+- **整库 `.bib` 导出/导入与全局快搜引用 (`⌘⇧K`)**：新增 `exportBibtexLibrary()`（自动去重 citeKey）与零依赖 `parseBibtex()` 解析器，支持书架一键导出 `references.bib`、导入 `.bib` 按 DOI / arXiv / 标题自动关联本地 PDF；任意界面按 `⌘⇧K`（Windows/Linux `Ctrl+Shift+K`）唤出快搜引用浮窗，一键复制 `\cite{key}` / `[@key]` / BibTeX / APA / GB/T 7714 或直接打开论文
+- **文内引文穿透 & 图表钉到分屏**：悬停/点击文中 `[12]` 参考文献预览时，自动匹配本地书架是否已收藏该论文，命中直接一键「打开」或「并排对照」；桌面端预览任意 Figure / Table / Equation 时支持点 `◫` 一键钉到同文档分屏对照阅读
+- **论文精读卡片模板**：批注侧边栏新增「📝 精读卡」，一键插入结构化精读模板（研究问题 / 核心方法 / 实验结论 / 局限与启发）到 `.annotations.md`
+
+### 移动端与全平台体验
+- **全平台原生矢量 PDF 打印**：补齐 Android `PrintManager` + `PrintDocumentAdapter` 原生矢量打印并开放 iOS AirPrint 按钮，工具栏 `🖨` 现已全平台可用
+- **移动端双指捏合缩放 & 双击缩放**：PDF 视图支持双指实时捏合缩放与双击在适合宽度和 `1.65×` 间快速切换
+- **CLI & MCP 同步**：新增 `solopdf export-bib <dir-or-pdfs...> [--out references.bib]` 与 MCP 只读工具 `solopdf_export_bib`
+
 ## v1.1.2 — macOS 原生 PDFKit 矢量打印、原生菜单栏与打印排版修复
 
 ### 新增与修复

@@ -2005,13 +2005,19 @@ extern "C" {
     fn solopdf_print_pdf(bytes: *const u8, len: usize, job_name_utf8: *const std::os::raw::c_char) -> i32;
 }
 
-/// Native vector PDF printing on macOS (PDFKit) and iOS (UIPrintInteractionController).
-/// Returns Ok(true) when handled natively, Ok(false) on other platforms so the
-/// frontend can fall back to webview printing.
+/// Native vector PDF printing on macOS (PDFKit), iOS (UIPrintInteractionController),
+/// and Android (PrintManager). Returns Ok(true) when handled natively, Ok(false)
+/// on other platforms so the frontend can fall back to webview printing.
 #[tauri::command]
-fn print_pdf(path: Option<String>, bytes: Option<Vec<u8>>, job_name: Option<String>) -> Result<bool, String> {
+fn print_pdf(
+    app: tauri::AppHandle,
+    path: Option<String>,
+    bytes: Option<Vec<u8>>,
+    job_name: Option<String>,
+) -> Result<bool, String> {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
+        let _ = app;
         let data = if let Some(b) = bytes {
             b
         } else if let Some(p) = path {
@@ -2031,9 +2037,25 @@ fn print_pdf(path: Option<String>, bytes: Option<Vec<u8>>, job_name: Option<Stri
             _ => Err("printing is unavailable on this device".into()),
         };
     }
-    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    #[cfg(target_os = "android")]
     {
-        let _ = (path, bytes, job_name);
+        let name = job_name.unwrap_or_else(|| "SoloPDF".into());
+        let target_path = if let Some(b) = bytes {
+            let dir = app.path().cache_dir().map_err(|e| e.to_string())?;
+            let _ = std::fs::create_dir_all(&dir);
+            let tmp = dir.join("solopdf_print.pdf");
+            std::fs::write(&tmp, b).map_err(|e| format!("failed to stage PDF for printing: {e}"))?;
+            tmp.to_string_lossy().into_owned()
+        } else if let Some(p) = path {
+            p
+        } else {
+            return Ok(false);
+        };
+        return android::print_pdf_file(&target_path, &name);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    {
+        let _ = (app, path, bytes, job_name);
         Ok(false)
     }
 }

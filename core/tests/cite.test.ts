@@ -3,6 +3,7 @@ import {
   findDoi, findArxivId, arxivYear, parsePdfYear, parseAuthorName, splitAuthors, isJunkTitle,
   extractCitation, firstPageHeuristics, toBibtex, toApa, toGbt, formatCitation, cslToCitation,
   fetchDoiMetadata, citeKey, citePageFromPdfjs, flattenXmp, readCitationInput,
+  exportBibtexLibrary, parseBibtex, formatAuthorsShort,
   type CitePage, type CitationMeta,
 } from '../src/cite.js'
 import { pageDeepLink } from '../src/sidecar.js'
@@ -332,5 +333,64 @@ describe('pdf.js adapters', () => {
   })
   it('page deep link', () => {
     expect(pageDeepLink('/a b/c.pdf', 3)).toBe('solopdf://open?file=%2Fa%20b%2Fc.pdf&page=3')
+  })
+})
+
+describe('BibTeX library export & import', () => {
+  it('deduplicates colliding citekeys and round-trips through parseBibtex', () => {
+    const a: CitationMeta = {
+      title: 'Attention Is All You Need',
+      authors: [{ family: 'Vaswani', given: 'Ashish' }, { family: 'Shazeer', given: 'Noam' }],
+      year: 2017,
+      arxiv: '1706.03762',
+      doi: '10.48550/arXiv.1706.03762',
+      type: 'preprint',
+      source: { title: 'firstPage', authors: 'firstPage', year: 'arxiv' },
+    }
+    const b: CitationMeta = {
+      ...a,
+      title: 'Attention Is All You Need (Extended)',
+    }
+    const { bib, keys } = exportBibtexLibrary([{ meta: a }, { meta: b }])
+    expect(keys).toEqual(['vaswani2017attention', 'vaswani2017attentionb'])
+    expect(bib).toContain('@misc{vaswani2017attention,')
+    expect(bib).toContain('@misc{vaswani2017attentionb,')
+
+    const parsed = parseBibtex(bib)
+    expect(parsed).toHaveLength(2)
+    expect(parsed[0].key).toBe('vaswani2017attention')
+    expect(parsed[0].meta.title).toBe('Attention Is All You Need')
+    expect(parsed[0].meta.year).toBe(2017)
+    expect(parsed[0].meta.arxiv).toBe('1706.03762')
+    expect(parsed[0].meta.doi).toBe('10.48550/arXiv.1706.03762')
+    expect(parsed[0].meta.authors.map((x) => x.family)).toEqual(['Vaswani', 'Shazeer'])
+  })
+
+  it('parses @inproceedings with quoted values, escaped chars, and CJK authors', () => {
+    const raw = `
+@comment{ignored}
+@inproceedings{he2016deep,
+  title = "{Deep Residual Learning for Image Recognition \& Classification}",
+  author = "He, Kaiming and Zhang, Xiangyu and Ren, Shaoqing",
+  booktitle = {CVPR},
+  year = 2016,
+  doi = {10.1109/CVPR.2016.90}
+}
+@article{zhang2024cn,
+  title = {{面向学术文献的本地阅读器}},
+  author = {{张三} and {李四} and {王五}},
+  journal = {计算机学报},
+  year = {2024}
+}
+`
+    const parsed = parseBibtex(raw)
+    expect(parsed).toHaveLength(2)
+    expect(parsed[0].key).toBe('he2016deep')
+    expect(parsed[0].meta.title).toBe('Deep Residual Learning for Image Recognition & Classification')
+    expect(parsed[0].meta.journal).toBe('CVPR')
+    expect(parsed[0].meta.year).toBe(2016)
+    expect(parsed[0].meta.type).toBe('article')
+    expect(formatAuthorsShort(parsed[0].meta.authors)).toBe('He et al.')
+    expect(formatAuthorsShort(parsed[1].meta.authors)).toBe('张三 等')
   })
 })
